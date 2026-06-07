@@ -1,0 +1,2182 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'dart:math' as math;
+
+import '../core/app_theme.dart';
+import '../utils/lms_adapter.dart';
+import '../utils/course_parser.dart';
+import 'media_viewers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../core/app_snackbar.dart';
+import '../main.dart'; // ★ globalDisableAutoCacheClear を読み込むために必要
+
+import '../utils/term_helper.dart'; // パスは適宜合わせてください
+
+//lib/screens/course_detail_screen.dartの中身です。
+
+
+class CourseDetailInteractivePage extends StatefulWidget {
+  final List<dynamic> courses; final int initialIndex; final String cookie; final int initialBottomIndex; final String? targetTaskId;
+  final bool isAuthenticated; final VoidCallback onLoginRequest; final String heroTag;
+  final Map<String, int> customCourseColors;
+  final Function(String, int?)? onColorChanged;
+  final Function(String)? onCourseEdited;
+  final Function(String)? onCourseDeleted;
+  final VoidCallback? onScheduleOverrideChanged;
+
+
+  const CourseDetailInteractivePage({super.key, required this.courses, required this.initialIndex, required this.cookie, this.initialBottomIndex = 0, this.targetTaskId, required this.isAuthenticated, required this.onLoginRequest, required this.heroTag, required this.customCourseColors, this.onColorChanged, this.onCourseEdited, this.onCourseDeleted, this.onScheduleOverrideChanged});
+  @override
+  State<CourseDetailInteractivePage> createState() => _CourseDetailInteractivePageState();
+}
+
+
+class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePage> {
+  late PageController _topPageController; late PageController _bottomPageController;
+  int _currentIndex = 0;
+  int _currentBottomIndex = 0;
+  bool _isMenuMode = false;
+  bool _isMemoOpen = false;
+  bool _isCollapsed = false;
+  Map<String, Map<String, int>> _courseOverrides = {};
+
+  // 👇 追加：各授業の学期属性（Q1〜Q4）のカスタム上書き情報を保持するマップ
+  Map<String, String> _courseTermOverrides = {};
+
+  // initState の中に `_loadTermOverrides();` を追記してください
+
+  Future<void> _loadTermOverrides() async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString('course_term_overrides_v10');
+    if (str != null) {
+      setState(() {
+        _courseTermOverrides = Map<String, String>.from(jsonDecode(str));
+      });
+    }
+  }
+
+  Future<void> _saveTermOverride(String cId, String termStr) async {
+    _courseTermOverrides[cId] = termStr;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('course_term_overrides_v10', jsonEncode(_courseTermOverrides));
+    setState(() {});
+    widget.onScheduleOverrideChanged?.call(); // ホーム画面の時間割フィルターを即座に再適用させる
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex >= 0 && widget.initialIndex < widget.courses.length ? widget.initialIndex : 0;
+
+
+    // ★ 修正：未ログイン時は下部カードの初期インデックスを強制的に「0 (MEMO)」にする
+    _currentBottomIndex = widget.isAuthenticated ? widget.initialBottomIndex : 0;
+
+
+    _topPageController = PageController(initialPage: _currentIndex);
+    _bottomPageController = PageController(initialPage: _currentBottomIndex);
+    _loadOverrides();
+  }
+
+
+
+
+
+
+  @override
+  void dispose() { _topPageController.dispose(); _bottomPageController.dispose(); super.dispose(); }
+
+
+  Future<void> _loadOverrides() async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString('course_overrides_v10');
+    if (str != null) {
+      Map<String, dynamic> dec = jsonDecode(str);
+      setState(() {
+        _courseOverrides = dec.map((k, v) => MapEntry(k, Map<String, int>.from(v)));
+      });
+    }
+  }
+
+
+  Future<void> _setOverride(String dateStr, int status, String cId) async {
+    if (_courseOverrides[cId] == null) _courseOverrides[cId] = {};
+    _courseOverrides[cId]![dateStr] = status;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('course_overrides_v10', jsonEncode(_courseOverrides));
+    setState((){});
+    widget.onScheduleOverrideChanged?.call();
+  }
+
+
+  // ★ 修正：ホーム画面と同じ「幅広いグレーの色域」を詳細画面にも適用
+  Color _getColorForIndex(int index) {
+    final c = widget.courses[index];
+    String cId = c['is_custom'] == true ? (c['raw_name'] ?? c['name'] ?? '') : c['id'].toString();
+
+    // カスタムカラーが設定されていれば優先
+    if (widget.customCourseColors.containsKey(cId)) {
+      return Color(widget.customCourseColors[cId]!);
+    }
+
+    int total = math.max(1, widget.courses.length);
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // ★ ホーム画面と同じ幅広いグレーの色域を定義
+    Color lightGrey = const Color(0xFFE0E0E0); // ほぼ白
+    Color darkGrey = const Color(0xFF1A1A1A);  // ほぼ黒
+
+    if (total <= 1) {
+      return isDark ? darkGrey : lightGrey;
+    }
+
+    double ratio = index / (total - 1);
+
+    if (!isDark) {
+      // --- ライトモード ---
+      // 白（上）から 黒（下）へ
+      return Color.lerp(lightGrey, darkGrey, ratio)!;
+    } else {
+      // --- ダークモード ---
+      // 黒（上）から 白（下）へ
+      return Color.lerp(darkGrey, lightGrey, ratio)!;
+    }
+  }
+
+
+  List<DateTime> _generateCourseDates(dynamic course) {
+    String rawName = course['name'] ?? '';
+    String dayPeriod = CourseScheduleParser.getDayPeriod(rawName);
+    if (course['is_custom'] == true) {
+      final match = RegExp(r'\[(.*?)\]').firstMatch(rawName);
+      if (match != null) dayPeriod = match.group(1) ?? '';
+    }
+    List<int> targetWeekdays = [];
+    if (dayPeriod.contains('月') || dayPeriod.contains('MON')) targetWeekdays.add(DateTime.monday);
+    if (dayPeriod.contains('火') || dayPeriod.contains('TUE')) targetWeekdays.add(DateTime.tuesday);
+    if (dayPeriod.contains('水') || dayPeriod.contains('WED')) targetWeekdays.add(DateTime.wednesday);
+    if (dayPeriod.contains('木') || dayPeriod.contains('THU')) targetWeekdays.add(DateTime.thursday);
+    if (dayPeriod.contains('金') || dayPeriod.contains('FRI')) targetWeekdays.add(DateTime.friday);
+    if (dayPeriod.contains('土') || dayPeriod.contains('SAT')) targetWeekdays.add(DateTime.saturday);
+
+
+    if (targetWeekdays.isEmpty) targetWeekdays.add(DateTime.monday);
+
+
+    DateTime now = DateTime.now();
+    bool isSpring = currentLMS.isSpringSemester(now);
+    DateTime start = currentLMS.getSemesterStartDate(now, isSpring);
+    DateTime end = currentLMS.getSemesterEndDate(now, isSpring);
+
+
+    List<DateTime> dates = [];
+    for (DateTime d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+      if (targetWeekdays.contains(d.weekday)) {
+        dates.add(d);
+      }
+    }
+    return dates;
+  }
+
+
+  Widget _buildMenuContent(Color textCol, dynamic cur) {
+    bool isCurrentCustom = cur['is_custom'] == true;
+    Color defaultColor = isCurrentCustom ? AppTheme.getCustomCourseColor(cur['raw_name'] ?? cur['name'] ?? '') : AppTheme.getGradientColor(_currentIndex, widget.courses.length);
+    List<DateTime> dates = _generateCourseDates(cur);
+    String cId = isCurrentCustom ? (cur['raw_name'] ?? cur['name'] ?? '') : cur['id'].toString();
+
+    // -------------------------------------------------------------------
+    // ★ 修正：TermHelper を使って現在の真の学期属性をスマートに取得
+    // -------------------------------------------------------------------
+    List<String> activeTerms = TermHelper.getCourseTerms(cur, _courseTermOverrides);
+
+    List<String> qLabels = ["Q1", "Q2", "Q3", "Q4"];
+    List<bool> qStates = [
+      activeTerms.contains("Q1"),
+      activeTerms.contains("Q2"),
+      activeTerms.contains("Q3"),
+      activeTerms.contains("Q4"),
+    ];
+
+    return Container(
+        width: double.infinity,
+        decoration: BoxDecoration(color: _getColorForIndex(_currentIndex), borderRadius: BorderRadius.circular(32)),
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ★ COURSE MENU の文字タイトルは削除してここから Wrap を開始
+            Wrap(
+                spacing: 16, runSpacing: 16,
+                children: [
+                  // ★ 修正：ソリッド＆サイバーテイストに映える洗練されたカラーに一新
+                  _buildColorSwatch(const Color(0xFFc6e7ec), textCol, cur), // ネオンシアン
+                  _buildColorSwatch(const Color(0xFF671b24), textCol, cur), // ネオンマゼンタ
+                  _buildColorSwatch(const Color(0xFF055646), textCol, cur), // ネオンライム
+                  _buildColorSwatch(const Color(0xFF034376), textCol, cur), // エレクトリックブルー
+                  _buildColorSwatch(const Color(0xFFe15e42), textCol, cur), // ブライトアンバー
+                  _buildColorSwatch(const Color(0xFFf5bc64), textCol, cur), // インオーガニックグレー
+                  GestureDetector(
+                    onTap: () {
+                      widget.onColorChanged?.call(cId, null);
+                      setState((){});
+                    },
+                    child: Container(width: 36, height: 36, decoration: BoxDecoration(color: defaultColor, shape: BoxShape.circle, border: Border.all(color: textCol.withOpacity(0.5), width: 1)), child: Icon(Icons.refresh, color: AppTheme.getTextColorForBackground(defaultColor).withOpacity(0.8), size: 20)),
+                  )
+                ]
+            ),
+            const SizedBox(height: 32),
+
+            // -------------------------------------------------------------------
+            // ★ 新設：学期属性変更トグルバー（複数選択可能なカプセルバー）
+            // -------------------------------------------------------------------
+            Text("学期属性のカスタマイズ (複数選択可)", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Container(
+              height: 36,
+              decoration: BoxDecoration(
+                color: textCol.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Row(
+                children: List.generate(4, (index) {
+                  bool isSelected = qStates[index];
+                  return Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        // タップされた位置の状態を反転
+                        qStates[index] = !qStates[index];
+
+                        // 有効なQを文字列にまとめる (例: "Q1.Q2")
+                        List<String> selectedList = [];
+                        for (int i = 0; i < 4; i++) {
+                          if (qStates[i]) selectedList.add(qLabels[i]);
+                        }
+                        // すべて外れた場合は空文字、選択があれば結合
+                        String updatedTermStr = selectedList.isEmpty ? "未選択" : selectedList.join(".");
+                        _saveTermOverride(cId, updatedTermStr);
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutCubic,
+                        margin: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: isSelected ? textCol : Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Center(
+                          child: Text(
+                            qLabels[index],
+                            style: TextStyle(
+                              color: isSelected ? AppTheme.getTextColorForBackground(textCol) : textCol.withOpacity(0.6),
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w300,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            if (isCurrentCustom) ...[
+              Text("Manage Custom Course", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => widget.onCourseEdited?.call(cur['raw_name'] ?? cur['name']),
+                      child: Container(padding: const EdgeInsets.symmetric(vertical: 16), decoration: BoxDecoration(color: textCol.withOpacity(0.1), borderRadius: BorderRadius.circular(16)), child: Center(child: Text("EDIT", style: TextStyle(color: textCol, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0)))),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => widget.onCourseDeleted?.call(cur['raw_name'] ?? cur['name']),
+                      child: Container(padding: const EdgeInsets.symmetric(vertical: 16), decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(16)), child: const Center(child: Text("DELETE", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0)))),
+                    ),
+                  )
+                ],
+              ),
+              const SizedBox(height: 32),
+            ],
+            Text("学期スケジュール", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Expanded(
+                child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: dates.length,
+                    itemBuilder: (ctx, i) {
+                      DateTime d = dates[i];
+                      String dateStr = "${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}";
+                      String displayDate = "${d.month}/${d.day}";
+                      int status = _courseOverrides[cId]?[dateStr] ?? 0;
+                      List<String> labels = ["通常", "ｵﾝﾃﾞﾏﾝﾄﾞ", "休講", "テスト"];
+
+                      return Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: Row(
+                              children: [
+                                SizedBox(width: 45, child: Text(displayDate, style: TextStyle(color: textCol, fontSize: 14, fontWeight: FontWeight.bold))),
+                                Expanded(
+                                    child: Container(
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: textCol.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(15),
+                                        ),
+                                        child: Row(
+                                            children: [0, 1, 2, 3].map((val) {
+                                              bool isSel = status == val;
+                                              return Expanded(
+                                                  child: GestureDetector(
+                                                      behavior: HitTestBehavior.opaque,
+                                                      onTap: () => _setOverride(dateStr, val, cId),
+                                                      child: Container(
+                                                        alignment: Alignment.center,
+                                                        decoration: BoxDecoration(
+                                                          color: isSel ? textCol : Colors.transparent,
+                                                          borderRadius: BorderRadius.circular(15),
+                                                          boxShadow: isSel ? [const BoxShadow(color: Colors.black12, blurRadius: 2, offset: Offset(0, 1))] : [],
+                                                        ),
+                                                        child: FittedBox(
+                                                          fit: BoxFit.scaleDown,
+                                                          child: Padding(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                                            child: Text(
+                                                                labels[val],
+                                                                style: TextStyle(
+                                                                    color: isSel ? AppTheme.getTextColorForBackground(textCol) : textCol.withOpacity(0.6),
+                                                                    fontSize: 10,
+                                                                    fontWeight: isSel ? FontWeight.bold : FontWeight.w500
+                                                                )
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      )
+                                                  )
+                                              );
+                                            }).toList()
+                                        )
+                                    )
+                                )
+                              ]
+                          )
+                      );
+                    }
+                )
+            )
+          ],
+        )
+    );
+  }
+
+
+  Widget _buildColorSwatch(Color c, Color textCol, dynamic cur) {
+    return GestureDetector(
+        onTap: () {
+          String cId = cur['is_custom'] == true ? (cur['raw_name'] ?? cur['name'] ?? '') : cur['id'].toString();
+          widget.onColorChanged?.call(cId, c.value);
+          setState((){});
+        },
+        child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white24, width: 1)))
+    );
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.courses.isEmpty || _currentIndex < 0 || _currentIndex >= widget.courses.length) {
+      return Scaffold(backgroundColor: AppTheme.bg(context), body: const Center(child: Text("Error: Course not found")));
+    }
+    final cur = widget.courses[_currentIndex];
+
+    final color = _getColorForIndex(_currentIndex);
+    final textCol = AppTheme.getTextColorForBackground(color);
+    bool isCurrentCustom = cur['is_custom'] == true;
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+        backgroundColor: AppTheme.bg(context),
+        body: Column(children: [
+          // -------------------------------------------------------------------
+          // ★ 上部カード（スワイプや下部のスクロール押し下げで伸縮する）
+          // -------------------------------------------------------------------
+          GestureDetector(
+            onTap: () {
+              if (_isCollapsed) setState(() => _isCollapsed = false);
+            },
+            onVerticalDragUpdate: (details) {
+              if (details.primaryDelta! > 5 && _isCollapsed) {
+                setState(() => _isCollapsed = false); // 下スワイプで広げる
+              } else if (details.primaryDelta! < -5 && !_isCollapsed) {
+                setState(() => _isCollapsed = true);  // 上スワイプで縮める
+              }
+            },
+            onVerticalDragEnd: (details) {
+              if (details.primaryVelocity != null && details.primaryVelocity! > 300 && !_isCollapsed) {
+                Navigator.pop(context);
+              }
+            },
+            child: Hero(
+              tag: widget.heroTag,
+              child: Material(
+                type: MaterialType.transparency,
+                child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                    height: _isCollapsed ? 100 : 260,
+                    child: PageView.builder(
+                        controller: _topPageController,
+                        itemCount: widget.courses.length,
+                        onPageChanged: (i) {
+                          setState(() {
+                            _currentIndex = i;
+                            _isMemoOpen = false;
+                          });
+                        },
+                        itemBuilder: (context, i) {
+                          final c = widget.courses[i]; final name = c['name'] ?? '';
+                          bool isThisCustom = c['is_custom'] == true;
+                          Color pageColor = _getColorForIndex(i);
+
+                          // --- 曜日・時限パース処理 ---
+                          String rawDayStr = "";
+                          if (isThisCustom) {
+                            final match = RegExp(r'\[(.*?)\]').firstMatch(name);
+                            if (match != null) rawDayStr = match.group(1) ?? '';
+                          } else {
+                            rawDayStr = CourseScheduleParser.getDayPeriod(name);
+                          }
+
+                          const numMap = {'１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7'};
+                          numMap.forEach((k, v) { rawDayStr = rawDayStr.replaceAll(k, v); });
+                          const dayMap = {'月':'MON','火':'TUE','水':'WED','木':'THU','金':'FRI','土':'SAT','日':'SUN'};
+                          dayMap.forEach((k, v) { rawDayStr = rawDayStr.replaceAll(k, v); });
+                          rawDayStr = rawDayStr.toUpperCase();
+
+                          Map<String, Set<int>> dayToPeriods = {};
+                          String currentDay = "";
+                          final regex = RegExp(r'(MON|TUE|WED|THU|FRI|SAT|SUN)?\s*(\d)');
+                          final matches = regex.allMatches(rawDayStr);
+
+                          for (var m in matches) {
+                            String? day = m.group(1);
+                            int period = int.parse(m.group(2)!);
+                            if (day != null) currentDay = day;
+                            if (currentDay.isNotEmpty) {
+                              dayToPeriods.putIfAbsent(currentDay, () => {}).add(period);
+                            }
+                          }
+
+                          String dayText = "";
+                          if (dayToPeriods.isNotEmpty) {
+                            List<String> parts = [];
+                            dayToPeriods.forEach((day, periods) {
+                              List<int> pList = periods.toList()..sort();
+                              parts.add("$day${pList.join('.')}");
+                            });
+                            dayText = parts.join(' / ');
+                          } else {
+                            dayText = rawDayStr.trim();
+                          }
+                          dayText = dayText.toUpperCase();
+
+                          String instructor = isThisCustom ? '' : CourseInstructorParser.getInstructorName(c);
+                          String roomName = isThisCustom
+                              ? (name.split('[').length > 2 ? name.split('[')[2].replaceAll(']', '').trim() : '')
+                              : CourseScheduleParser.getRoomNumber(name);
+
+                          int totalCourses = widget.courses.length;
+                          int dotCount = totalCourses < 5 ? totalCourses : 5;
+                          int activeDot = 0;
+                          if (totalCourses <= 5) {
+                            activeDot = i;
+                          } else {
+                            if (i == 0) activeDot = 0;
+                            else if (i == 1) activeDot = 1;
+                            else if (i == totalCourses - 2) activeDot = 3;
+                            else if (i == totalCourses - 1) activeDot = 4;
+                            else activeDot = 2;
+                          }
+
+                          return Container(
+                              decoration: BoxDecoration(color: pageColor, borderRadius: BorderRadius.circular(32)),
+                              child: SafeArea(
+                                  bottom: false,
+                                  child: Stack(children: [
+                                    // ★ 修正：縮小した際には3点メニューボタンを完全に非表示(不透明度0 & タップ無効)にする
+                                    AnimatedPositioned(
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutCubic,
+                                        top: _isCollapsed ? 20 : 16,
+                                        left: 16,
+                                        child: AnimatedOpacity(
+                                          duration: const Duration(milliseconds: 200),
+                                          opacity: _isCollapsed ? 0.0 : 1.0,
+                                          child: IgnorePointer(
+                                            ignoring: _isCollapsed,
+                                            child: GestureDetector(
+                                              behavior: HitTestBehavior.opaque,
+                                              onTap: () => setState(() => _isMenuMode = !_isMenuMode),
+                                              child: Container(
+                                                padding: const EdgeInsets.all(8),
+                                                child: Icon(_isMenuMode ? Icons.close : Icons.more_vert, color: AppTheme.getTextColorForBackground(pageColor), size: 24),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                    ),
+
+                                    Positioned(
+                                        top: 0, right: 24,
+                                        child: AnimatedOpacity(
+                                            duration: const Duration(milliseconds: 200),
+                                            opacity: _isCollapsed ? 0.0 : 1.0,
+                                            child: Transform(transform: Matrix4.diagonal3Values(0.8, 1.3, 1.0), alignment: Alignment.topRight, child: Text(dayText, style: TextStyle(color: AppTheme.getTextColorForBackground(pageColor).withOpacity(0.8), fontSize: 36, fontWeight: FontWeight.w100), textAlign: TextAlign.right))
+                                        )
+                                    ),
+
+                                    // ★ 修正：3点ボタンが消えるため、縮小時の left を左端の「24」に寄せて美しく整列
+                                    AnimatedPositioned(
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutCubic,
+                                        bottom: _isCollapsed ? 28 : 24,
+                                        left: 24,
+                                        right: _isCollapsed ? 24 : 90,
+                                        child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              AnimatedDefaultTextStyle(
+                                                duration: const Duration(milliseconds: 300),
+                                                style: TextStyle(
+                                                    fontSize: _isCollapsed ? 16 : 24,
+                                                    fontWeight: FontWeight.w300,
+                                                    color: AppTheme.getTextColorForBackground(pageColor),
+                                                    height: 1.2
+                                                ),
+                                                child: Text(
+                                                    CourseTitleParser.getCleanTitle(name),
+                                                    maxLines: _isCollapsed ? 1 : 2,
+                                                    overflow: TextOverflow.ellipsis
+                                                ),
+                                              ),
+                                              AnimatedCrossFade(
+                                                duration: const Duration(milliseconds: 200),
+                                                crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                firstChild: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    if (instructor.isNotEmpty || roomName.isNotEmpty) const SizedBox(height: 12),
+                                                    if (instructor.isNotEmpty) Text(instructor, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w300, color: AppTheme.getTextColorForBackground(pageColor))),
+                                                    if (roomName.isNotEmpty) Text(roomName, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w300, color: AppTheme.getTextColorForBackground(pageColor)))
+                                                  ],
+                                                ),
+                                                secondChild: const SizedBox(width: double.infinity, height: 0),
+                                              )
+                                            ]
+                                        )
+                                    ),
+
+                                    Positioned(
+                                        bottom: 24, right: 24,
+                                        child: AnimatedOpacity(
+                                            duration: const Duration(milliseconds: 200),
+                                            opacity: _isCollapsed ? 0.0 : 1.0,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: List.generate(dotCount, (dotIndex) {
+                                                bool isActive = dotIndex == activeDot;
+                                                return Container(
+                                                  margin: const EdgeInsets.only(left: 6.0),
+                                                  width: 6.0,
+                                                  height: 6.0,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    color: isActive
+                                                        ? AppTheme.getTextColorForBackground(pageColor)
+                                                        : AppTheme.getTextColorForBackground(pageColor).withOpacity(0.2),
+                                                  ),
+                                                );
+                                              }),
+                                            )
+                                        )
+                                    )
+                                  ])));
+                        })),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+
+          // -------------------------------------------------------------------
+          // ★ スライドするタブ型メニュー
+          // -------------------------------------------------------------------
+          Builder(
+              builder: (context) {
+                int pageCount = 0;
+                List<String> pageTitlesLong = [];
+                List<String> pageTitlesShort = [];
+
+                if (isCurrentCustom) {
+                  pageCount = 2;
+                  pageTitlesLong = ["MEMO", "SYLLABUS"];
+                  pageTitlesShort = ["MEMO", "SYLLABUS"];
+                } else if (widget.isAuthenticated) {
+                  pageCount = 5;
+                  pageTitlesLong = ["MEMO", "MODULES", "TASKS", "GRADES", "INFORMATION"];
+                  pageTitlesShort = ["MEMO", "MODS", "TASKS", "GRADE", "INFO"];
+                } else {
+                  pageCount = 2;
+                  pageTitlesLong = ["MEMO", "CANVAS"];
+                  pageTitlesShort = ["MEMO", "CANVAS"];
+                }
+
+                int safeBottomIndex = _currentBottomIndex;
+                if (safeBottomIndex >= pageCount) safeBottomIndex = pageCount - 1;
+                if (safeBottomIndex < 0) safeBottomIndex = 0;
+
+                List<int> flexes = List.generate(pageCount, (i) => i == safeBottomIndex ? 4 : 2);
+                int totalFlex = flexes.fold(0, (sum, flex) => sum + flex);
+
+                int leftFlexSum = 0;
+                for (int i = 0; i < safeBottomIndex; i++) { leftFlexSum += flexes[i]; }
+
+                return Container(
+                  height: 48,
+                  width: double.infinity,
+                  color: Colors.transparent,
+                  child: Stack(
+                    children: [
+                      if (safeBottomIndex > 0)
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          top: 4, bottom: 4, left: 0,
+                          width: MediaQuery.of(context).size.width * (leftFlexSum / totalFlex),
+                          child: Container(decoration: BoxDecoration(color: color, borderRadius: const BorderRadius.horizontal(left: Radius.circular(20), right: Radius.circular(20)))),
+                        ),
+                      if (safeBottomIndex < pageCount - 1)
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          top: 4, bottom: 4,
+                          left: MediaQuery.of(context).size.width * ((leftFlexSum + flexes[safeBottomIndex]) / totalFlex),
+                          right: 0,
+                          child: Container(decoration: BoxDecoration(color: color, borderRadius: const BorderRadius.horizontal(left: Radius.circular(20), right: Radius.circular(20)))),
+                        ),
+                      Row(
+                        children: List.generate(pageCount, (index) {
+                          bool isSelected = safeBottomIndex == index;
+                          return Expanded(
+                            flex: flexes[index],
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                setState(() => _currentBottomIndex = index);
+                                if (_bottomPageController.hasClients) {
+                                  _bottomPageController.animateToPage(index, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+                                }
+                              },
+                              child: Center(
+                                child: AnimatedDefaultTextStyle(
+                                  duration: const Duration(milliseconds: 300),
+                                  style: TextStyle(
+                                    color: isSelected ? (isDark ? Colors.white : Colors.black) : textCol,
+                                    fontSize: 13, fontWeight: FontWeight.w300, letterSpacing: 1.0,
+                                  ),
+                                  child: Text(isSelected ? pageTitlesLong[index] : pageTitlesShort[index], maxLines: 1, overflow: TextOverflow.clip),
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ],
+                  ),
+                );
+              }
+          ),
+          const SizedBox(height: 4),
+
+          // -------------------------------------------------------------------
+          // ★ 下部カード領域（横スライド・縦スクロールの挙動一元化）
+          // -------------------------------------------------------------------
+          // -------------------------------------------------------------------
+          // ★ 下部カード領域（横スライド・縦スクロールの挙動一元化）
+          // -------------------------------------------------------------------
+          Expanded(
+            // 👇 新設：項目が少ないときのドラッグや、純粋な「タップ（触る）」を検知する
+              child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  // ① 空白部分を「触ったりしたら」縮小する
+                  onTap: () {
+                    if (!_isCollapsed) {
+                      setState(() => _isCollapsed = true);
+                    }
+                  },
+                  // ② 項目が少なくスクロールしない時の「押し上げ」「押し下げ」を検知
+                  onVerticalDragUpdate: (details) {
+                    if (details.primaryDelta! < -3 && !_isCollapsed) {
+                      setState(() => _isCollapsed = true);  // 上スワイプ -> 縮小
+                    } else if (details.primaryDelta! > 3 && _isCollapsed) {
+                      setState(() => _isCollapsed = false); // 下スワイプ -> 拡大
+                    }
+                  },
+                  child: NotificationListener<ScrollNotification>(
+                      onNotification: (scrollNotification) {
+                        // 横スワイプ（タブ切り替え）での誤作動を防ぐため、縦スクロールのみ処理
+                        if (scrollNotification.metrics.axis == Axis.vertical) {
+                          if (scrollNotification is ScrollUpdateNotification) {
+                            if (scrollNotification.scrollDelta != null) {
+                              // ③ 長いリストを上にスクロール（押し上げ）した時
+                              if (scrollNotification.scrollDelta! > 2 && !_isCollapsed) {
+                                setState(() => _isCollapsed = true);
+                              }
+                              // ④ 長いリストが「最上部」にある状態で、さらに下に押し下げた時
+                              else if (scrollNotification.metrics.pixels <= 0 && scrollNotification.scrollDelta! < -2 && _isCollapsed) {
+                                setState(() => _isCollapsed = false);
+                              }
+                            }
+                          } else if (scrollNotification is OverscrollNotification) {
+                            // iOSなどのバウンス（引っ張り）領域での検知
+                            if (scrollNotification.overscroll < -2 && _isCollapsed) {
+                              setState(() => _isCollapsed = false);
+                            } else if (scrollNotification.overscroll > 2 && !_isCollapsed) {
+                              setState(() => _isCollapsed = true);
+                            }
+                          }
+                        }
+                        return false;
+                      },
+                      child: Builder(
+                          builder: (context) {
+                            final route = ModalRoute.of(context);
+                            final animation = route?.animation ?? const AlwaysStoppedAnimation(1.0);
+
+                            int pageCount = 0;
+                            List<Widget> pages = [];
+
+                            if (isCurrentCustom) {
+                              pageCount = 2;
+                              pages = [
+                                _CourseMemoWidget(
+                                    courseId: cur['id'].toString(),
+                                    courseName: cur['title'] ?? cur['name'] ?? '',
+                                    bgColor: Colors.transparent,
+                                    textColor: textCol,
+                                    onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
+                                ),
+                                Container(
+                                    width: double.infinity,
+                                    color: Colors.transparent,
+                                    child: Center(
+                                        child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.edit_note, size: 48, color: textCol.withOpacity(0.5)),
+                                              const SizedBox(height: 16),
+                                              Text("CUSTOM COURSE", style: TextStyle(color: textCol, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                                              const SizedBox(height: 8),
+                                              Text("NO SYLLABUS DATA", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 10, letterSpacing: 1.0)),
+                                            ]
+                                        )
+                                    )
+                                )
+                              ];
+                            } else if (widget.isAuthenticated) {
+                              pageCount = 5;
+                              pages = [
+                                _CourseMemoWidget(
+                                    courseId: cur['id'].toString(),
+                                    courseName: cur['title'] ?? cur['name'] ?? '',
+                                    bgColor: Colors.transparent,
+                                    textColor: textCol,
+                                    onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
+                                ),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'MODULES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'ASSIGNMENTS', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'GRADES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'ANNOUNCE', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId),
+                              ];
+                            } else {
+                              pageCount = 2;
+                              pages = [
+                                _CourseMemoWidget(
+                                    courseId: cur['id'].toString(),
+                                    courseName: cur['title'] ?? cur['name'] ?? '',
+                                    bgColor: Colors.transparent,
+                                    textColor: textCol,
+                                    onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
+                                ),
+                                Container(
+                                    width: double.infinity,
+                                    color: Colors.transparent,
+                                    child: Center(
+                                        child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.lock_outline, size: 48, color: textCol.withOpacity(0.5)),
+                                              const SizedBox(height: 16),
+                                              Text("LOGIN REQUIRED", style: TextStyle(color: textCol, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                                              const SizedBox(height: 8),
+                                              Text("PLEASE LOGIN TO VIEW DETAILS", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 10, letterSpacing: 1.0)),
+                                              const SizedBox(height: 32),
+                                              GestureDetector(
+                                                onTap: () {
+                                                  Navigator.pop(context);
+                                                  widget.onLoginRequest();
+                                                },
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                                  decoration: BoxDecoration(color: textCol, borderRadius: BorderRadius.circular(30)),
+                                                  child: Text("LOGIN", style: TextStyle(color: color, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                                                ),
+                                              )
+                                            ]
+                                        )
+                                    )
+                                )
+                              ];
+                            }
+
+                            int safeBottomIndex = _currentBottomIndex;
+                            if (safeBottomIndex >= pageCount) safeBottomIndex = pageCount - 1;
+                            if (safeBottomIndex < 0) safeBottomIndex = 0;
+
+                            List<Widget> wrappedPages = pages.map((page) {
+                              return Container(
+                                width: double.infinity,
+                                height: double.infinity,
+                                clipBehavior: Clip.antiAlias,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(32),
+                                ),
+                                child: page,
+                              );
+                            }).toList();
+
+                            return SlideTransition(
+                              position: Tween<Offset>(begin: const Offset(0, 1.0), end: Offset.zero).animate(
+                                  CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)
+                              ),
+                              child: FadeTransition(
+                                  opacity: CurvedAnimation(parent: animation, curve: Curves.easeIn),
+                                  child: _isMenuMode
+                                      ? _buildMenuContent(textCol, cur)
+                                      : Container(
+                                      width: double.infinity,
+                                      color: Colors.transparent,
+                                      child: Column(
+                                        children: [
+                                          Expanded(
+                                            child: PageView(
+                                              controller: _bottomPageController,
+                                              onPageChanged: (i) => setState(() => _currentBottomIndex = i),
+                                              children: wrappedPages,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                  )
+                              ),
+                            );
+                          }
+                      )
+                  )
+              )
+          )
+        ])
+    );
+  }
+}
+
+// （以下、_CourseDataList、_CourseMemoWidget、_TextInputOverlay、_FullScreenImageGallery は変更なし）
+class _CourseDataList extends StatefulWidget {
+  final int courseId; final String endpointType; final String cookie; final Color bgColor; final Color textColor; final String? targetItemId;
+  const _CourseDataList({required this.courseId, required this.endpointType, required this.cookie, required this.bgColor, required this.textColor, this.targetItemId});
+  @override
+  State<_CourseDataList> createState() => _CourseDataListState();
+}
+
+
+class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliveClientMixin {
+  @override bool get wantKeepAlive => true;
+  List<dynamic> _data = [];
+  bool _isLoading = true;
+  Set<String> _expandedItems = {}; // ★ 展開状態を記憶するセット
+
+  @override void initState() {
+    super.initState();
+    if (widget.targetItemId != null) _expandedItems.add(widget.targetItemId!);
+    _fetch();
+  }
+
+  @override void didUpdateWidget(covariant _CourseDataList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.courseId != widget.courseId) {
+      _expandedItems.clear(); // 授業が変わったらリセット
+      if (widget.targetItemId != null) _expandedItems.add(widget.targetItemId!);
+      _fetch();
+    }
+  }
+
+  Future<void> _fetch() async {
+    setState(() => _isLoading = true); String url = "";
+    if (widget.endpointType == 'MODULES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/modules?per_page=50&include[]=items';
+    else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/assignments?per_page=50&order_by=due_at&include[]=submission';
+    else url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/discussion_topics?only_announcements=true&per_page=20';
+    try { // 修正前： final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie});
+      final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 10)); if (res.statusCode == 200 && mounted) setState(() { _data = jsonDecode(res.body); _isLoading = false; }); } catch (_) { if (mounted) setState(() => _isLoading = false); }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    // ★ 追加：OSのフッター余白（ホームバー等）を取得
+    double bottomPadding = MediaQuery.of(context).padding.bottom;
+
+    return Container(width: double.infinity, decoration: BoxDecoration(color: widget.bgColor, borderRadius: BorderRadius.circular(32)), child: ClipRRect(borderRadius: BorderRadius.circular(32), child: _isLoading ? Center(child: CircularProgressIndicator(color: widget.textColor)) : _data.isEmpty ? Center(child: Text("NO DATA / OFFLINE", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontWeight: FontWeight.w300))) : ListView.builder(
+      // ★ 修正：bottom に bottomPadding を足す
+        padding: EdgeInsets.only(top: 8, left: 16, right: 16, bottom: 24 + bottomPadding),
+        itemCount: _data.length, itemBuilder: (context, i) {
+      final item = _data[i];
+      String itemId = item['id']?.toString() ?? i.toString();
+      String title = item['name'] ?? item['title'] ?? 'No Title';
+      String subtitle = "";
+      String rightText = "";
+      bool isExpanded = _expandedItems.contains(itemId); // 現在開いているか判定
+      List<Widget> children = [];
+      String largeDueStr = "";
+
+      if (widget.endpointType == 'MODULES') {
+        children = (item['items'] as List? ?? []).map((si) {
+          String subTitle = si['title'] ?? 'Unknown'; String type = si['type'] ?? ''; IconData icon;
+          switch(type) { case 'File': icon = Icons.description; break; case 'Page': icon = Icons.article; break; case 'Assignment': icon = Icons.assignment; break; case 'Quiz': icon = Icons.quiz; break; case 'ExternalUrl': icon = Icons.link; break; default: icon = Icons.circle; break; }
+          return InkWell(onTap: () => openSmartUrl(context, si['html_url'] ?? si['url'] ?? '', widget.cookie, title: subTitle), child: Container(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16), child: Row(children: [Icon(icon, size: 16, color: widget.textColor.withOpacity(0.7)), const SizedBox(width: 12), Expanded(child: Text(subTitle, style: TextStyle(color: widget.textColor.withOpacity(0.9), fontSize: 13)))])));
+        }).toList();
+        if (children.isEmpty) children = [Padding(padding: const EdgeInsets.all(16.0), child: Text("No items in this module", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontSize: 12)))];
+      } else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES' || widget.endpointType == 'ANNOUNCE') {
+        if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') {
+          // 期限の文字列を生成
+          String dueStrRaw = item['due_at'] ?? '';
+          if (dueStrRaw.isNotEmpty) {
+            DateTime? dueAt = DateTime.tryParse(dueStrRaw)?.toLocal();
+            if (dueAt != null) {
+              subtitle = "Due: ${dueAt.month}/${dueAt.day} ${dueAt.hour.toString().padLeft(2,'0')}:${dueAt.minute.toString().padLeft(2,'0')}";
+              largeDueStr = "${dueAt.month}/${dueAt.day}  ${dueAt.hour.toString().padLeft(2,'0')}:${dueAt.minute.toString().padLeft(2,'0')}";
+            }
+          }
+
+          if (widget.endpointType == 'GRADES') {
+            final submission = item['submission'];
+            final score = submission != null ? submission['score'] : null;
+            final points = item['points_possible'];
+            rightText = score != null ? "$score / $points" : "- / $points";
+          }
+          else {
+            final points = item['points_possible'];
+            rightText = points != null ? "$points pts" : "";
+          }
+
+          List<String> subTypes = (item['submission_types'] as List?)?.map((e) => e.toString()).toList() ?? [];
+          String subTypeStr = subTypes.join(', ');
+          List<String> allowedExt = (item['allowed_extensions'] as List?)?.map((e) => e.toString()).toList() ?? [];
+          String allowedExtStr = allowedExt.isNotEmpty ? allowedExt.join(', ') : 'Not specified';
+
+          children.add(
+              Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: TextStyle(color: widget.textColor, fontSize: 16, fontWeight: FontWeight.bold, height: 1.3)),
+                        const SizedBox(height: 12),
+                        Text("Submission Type: $subTypeStr", style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text("Allowed Formats: $allowedExtStr", style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 12))
+                      ]
+                  )
+              )
+          );
+        } else if (widget.endpointType == 'ANNOUNCE') {
+          String posted = item['posted_at'] ?? ''; if (posted.length > 10) posted = posted.substring(0, 10); subtitle = posted;
+          String message = item['message'] ?? 'No content';
+          message = message.replaceAll(RegExp(r'<[^>]*>'), '');
+          children.add(
+              Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Text(
+                      message.trim(),
+                      style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 13, height: 1.4)
+                  )
+              )
+          );
+        }
+        String targetUrl = item['html_url'] ?? item['url'] ?? '';
+        if (targetUrl.isNotEmpty) {
+          Color btnBgColor = widget.textColor;
+          Color btnTextColor = AppTheme.getTextColorForBackground(btnBgColor);
+
+          children.add(
+              Padding(
+                  padding: const EdgeInsets.only(left: 16.0, bottom: 16.0, top: 8.0),
+                  child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                          onPressed: () => openSmartUrl(context, targetUrl, widget.cookie, title: title),
+                          icon: Icon(Icons.open_in_browser, size: 16, color: btnTextColor),
+                          label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                          style: TextButton.styleFrom(
+                              backgroundColor: btnBgColor,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))
+                          )
+                      )
+                  )
+              )
+          );
+        }
+      }
+
+      Widget headerContent;
+      if ((widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') && isExpanded && largeDueStr.isNotEmpty) {
+        headerContent = Text(largeDueStr, style: TextStyle(color: widget.textColor, fontSize: 26, fontWeight: FontWeight.w200, height: 1.1));
+      } else {
+        headerContent = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  title,
+                  style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.w600, height: 1.2),
+                  maxLines: isExpanded ? null : 1,
+                  overflow: isExpanded ? null : TextOverflow.ellipsis
+              ),
+              if (subtitle.isNotEmpty)
+                Padding(
+                    padding: const EdgeInsets.only(top: 2.0),
+                    child: Text(subtitle, style: TextStyle(color: widget.textColor.withOpacity(0.6), fontSize: 10, fontWeight: FontWeight.w300))
+                )
+            ]
+        );
+      }
+
+      return Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent, listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.zero, dense: true)),
+          child: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(color: widget.textColor.withOpacity(0.05), borderRadius: BorderRadius.circular(16)),
+              child: ExpansionTile(
+                  key: PageStorageKey(itemId),
+                  initiallyExpanded: isExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() {
+                      if (expanded) _expandedItems.add(itemId);
+                      else _expandedItems.remove(itemId);
+                    });
+                  },
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  iconColor: widget.textColor.withOpacity(0.7),
+                  collapsedIconColor: widget.textColor.withOpacity(0.5),
+                  title: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(Icons.circle, size: 8, color: widget.textColor.withOpacity(0.5)),
+                        const SizedBox(width: 16),
+                        Expanded(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 250),
+                              child: Align(
+                                  key: ValueKey(isExpanded),
+                                  alignment: Alignment.centerLeft,
+                                  child: headerContent
+                              ),
+                            )
+                        ),
+                        if (rightText.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 8.0), child: Text(rightText, style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.bold)))
+                      ]
+                  ),
+                  children: children
+              )
+          )
+      );
+    })));
+  }
+}
+
+
+class _CourseMemoWidget extends StatefulWidget {
+  final dynamic courseId;
+  final String courseName;
+  final Color bgColor;
+  final Color textColor;
+  final ValueChanged<bool>? onMemoStateChanged;
+
+
+  const _CourseMemoWidget({
+    required this.courseId,
+    this.courseName = '',
+    required this.bgColor,
+    required this.textColor,
+    this.onMemoStateChanged,
+  });
+
+
+  @override
+  State<_CourseMemoWidget> createState() => _CourseMemoWidgetState();
+}
+
+
+class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeepAliveClientMixin {
+  @override bool get wantKeepAlive => true;
+
+
+  List<Map<String, dynamic>> _memos = [];
+  String? _activeMemoId;
+  final ImagePicker _picker = ImagePicker();
+
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMemos();
+  }
+
+
+  @override
+  void didUpdateWidget(covariant _CourseMemoWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.courseId != widget.courseId) {
+      setState(() {
+        _activeMemoId = null;
+        _memos = [];
+      });
+      // ★ 修正：ここで親のsetStateを呼ぶと描画中にエラー（赤い画面）になるため削除
+      _loadMemos();
+    }
+  }
+
+
+  Future<void> _loadMemos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? data = prefs.getString('course_memos_v2_${widget.courseId}');
+    if (data != null) {
+      try {
+        final List<dynamic> decoded = jsonDecode(data);
+        if (mounted) setState(() => _memos = decoded.map((e) => Map<String, dynamic>.from(e)).toList());
+      } catch(e) {}
+    }
+  }
+
+
+  Future<void> _saveMemos() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('course_memos_v2_${widget.courseId}', jsonEncode(_memos));
+  }
+
+  // ★ 追加1：一時キャッシュの画像をアプリの安全な領域（Documents）にコピーして永続化する
+  Future<String> _saveImageToLocal(String tempPath) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final memoDirPath = '${directory.path}/memo_images';
+    final memoDir = Directory(memoDirPath);
+    if (!await memoDir.exists()) {
+      await memoDir.create(recursive: true);
+    }
+    final fileName = 'memo_img_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final savedImage = await File(tempPath).copy('$memoDirPath/$fileName');
+    return savedImage.path;
+  }
+
+  // ★ 追加2：Undoを考慮した画像の「遅延」削除機能（6秒後にまだ消えていれば実体ファイルを消去）
+  void _scheduleFileDeletion(String path) {
+    Future.delayed(const Duration(seconds: 6), () {
+      bool isStillInUse = false;
+      for (var memo in _memos) {
+        final items = memo['items'] as List<dynamic>? ?? [];
+        for (var item in items) {
+          if (item['type'] == 'image' && item['data'] == path) {
+            isStillInUse = true; // Undoされて復活していれば削除をキャンセル
+            break;
+          }
+        }
+      }
+      if (!isStillInUse) {
+        try {
+          final file = File(path);
+          if (file.existsSync()) file.deleteSync(); // ストレージから完全に消去
+        } catch (_) {}
+      }
+    });
+  }
+
+
+  String _getFilteredCourseName(String name) {
+    if (name.isEmpty) return '';
+    return CourseTitleParser.getCleanTitle(name);
+  }
+
+
+  void _createNewMemoTab() {
+    final now = DateTime.now();
+    final filteredName = _getFilteredCourseName(widget.courseName);
+    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+    final newTitle = filteredName.isNotEmpty ? '$dateStr $filteredName' : dateStr;
+
+
+    final Map<String, dynamic> newMemo = {
+      'id': now.millisecondsSinceEpoch.toString(),
+      'title': newTitle,
+      'items': <dynamic>[],
+    };
+    setState(() {
+      _memos.add(newMemo);
+      _activeMemoId = newMemo['id']?.toString();
+    });
+    widget.onMemoStateChanged?.call(true);
+    _saveMemos();
+  }
+
+
+  void _closeMemo() {
+    FocusScope.of(context).unfocus();
+    setState(() => _activeMemoId = null);
+    widget.onMemoStateChanged?.call(false);
+  }
+
+
+  void _addItemToMemo(String type, String data) {
+    if (_activeMemoId == null) return;
+    final index = _memos.indexWhere((m) => m['id']?.toString() == _activeMemoId);
+    if (index != -1) {
+      final now = DateTime.now();
+      final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+      setState(() {
+        List<dynamic> items = List<dynamic>.from(_memos[index]['items'] ?? []);
+        items.add({'id': now.millisecondsSinceEpoch.toString(), 'type': type, 'data': data, 'time': timeStr});
+        _memos[index]['items'] = items;
+      });
+      _saveMemos();
+    }
+  }
+
+
+  void _deleteItem(int memoIndex, int itemIndex) {
+    final deletedItem = _memos[memoIndex]['items'][itemIndex];
+    final currentCourseId = widget.courseId;
+    final currentMemoId = _memos[memoIndex]['id'];
+
+
+    setState(() {
+      List<dynamic> items = List<dynamic>.from(_memos[memoIndex]['items'] ?? []);
+      items.removeAt(itemIndex);
+      _memos[memoIndex]['items'] = items;
+    });
+    _saveMemos();
+
+
+    // ★ ここから下をAppSnackBarに置き換え
+    AppSnackBar.showUndo(context, "メモを削除しました", () {
+      if (widget.courseId != currentCourseId) return;
+      setState(() {
+        final targetIndex = _memos.indexWhere((m) => m['id'] == currentMemoId);
+        if (targetIndex != -1) {
+          List<dynamic> items = List<dynamic>.from(_memos[targetIndex]['items'] ?? []);
+          if (itemIndex <= items.length) items.insert(itemIndex, deletedItem);
+          else items.add(deletedItem);
+          _memos[targetIndex]['items'] = items;
+        }
+      });
+      _saveMemos();
+    });
+    if (deletedItem['type'] == 'image') {
+      _scheduleFileDeletion(deletedItem['data']);
+    }
+  }
+
+
+  void _deleteMemoTab(int index) {
+    final deletedMemo = _memos[index];
+    final currentCourseId = widget.courseId;
+
+
+    setState(() {
+      _memos.removeAt(index);
+      if (_activeMemoId == deletedMemo['id']?.toString()) {
+        _activeMemoId = null;
+        widget.onMemoStateChanged?.call(false);
+      }
+    });
+    _saveMemos();
+
+
+    // ★ ここから下をAppSnackBarに置き換え
+    AppSnackBar.showUndo(context, "メモタブを削除しました", () {
+      if (widget.courseId != currentCourseId) return;
+      setState(() {
+        if (index <= _memos.length) _memos.insert(index, deletedMemo);
+        else _memos.add(deletedMemo);
+      });
+      _saveMemos();
+    });
+    final items = deletedMemo['items'] as List<dynamic>? ?? [];
+    for (var item in items) {
+      if (item['type'] == 'image') {
+        _scheduleFileDeletion(item['data']);
+      }
+    }
+  }
+
+
+  void _editTitleDialog(String currentTitle, int index) {
+    String newTitle = currentTitle;
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text('Edit Tab Name', style: TextStyle(color: Colors.black)),
+          content: TextField(
+            controller: TextEditingController(text: currentTitle),
+            style: const TextStyle(color: Colors.black),
+            decoration: const InputDecoration(focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.black))),
+            onChanged: (v) => newTitle = v,
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.black54))),
+            TextButton(onPressed: () { setState(() => _memos[index]['title'] = newTitle); _saveMemos(); Navigator.pop(ctx); }, child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold))),
+          ],
+        )
+    );
+  }
+
+
+  Future<void> _takePhoto() async {
+    try {
+      // ★ 追加：これからカメラを開くので、お掃除ストップを宣言！
+      globalDisableAutoCacheClear = true;
+
+      final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80, maxWidth: 2400);
+
+      if (photo != null) {
+        // 一時パスから安全な領域へコピーして保存
+        final savedPath = await _saveImageToLocal(photo.path);
+        _addItemToMemo('image', savedPath);
+      }
+    } catch (e) {
+      debugPrint("Take Photo Error: $e");
+    } finally {
+      // ★ 追加：カメラから戻ってきた（またはエラーで終わった）ので、お掃除を再開OKにする
+      globalDisableAutoCacheClear = false;
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      // ★ 追加：これからギャラリーを開くので、お掃除ストップを宣言！
+      globalDisableAutoCacheClear = true;
+
+      final List<XFile> files = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 2400);
+      if (files.isNotEmpty) {
+        for (var file in files) {
+          // 一時パスから安全な領域へコピーして保存
+          final savedPath = await _saveImageToLocal(file.path);
+          _addItemToMemo('image', savedPath);
+        }
+      }
+    } catch (e) {
+      debugPrint("Pick File Error: $e");
+    } finally {
+      // ★ 追加：ギャラリーから戻ってきたので、お掃除を再開OKにする
+      globalDisableAutoCacheClear = false;
+    }
+  }
+
+
+  void _openTextInput() {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color inputBg = isDark ? const Color(0xFF222222) : const Color(0xFFEEEEEE);
+    Color inputCol = isDark ? Colors.white : Colors.black;
+
+
+    Navigator.push(context, PageRouteBuilder(
+        opaque: false, barrierColor: Colors.black.withOpacity(0.95), barrierDismissible: true,
+        transitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return Scaffold(
+            backgroundColor: Colors.transparent,
+            body: _TextInputOverlay(bgColor: inputBg, textColor: inputCol, onSubmitted: (text) => _addItemToMemo('text', text)),
+          );
+        }
+    ));
+  }
+
+
+  void _showFullScreenImage(int memoIndex, String initialPath) {
+    final memo = _memos[memoIndex];
+    final items = memo['items'] as List<dynamic>? ?? [];
+    final imageItems = items.where((item) => item['type'] == 'image').toList();
+    final initialIndex = imageItems.indexWhere((item) => item['data']?.toString() == initialPath);
+
+
+    Navigator.push(context, PageRouteBuilder(
+        opaque: false, barrierColor: Colors.black,
+        pageBuilder: (context, _, __) => _FullScreenImageGallery(imageItems: imageItems, initialIndex: initialIndex != -1 ? initialIndex : 0)
+    ));
+  }
+
+
+  Map<String, String> _generateDateTimeStrings(List<dynamic> items) {
+    final now = DateTime.now();
+    final months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+
+    final monthDate = "${months[now.month - 1]} ${now.day}";
+    final year = "${now.year}";
+    final weekday = weekdays[now.weekday - 1];
+
+
+    String timeRange = "";
+    if (items.isNotEmpty) {
+      final first = items.first['time'] ?? '';
+      final last = items.last['time'] ?? '';
+      timeRange = first == last ? first : "$first - $last";
+    } else {
+      timeRange = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+    }
+
+
+    return {
+      "monthDate": monthDate,
+      "year": year,
+      "weekday": weekday,
+      "time": timeRange
+    };
+  }
+
+
+  String _sanitizeTextForPdf(String text) {
+    if (text.isEmpty) return text;
+    return text.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]'), '')
+        .replaceAll(RegExp(r'[\u{1F600}-\u{1F64F}]', unicode: true), '□')
+        .replaceAll(RegExp(r'[\u{1F300}-\u{1F5FF}]', unicode: true), '□')
+        .replaceAll(RegExp(r'[\u{1F680}-\u{1F6FF}]', unicode: true), '□')
+        .replaceAll(RegExp(r'[\u{2600}-\u{26FF}]', unicode: true), '□')
+        .replaceAll(RegExp(r'[\u{2700}-\u{27BF}]', unicode: true), '□');
+  }
+
+
+  Future<void> _shareMemo(int memoIndex) async {
+    BuildContext? sheetContext;
+
+    showModalBottomSheet(
+        context: context,
+        backgroundColor: widget.bgColor,
+        isDismissible: false,
+        enableDrag: false,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+        builder: (ctx) {
+          sheetContext = ctx;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 48.0),
+            child: SizedBox(
+              height: 64,
+              child: Center(
+                child: CircularProgressIndicator(color: widget.textColor),
+              ),
+            ),
+          );
+        }
+    );
+
+    await Future.delayed(const Duration(milliseconds: 350));
+    final pdfResult = await _generatePdf(memoIndex);
+
+    if (sheetContext != null && mounted) {
+      Navigator.pop(sheetContext!);
+    }
+
+    if (pdfResult != null && !pdfResult.startsWith("ERROR:")) {
+      // 共有ダイアログを呼び出す
+      await Share.shareXFiles([XFile(pdfResult)], text: _memos[memoIndex]['title']);
+
+      // ★ 削除：ここにあった `try { File(pdfResult).deleteSync(); } catch (_) {}` を完全に消去。
+      // これにより、ユーザーが共有先を選ぶ前にファイルが消滅するエラーを防止。
+      // 一時ファイル（Temp）に残ったPDFは、アプリが裏に回った際に自動お掃除機能が処理します。
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDFエラー: ${pdfResult?.replaceFirst("ERROR:", "") ?? "不明なエラー"}'))
+      );
+    }
+  }
+
+
+  Future<String?> _generatePdf(int memoIndex) async {
+    try {
+      final memo = _memos[memoIndex];
+      final pdf = pw.Document();
+      final List<dynamic> items = memo['items'] ?? [];
+      final dateTimeInfo = _generateDateTimeStrings(items);
+
+
+      final fontData = await rootBundle.load('assets/fonts/ZenKakuGothicNew-Regular.ttf');
+      final jpFont = pw.Font.ttf(fontData);
+
+
+      String rawTitle = memo['title']?.toString() ?? 'Untitled';
+      String documentDisplayTitle = rawTitle;
+      String fileSaveTitle = rawTitle;
+
+
+      final defaultDatePattern = RegExp(r'^(\d{2})/(\d{2})\s+(.+)$');
+      final match = defaultDatePattern.firstMatch(rawTitle);
+
+
+      if (match != null) {
+        documentDisplayTitle = match.group(3)!.trim();
+        fileSaveTitle = documentDisplayTitle + "_" + match.group(1)! + "-" + match.group(2)!;
+      } else {
+        final dateOnlyPattern = RegExp(r'^(\d{2})/(\d{2})$');
+        final matchDateOnly = dateOnlyPattern.firstMatch(rawTitle);
+        if (matchDateOnly != null) {
+          documentDisplayTitle = rawTitle;
+          fileSaveTitle = matchDateOnly.group(1)! + "-" + matchDateOnly.group(2)!;
+        }
+      }
+
+
+      final safeDisplayTitle = _sanitizeTextForPdf(documentDisplayTitle);
+
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageTheme: pw.PageTheme(
+            margin: const pw.EdgeInsets.all(48),
+            theme: pw.ThemeData.withFont(base: jpFont),
+          ),
+          build: (pw.Context context) => [
+            pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(flex: 1, child: pw.SizedBox()),
+                  pw.Expanded(
+                      flex: 2,
+                      child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(safeDisplayTitle, style: pw.TextStyle(font: jpFont, fontSize: 40, lineSpacing: 1.2, color: PdfColors.black)),
+                            pw.Text(dateTimeInfo['monthDate']!, style: pw.TextStyle(font: jpFont, fontSize: 40, lineSpacing: 1.2, color: PdfColors.black)),
+                            pw.Text(dateTimeInfo['year']!, style: pw.TextStyle(font: jpFont, fontSize: 40, lineSpacing: 1.2, color: PdfColors.black)),
+                            pw.Text(dateTimeInfo['weekday']!, style: pw.TextStyle(font: jpFont, fontSize: 40, lineSpacing: 1.2, color: PdfColors.black)),
+                            pw.Text(dateTimeInfo['time']!, style: pw.TextStyle(font: jpFont, fontSize: 40, lineSpacing: 1.2, color: PdfColors.black)),
+                          ]
+                      )
+                  ),
+                ]
+            ),
+            pw.SizedBox(height: 64),
+
+
+            ...items.map((item) {
+              final bool isText = item['type'] == 'text';
+              final safeData = _sanitizeTextForPdf(item['data']?.toString() ?? '');
+              return pw.Container(
+                margin: const pw.EdgeInsets.symmetric(vertical: 12),
+                child: pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Expanded(
+                        flex: 1,
+                        child: pw.Text(item['time']?.toString() ?? '', style: pw.TextStyle(font: jpFont, fontSize: 14, color: PdfColors.black))
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: isText
+                          ? pw.Text(safeData, style: pw.TextStyle(font: jpFont, fontSize: 14, lineSpacing: 1.5, color: PdfColors.black))
+                          : pw.ConstrainedBox(
+                        constraints: const pw.BoxConstraints(maxHeight: 340),
+                        child: pw.ClipRRect(
+                          horizontalRadius: 8,
+                          verticalRadius: 8,
+                          child: pw.Image(
+                            pw.MemoryImage(File(item['data'].toString()).readAsBytesSync()),
+                            fit: pw.BoxFit.contain,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      );
+
+
+      final output = await getTemporaryDirectory();
+      final fileSafeName = fileSaveTitle.replaceAll(RegExp(r'[\\/:*?"<>|\r\n]'), '_');
+      final fileName = fileSafeName.trim().isEmpty ? "Memo_${memo['id']}" : fileSafeName;
+      final file = File("${output.path}/$fileName.pdf");
+      await file.writeAsBytes(await pdf.save());
+      return file.path;
+    } catch (e) {
+      debugPrint("PDF Export Error: $e");
+      return "ERROR: $e";
+    }
+  }
+
+
+  @override
+  Widget _buildListView() {
+    // ★ 追加：OSのフッター余白を取得
+    double bottomPadding = MediaQuery.of(context).padding.bottom;
+
+    return ListView.builder(
+      // ★ 修正：bottom に bottomPadding を足す
+        padding: EdgeInsets.only(top: 8, left: 16, right: 16, bottom: 24 + bottomPadding),
+        itemCount: _memos.length + 1,
+        itemBuilder: (context, i) {
+          if (i == _memos.length) {
+            return GestureDetector(
+              onTap: _createNewMemoTab,
+              child: Container(
+                height: 48, margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(color: widget.textColor.withOpacity(0.05), borderRadius: BorderRadius.circular(16)),
+                child: Center(child: Icon(Icons.add, color: widget.textColor.withOpacity(0.7))),
+              ),
+            );
+          }
+          final memo = _memos[i];
+          return GestureDetector(
+            onTap: () { setState(() => _activeMemoId = memo['id']?.toString()); widget.onMemoStateChanged?.call(true); },
+            child: Container(
+                height: 48, margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(color: widget.textColor.withOpacity(0.05), borderRadius: BorderRadius.circular(16)),
+                child: Row(
+                    children: [
+                      const SizedBox(width: 16), Icon(Icons.edit_document, color: widget.textColor.withOpacity(0.5), size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(memo['title']?.toString() ?? 'Untitled', style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      IconButton(icon: Icon(Icons.delete, size: 18, color: widget.textColor.withOpacity(0.3)), onPressed: () => _deleteMemoTab(i)),
+                    ]
+                )
+            ),
+          );
+        }
+    );
+  }
+
+
+  @override
+  Widget _buildDetailView() {
+    final memoIndex = _memos.indexWhere((m) => m['id']?.toString() == _activeMemoId);
+    if (memoIndex == -1) return const SizedBox();
+    final memo = _memos[memoIndex];
+    final List<dynamic> items = memo['items'] ?? [];
+
+
+    Color solidBtnBg = widget.textColor;
+    Color solidIconCol = AppTheme.getTextColorForBackground(solidBtnBg);
+
+    // OSのフッター余白を取得
+    double bottomPadding = MediaQuery.of(context).padding.bottom;
+
+
+    return Stack(
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 4.0, left: 16.0, right: 16.0),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque, onTap: _closeMemo,
+                    child: Container(padding: const EdgeInsets.all(8), child: Icon(Icons.arrow_back_ios_new, color: widget.textColor, size: 18)),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _editTitleDialog(memo['title']?.toString() ?? '', memoIndex),
+                      child: Text(memo['title']?.toString() ?? 'Untitled', style: TextStyle(color: widget.textColor, fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                  IconButton(icon: Icon(Icons.share, color: widget.textColor, size: 20), onPressed: () => _shareMemo(memoIndex)),
+                ],
+              ),
+            ),
+
+
+            Expanded(
+              child: Padding(
+                // ★ 修正：メモ領域全体（グレーの背景図形）の下端にも bottomPadding を足して上に持ち上げる
+                padding: EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0 + bottomPadding),
+                child: ClipPath(
+                  clipper: _MemoAreaClipper(),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: widget.textColor.withOpacity(0.05),
+                    ),
+                    child: ListView.builder(
+                      // ★ 修正：外枠ごと持ち上がったので、ここの inner padding は元の 180 に戻す
+                        padding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 180),
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: items.length,
+                        itemBuilder: (context, index) {
+                          final item = items[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 16.0),
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SizedBox(width: 40, child: Text(item['time'] ?? '', style: TextStyle(color: widget.textColor.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold))),
+                                  Expanded(
+                                    child: item['type'] == 'text'
+                                        ? Text(item['data'] ?? '', style: TextStyle(color: widget.textColor, fontSize: 14))
+                                        : Align(alignment: Alignment.centerLeft, child: GestureDetector(onTap: () => _showFullScreenImage(memoIndex, item['data']), child: ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.file(File(item['data']), width: 80, height: 80, fit: BoxFit.cover)))),
+                                  ),
+                                  IconButton(icon: Icon(Icons.delete, size: 16, color: widget.textColor.withOpacity(0.2)), onPressed: () => _deleteItem(memoIndex, index)),
+                                ]
+                            ),
+                          );
+                        }
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+
+        // ボタン類の位置も、同じ 16 + bottomPadding なので下端がぴったり揃います
+        Positioned(
+          bottom: 16 + bottomPadding, right: 16,
+          child: _buildRoundBtn(Icons.photo_library, solidBtnBg, solidIconCol, _pickFile),
+        ),
+        Positioned(
+          bottom: 16 + bottomPadding, right: 16 + 56 + 12,
+          child: _buildRoundBtn(Icons.camera_alt, solidBtnBg, solidIconCol, _takePhoto),
+        ),
+        Positioned(
+          bottom: 16 + 56 + 12 + bottomPadding, right: 16,
+          child: _buildRoundBtn(Icons.edit, solidBtnBg, solidIconCol, _openTextInput),
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildRoundBtn(IconData icon, Color bg, Color iconCol, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 56, height: 56,
+        // ★ 修正：boxShadow（影）の記述を削除しました
+        decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+        child: Icon(icon, color: iconCol, size: 24),
+      ),
+    );
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return Container(
+      width: double.infinity,
+      color: widget.bgColor,
+      child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: _activeMemoId == null ? _buildListView() : _buildDetailView()
+      ),
+    );
+  }
+}
+
+
+// ★ 修正：すべての角をフィレットした完全な5角形クリッパー
+class _MemoAreaClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    Path path = Path();
+    double r = 16.0;
+    double cut = 175.0;
+    double w = size.width;
+    double h = size.height;
+
+
+    // 左上角から開始
+    path.moveTo(0, r);
+    path.arcToPoint(Offset(r, 0), radius: Radius.circular(r));
+
+
+    // 右上角
+    path.lineTo(w - r, 0);
+    path.arcToPoint(Offset(w, r), radius: Radius.circular(r));
+
+
+    // 右下の斜めカット開始角 (フィレット)
+    path.lineTo(w, h - cut - r);
+    path.quadraticBezierTo(w, h - cut, w - r, h - cut + r);
+
+
+    // 斜め線
+    path.lineTo(w - cut + r, h - r);
+
+
+    // 右下の斜めカット終了角 (フィレット)
+    path.quadraticBezierTo(w - cut, h, w - cut - r, h);
+
+
+    // 左下角
+    path.lineTo(r, h);
+    path.arcToPoint(Offset(0, h - r), radius: Radius.circular(r));
+
+
+    path.close();
+    return path;
+  }
+
+
+  @override
+  bool shouldReclip(CustomClipper<Path> oldClipper) => false;
+}
+
+
+class _TextInputOverlay extends StatefulWidget {
+  final Function(String) onSubmitted;
+  final Color bgColor;
+  final Color textColor;
+
+
+
+
+  const _TextInputOverlay({required this.onSubmitted, required this.bgColor, required this.textColor});
+
+
+
+
+  @override
+  State<_TextInputOverlay> createState() => _TextInputOverlayState();
+}
+
+
+class _TextInputOverlayState extends State<_TextInputOverlay> {
+  final TextEditingController _controller = TextEditingController();
+  bool _hasText = false;
+
+
+
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() {
+      setState(() {
+        _hasText = _controller.text.trim().isNotEmpty;
+      });
+    });
+  }
+
+
+
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    double topPadding = MediaQuery.of(context).padding.top;
+    double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+
+
+
+
+    double maxCardHeight = MediaQuery.of(context).size.height - topPadding - 80.0 - keyboardHeight;
+    if (maxCardHeight < 100) maxCardHeight = 100;
+
+
+
+
+    return Stack(
+      children: [
+        Positioned(
+          top: topPadding + 16.0,
+          left: 16.0,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.pop(context),
+            child: const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Icon(Icons.close, color: Colors.white, size: 28),
+            ),
+          ),
+        ),
+
+
+
+
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: keyboardHeight + 8.0,
+            ),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+              builder: (context, val, child) {
+                return Transform.scale(
+                  scale: val,
+                  alignment: const Alignment(0.8, 1.0),
+                  child: Opacity(opacity: val, child: child),
+                );
+              },
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: maxCardHeight,
+                ),
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: widget.bgColor,
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  padding: const EdgeInsets.only(left: 24, right: 16, top: 16, bottom: 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          autofocus: true,
+                          minLines: 4,
+                          maxLines: null,
+                          cursorColor: widget.textColor,
+                          style: TextStyle(color: widget.textColor, fontSize: 16, height: 1.4),
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(vertical: 4),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _hasText ? () {
+                          widget.onSubmitted(_controller.text.trim());
+                          Navigator.pop(context);
+                        } : null,
+                        child: Container(
+                          width: 40, height: 40,
+                          margin: const EdgeInsets.only(bottom: 4),
+                          decoration: BoxDecoration(
+                            color: _hasText ? widget.textColor : widget.textColor.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.arrow_forward, color: widget.bgColor, size: 20),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
+class _FullScreenImageGallery extends StatefulWidget {
+  final List<dynamic> imageItems;
+  final int initialIndex;
+
+
+
+
+  const _FullScreenImageGallery({required this.imageItems, required this.initialIndex});
+
+
+
+
+  @override
+  State<_FullScreenImageGallery> createState() => _FullScreenImageGalleryState();
+}
+
+
+class _FullScreenImageGalleryState extends State<_FullScreenImageGallery> {
+  late PageController _pageController;
+  late List<TransformationController> _transformationControllers;
+  bool _isZoomed = false;
+  TapDownDetails? _doubleTapDetails;
+  late int _currentIndex;
+
+
+
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+    _transformationControllers = List.generate(
+        widget.imageItems.length,
+            (_) => TransformationController()..addListener(_onTransformationChange)
+    );
+  }
+
+
+
+
+  void _onTransformationChange() {
+    final currentPage = _pageController.page?.round() ?? widget.initialIndex;
+    if (currentPage >= 0 && currentPage < _transformationControllers.length) {
+      final scale = _transformationControllers[currentPage].value.getMaxScaleOnAxis();
+      final isCurrentlyZoomed = scale > 1.01;
+      if (_isZoomed != isCurrentlyZoomed) {
+        setState(() {
+          _isZoomed = isCurrentlyZoomed;
+        });
+      }
+    }
+  }
+
+
+
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    for (var controller in _transformationControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+
+
+
+  void _handleDoubleTapDown(TapDownDetails details) {
+    _doubleTapDetails = details;
+  }
+
+
+
+
+  void _handleDoubleTap(int index) {
+    final controller = _transformationControllers[index];
+    if (controller.value.getMaxScaleOnAxis() > 1.0) {
+      controller.value = Matrix4.identity();
+    } else {
+      if (_doubleTapDetails != null) {
+        final position = _doubleTapDetails!.localPosition;
+        controller.value = Matrix4.identity()
+          ..translate(-position.dx * 1.5, -position.dy * 1.5)
+          ..scale(2.5);
+      }
+    }
+  }
+
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            physics: _isZoomed ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
+            itemCount: widget.imageItems.length,
+            onPageChanged: (index) {
+              setState(() {
+                _currentIndex = index;
+              });
+              for (int i = 0; i < _transformationControllers.length; i++) {
+                if (i != index) {
+                  _transformationControllers[i].value = Matrix4.identity();
+                }
+              }
+            },
+            itemBuilder: (context, index) {
+              final path = widget.imageItems[index]['data']?.toString() ?? '';
+              return GestureDetector(
+                onDoubleTapDown: _handleDoubleTapDown,
+                onDoubleTap: () => _handleDoubleTap(index),
+                child: InteractiveViewer(
+                  transformationController: _transformationControllers[index],
+                  minScale: 1.0,
+                  maxScale: 5.0,
+                  child: Center(
+                    child: Image.file(
+                      File(path),
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          // ★ 左上に×（閉じる）ボタンを配置
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 16,
+            left: 16,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 26),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+          // ★ 右上にダウンロード（共有）ボタンを配置（三角の共有マーク）
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 16,
+            right: 16,
+            child: IconButton(
+              icon: const Icon(Icons.share, color: Colors.white, size: 26),
+              onPressed: () async {
+                final path = widget.imageItems[_currentIndex]['data']?.toString() ?? '';
+                if (path.isNotEmpty) {
+                  await Share.shareXFiles([XFile(path)], text: 'Memo Image');
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
