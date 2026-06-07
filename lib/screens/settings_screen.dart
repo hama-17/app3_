@@ -551,7 +551,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           colors: [
                             Color(0xFF0b0c11), // トップ
                             Color(0xFF3e5364), // ミドル
-                            Color(0xFFd6552e), // ボトム
+                            Color(0xFFcdc7c3), // ボトム
                           ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,

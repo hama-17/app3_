@@ -1816,7 +1816,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     // ★ 既定の3色グラデーション定義
     const Color defaultTopGradient = Color(0xFF0B0C11);
     const Color defaultMiddleGradient = Color(0xFF3E5364);
-    const Color defaultBottomGradient = Color(0xFFD6552E);
+    const Color defaultBottomGradient = Color(0xFFcdc7c3);
 
     // --- 左側 (D/W/M) の高さと背景色 ---
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
