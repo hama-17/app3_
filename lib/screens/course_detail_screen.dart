@@ -949,177 +949,243 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    // ★ 追加：OSのフッター余白（ホームバー等）を取得
     double bottomPadding = MediaQuery.of(context).padding.bottom;
 
-    return Container(width: double.infinity, decoration: BoxDecoration(color: widget.bgColor, borderRadius: BorderRadius.circular(32)), child: ClipRRect(borderRadius: BorderRadius.circular(32), child: _isLoading ? Center(child: CircularProgressIndicator(color: widget.textColor)) : _data.isEmpty ? Center(child: Text("NO DATA / OFFLINE", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontWeight: FontWeight.w300))) : ListView.builder(
-      // ★ 修正：bottom に bottomPadding を足す
-        padding: EdgeInsets.only(top: 8, left: 16, right: 16, bottom: 24 + bottomPadding),
-        itemCount: _data.length, itemBuilder: (context, i) {
-      final item = _data[i];
-      String itemId = item['id']?.toString() ?? i.toString();
-      String title = item['name'] ?? item['title'] ?? 'No Title';
-      String subtitle = "";
-      String rightText = "";
-      bool isExpanded = _expandedItems.contains(itemId); // 現在開いているか判定
-      List<Widget> children = [];
-      String largeDueStr = "";
+    return Container(
+        width: double.infinity,
+        decoration: BoxDecoration(color: widget.bgColor, borderRadius: BorderRadius.circular(32)),
+        child: ClipRRect(
+            borderRadius: BorderRadius.circular(32),
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator(color: widget.textColor))
+                : _data.isEmpty
+                ? Center(child: Text("NO DATA / OFFLINE", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontWeight: FontWeight.w300)))
+                : ListView.builder(
+                padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 24 + bottomPadding),
+                itemCount: _data.length,
+                itemBuilder: (context, i) {
+                  final item = _data[i];
+                  String itemId = item['id']?.toString() ?? i.toString();
+                  String title = item['name'] ?? item['title'] ?? 'No Title';
+                  String subtitle = "";
+                  String rightText = "";
+                  bool isExpanded = _expandedItems.contains(itemId);
+                  List<Widget> children = [];
+                  String largeDueStr = "";
 
-      if (widget.endpointType == 'MODULES') {
-        children = (item['items'] as List? ?? []).map((si) {
-          String subTitle = si['title'] ?? 'Unknown'; String type = si['type'] ?? ''; IconData icon;
-          switch(type) { case 'File': icon = Icons.description; break; case 'Page': icon = Icons.article; break; case 'Assignment': icon = Icons.assignment; break; case 'Quiz': icon = Icons.quiz; break; case 'ExternalUrl': icon = Icons.link; break; default: icon = Icons.circle; break; }
-          return InkWell(onTap: () => openSmartUrl(context, si['html_url'] ?? si['url'] ?? '', widget.cookie, title: subTitle), child: Container(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16), child: Row(children: [Icon(icon, size: 16, color: widget.textColor.withOpacity(0.7)), const SizedBox(width: 12), Expanded(child: Text(subTitle, style: TextStyle(color: widget.textColor.withOpacity(0.9), fontSize: 13)))])));
-        }).toList();
-        if (children.isEmpty) children = [Padding(padding: const EdgeInsets.all(16.0), child: Text("No items in this module", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontSize: 12)))];
-      } else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES' || widget.endpointType == 'ANNOUNCE') {
-        if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') {
-          // 期限の文字列を生成
-          String dueStrRaw = item['due_at'] ?? '';
-          if (dueStrRaw.isNotEmpty) {
-            DateTime? dueAt = DateTime.tryParse(dueStrRaw)?.toLocal();
-            if (dueAt != null) {
-              subtitle = "Due: ${dueAt.month}/${dueAt.day} ${dueAt.hour.toString().padLeft(2,'0')}:${dueAt.minute.toString().padLeft(2,'0')}";
-              largeDueStr = "${dueAt.month}/${dueAt.day}  ${dueAt.hour.toString().padLeft(2,'0')}:${dueAt.minute.toString().padLeft(2,'0')}";
-            }
-          }
-
-          if (widget.endpointType == 'GRADES') {
-            final submission = item['submission'];
-            final score = submission != null ? submission['score'] : null;
-            final points = item['points_possible'];
-            rightText = score != null ? "$score / $points" : "- / $points";
-          }
-          else {
-            final points = item['points_possible'];
-            rightText = points != null ? "$points pts" : "";
-          }
-
-          List<String> subTypes = (item['submission_types'] as List?)?.map((e) => e.toString()).toList() ?? [];
-          String subTypeStr = subTypes.join(', ');
-          List<String> allowedExt = (item['allowed_extensions'] as List?)?.map((e) => e.toString()).toList() ?? [];
-          String allowedExtStr = allowedExt.isNotEmpty ? allowedExt.join(', ') : 'Not specified';
-
-          children.add(
-              Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: TextStyle(color: widget.textColor, fontSize: 16, fontWeight: FontWeight.bold, height: 1.3)),
-                        const SizedBox(height: 12),
-                        Text("Submission Type: $subTypeStr", style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 12)),
-                        const SizedBox(height: 4),
-                        Text("Allowed Formats: $allowedExtStr", style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 12))
-                      ]
-                  )
-              )
-          );
-        } else if (widget.endpointType == 'ANNOUNCE') {
-          String posted = item['posted_at'] ?? ''; if (posted.length > 10) posted = posted.substring(0, 10); subtitle = posted;
-          String message = item['message'] ?? 'No content';
-          message = message.replaceAll(RegExp(r'<[^>]*>'), '');
-          children.add(
-              Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Text(
-                      message.trim(),
-                      style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 13, height: 1.4)
-                  )
-              )
-          );
-        }
-        String targetUrl = item['html_url'] ?? item['url'] ?? '';
-        if (targetUrl.isNotEmpty) {
-          Color btnBgColor = widget.textColor;
-          Color btnTextColor = AppTheme.getTextColorForBackground(btnBgColor);
-
-          children.add(
-              Padding(
-                  padding: const EdgeInsets.only(left: 16.0, bottom: 16.0, top: 8.0),
-                  child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                          onPressed: () => openSmartUrl(context, targetUrl, widget.cookie, title: title),
-                          icon: Icon(Icons.open_in_browser, size: 16, color: btnTextColor),
-                          label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-                          style: TextButton.styleFrom(
-                              backgroundColor: btnBgColor,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))
+                  // --- MODULES ---
+                  if (widget.endpointType == 'MODULES') {
+                    children = (item['items'] as List? ?? []).map((si) {
+                      String subTitle = si['title'] ?? 'Unknown';
+                      String type = si['type'] ?? '';
+                      IconData icon;
+                      switch(type) {
+                        case 'File': icon = Icons.description; break;
+                        case 'Page': icon = Icons.article; break;
+                        case 'Assignment': icon = Icons.assignment; break;
+                        case 'Quiz': icon = Icons.quiz; break;
+                        case 'ExternalUrl': icon = Icons.link; break;
+                        default: icon = Icons.circle; break;
+                      }
+                      return InkWell(
+                          onTap: () => openSmartUrl(context, si['html_url'] ?? si['url'] ?? '', widget.cookie, title: subTitle),
+                          child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                              child: Row(
+                                  children: [
+                                    Icon(icon, size: 16, color: widget.textColor.withOpacity(0.7)),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: Text(subTitle, style: TextStyle(color: widget.textColor.withOpacity(0.9), fontSize: 13)))
+                                  ]
+                              )
                           )
-                      )
-                  )
-              )
-          );
-        }
-      }
+                      );
+                    }).toList();
+                    if (children.isEmpty) {
+                      children = [Padding(padding: const EdgeInsets.all(16.0), child: Text("No items in this module", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontSize: 12)))];
+                    }
+                  }
+                  // --- ASSIGNMENTS / GRADES / ANNOUNCE ---
+                  else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES' || widget.endpointType == 'ANNOUNCE') {
+                    if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') {
+                      String dueStrRaw = item['due_at'] ?? '';
+                      if (dueStrRaw.isNotEmpty) {
+                        DateTime? dueAt = DateTime.tryParse(dueStrRaw)?.toLocal();
+                        if (dueAt != null) {
+                          subtitle = "Due: ${dueAt.month}/${dueAt.day} ${dueAt.hour.toString().padLeft(2,'0')}:${dueAt.minute.toString().padLeft(2,'0')}";
+                          largeDueStr = "${dueAt.month}/${dueAt.day}  ${dueAt.hour.toString().padLeft(2,'0')}:${dueAt.minute.toString().padLeft(2,'0')}";
+                        }
+                      }
 
-      Widget headerContent;
-      if ((widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') && isExpanded && largeDueStr.isNotEmpty) {
-        headerContent = Text(largeDueStr, style: TextStyle(color: widget.textColor, fontSize: 26, fontWeight: FontWeight.w200, height: 1.1));
-      } else {
-        headerContent = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                  title,
-                  style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.w600, height: 1.2),
-                  maxLines: isExpanded ? null : 1,
-                  overflow: isExpanded ? null : TextOverflow.ellipsis
-              ),
-              if (subtitle.isNotEmpty)
-                Padding(
-                    padding: const EdgeInsets.only(top: 2.0),
-                    child: Text(subtitle, style: TextStyle(color: widget.textColor.withOpacity(0.6), fontSize: 10, fontWeight: FontWeight.w300))
-                )
-            ]
-        );
-      }
+                      if (widget.endpointType == 'GRADES') {
+                        final submission = item['submission'];
+                        final score = submission != null ? submission['score'] : null;
+                        final points = item['points_possible'];
+                        rightText = score != null ? "$score / $points" : "- / $points";
+                      }
+                      else {
+                        final points = item['points_possible'];
+                        rightText = points != null ? "$points pts" : "";
+                      }
 
-      return Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent, listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.zero, dense: true)),
-          child: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(color: widget.textColor.withOpacity(0.05), borderRadius: BorderRadius.circular(16)),
-              child: ExpansionTile(
-                  key: PageStorageKey(itemId),
-                  initiallyExpanded: isExpanded,
-                  onExpansionChanged: (expanded) {
-                    setState(() {
-                      if (expanded) _expandedItems.add(itemId);
-                      else _expandedItems.remove(itemId);
-                    });
-                  },
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                  childrenPadding: const EdgeInsets.only(bottom: 8),
-                  iconColor: widget.textColor.withOpacity(0.7),
-                  collapsedIconColor: widget.textColor.withOpacity(0.5),
-                  title: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Icon(Icons.circle, size: 8, color: widget.textColor.withOpacity(0.5)),
-                        const SizedBox(width: 16),
-                        Expanded(
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 250),
+                      List<String> subTypes = (item['submission_types'] as List?)?.map((e) => e.toString()).toList() ?? [];
+                      String subTypeStr = subTypes.join(', ');
+                      List<String> allowedExt = (item['allowed_extensions'] as List?)?.map((e) => e.toString()).toList() ?? [];
+                      String allowedExtStr = allowedExt.isNotEmpty ? allowedExt.join(', ') : 'Not specified';
+
+                      children.add(
+                          Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(title, style: TextStyle(color: widget.textColor, fontSize: 16, fontWeight: FontWeight.w400, height: 1.3)),
+                                    const SizedBox(height: 12),
+                                    Text("Submission Type: $subTypeStr", style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 12)),
+                                    const SizedBox(height: 4),
+                                    Text("Allowed Formats: $allowedExtStr", style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 12))
+                                  ]
+                              )
+                          )
+                      );
+                    } else if (widget.endpointType == 'ANNOUNCE') {
+                      String posted = item['posted_at'] ?? '';
+                      if (posted.length > 10) posted = posted.substring(0, 10);
+                      subtitle = posted;
+                      String message = item['message'] ?? 'No content';
+                      message = message.replaceAll(RegExp(r'<[^>]*>'), '');
+                      children.add(
+                          Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                              child: Text(
+                                  message.trim(),
+                                  style: TextStyle(color: widget.textColor.withOpacity(0.8), fontSize: 13, height: 1.4)
+                              )
+                          )
+                      );
+                    }
+
+                    String targetUrl = item['html_url'] ?? item['url'] ?? '';
+                    if (targetUrl.isNotEmpty) {
+                      Color btnBgColor = widget.textColor;
+                      Color btnTextColor = AppTheme.getTextColorForBackground(btnBgColor);
+
+                      children.add(
+                          Padding(
+                              padding: const EdgeInsets.only(left: 8.0, bottom: 8.0, top: 8.0),
                               child: Align(
-                                  key: ValueKey(isExpanded),
                                   alignment: Alignment.centerLeft,
-                                  child: headerContent
-                              ),
+                                  child: TextButton.icon(
+                                      onPressed: () => openSmartUrl(context, targetUrl, widget.cookie, title: title),
+                                      icon: Icon(Icons.open_in_browser, size: 16, color: btnTextColor),
+                                      label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.w400, letterSpacing: 1.0)),
+                                      style: TextButton.styleFrom(
+                                          backgroundColor: btnBgColor,
+                                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))
+                                      )
+                                  )
+                              )
+                          )
+                      );
+                    }
+                  }
+
+                  // ★ ヘッダーコンテンツの生成
+                  Widget headerContent;
+                  if ((widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') && isExpanded && largeDueStr.isNotEmpty) {
+                    headerContent = Text(largeDueStr, style: TextStyle(color: widget.textColor, fontSize: 26, fontWeight: FontWeight.w200, height: 1.1));
+                  } else {
+                    headerContent = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                              title,
+                              style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.w500, height: 1.3),
+                              maxLines: isExpanded ? null : 1,
+                              overflow: isExpanded ? null : TextOverflow.ellipsis
+                          ),
+                          if (subtitle.isNotEmpty)
+                            Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Text(subtitle, style: TextStyle(color: widget.textColor.withOpacity(0.6), fontSize: 11, fontWeight: FontWeight.w300))
                             )
+                        ]
+                    );
+                  }
+
+                  return Column(
+                    children: [
+                      // 各項目の上部に細い線を描画（一番上の項目以外）
+                      if (i > 0)
+                        Divider(color: widget.textColor.withOpacity(0.5), thickness: 0.5, height: 1),
+
+                      Theme(
+                        data: Theme.of(context).copyWith(
+                          splashColor: Colors.transparent,
+                          highlightColor: Colors.transparent,
                         ),
-                        if (rightText.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 8.0), child: Text(rightText, style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.bold)))
-                      ]
-                  ),
-                  children: children
-              )
-          )
-      );
-    })));
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              if (isExpanded) _expandedItems.remove(itemId);
+                              else _expandedItems.add(itemId);
+                            });
+                          },
+                          child: Padding(
+                            // ★ 修正：上パンディングは狭く(12)、下の余白は広く(展開時はコンテンツの繋がりを意識して16、閉じている時は40)
+                            padding: EdgeInsets.only(top: 12.0, bottom: isExpanded ? 16.0 : 40.0),
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                      child: AnimatedSwitcher(
+                                        duration: const Duration(milliseconds: 200),
+                                        child: Align(
+                                            key: ValueKey(isExpanded),
+                                            alignment: Alignment.centerLeft,
+                                            child: headerContent
+                                        ),
+                                      )
+                                  ),
+                                  if (rightText.isNotEmpty)
+                                    Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                                        child: Text(rightText, style: TextStyle(color: widget.textColor, fontSize: 16, fontWeight: FontWeight.w400))
+                                    ),
+                                  Icon(
+                                      isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                      color: widget.textColor.withOpacity(0.5),
+                                      size: 24
+                                  ),
+                                ]
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // ★ 展開時のコンテンツ
+                      AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 250),
+                        crossFadeState: isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                        firstChild: Padding(
+                          // ★ 展開時はコンテンツの下に大きな余白(40)を作り、次の区切り線との距離を保つ
+                          padding: const EdgeInsets.only(bottom: 40.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: children,
+                          ),
+                        ),
+                        secondChild: const SizedBox(width: double.infinity, height: 0),
+                      ),
+                    ],
+                  );
+                }
+            )
+        )
+    );
   }
 }
 

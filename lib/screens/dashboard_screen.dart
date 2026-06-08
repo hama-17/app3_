@@ -834,28 +834,32 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   Future<void> _fetchAssignments() async {
     try {
-      final cached = await CacheManager.load('cached_assignments_v10');
+      // キャッシュキーを新しくし、クリーンな状態で全取得させる
+      final cached = await CacheManager.load('cached_assignments_v14_all_year');
       if (cached != null && mounted) {
         setState(() {
           _assignments = cached;
         });
       }
 
-      if (widget.cookie.isEmpty || widget.courses.isEmpty) return;
+      if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
 
       List<dynamic> tasks = [];
 
-      // ★ 修正：バッチ処理（Future.wait）を廃止し、サーバー負荷を下げるため直列処理（1つずつ取得）に変更
-      for (var course in widget.courses) {
-        // ★ 追加ストッパー1：ループの先頭で画面が生きているか確認
+      // ★ 解決の鍵：Q1/Q2に関係なく、今年度のLMS授業をすべて抽出
+      final thisYearCourses = widget.allCourses.where((c) {
+        if (c['is_custom'] == true) return false;
+        return _isCurrentYearCourse(c);
+      }).toList();
+
+      for (var course in thisYearCourses) {
         if (!mounted) return;
 
-        final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/assignments?per_page=50&include[]=submission');
+        final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/assignments?per_page=40&include[]=submission');
         if (uri == null) continue;
 
-        final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 10));
+        final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 15));
 
-        // ★ 追加ストッパー2：非同期通信から戻ってきた直後にも確認（通信中に画面が閉じられた場合を防ぐ）
         if (!mounted) return;
 
         if (res.statusCode == 200) {
@@ -867,13 +871,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               tasks.add(task);
             }
           }
-        } else if (res.statusCode == 401 || res.statusCode == 403) {
-          _triggerErrorState();
-          throw Exception("Unauthorized or Rate Limited");
+        } else if (res.statusCode == 403 || res.statusCode == 401) {
+          // 課題機能がオフの授業や過去の授業はスルーする
+          continue;
+        } else if (res.statusCode == 429) {
+          // リクエスト過多の場合は少し休む
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
         }
 
-        // ★ 追加：リクエスト間にわずかなウェイト（100ms）を挟み、DDos検知システムを回避する
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 150));
       }
 
       final Map<String, dynamic> uniqueTasks = {};
@@ -882,7 +889,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       finalTasks.addAll(_customTasks);
       finalTasks.sort((a, b) => (DateTime.tryParse(a['due_at'] ?? '') ?? DateTime.now()).compareTo(DateTime.tryParse(b['due_at'] ?? '') ?? DateTime.now()));
 
-      await CacheManager.save('cached_assignments_v10', finalTasks);
+      await CacheManager.save('cached_assignments_v14_all_year', finalTasks);
       if (mounted) setState(() { _assignments = finalTasks; });
       CalendarSyncService.syncTasks(finalTasks);
 
@@ -891,7 +898,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _triggerErrorState();
     } finally {
       if (mounted) {
-        setState(() => _isLoadingAssignments = false);
+        setState(() { _isLoadingAssignments = false; _hasApiError = false; });
         _updateAlertAnimation();
       }
     }
@@ -899,28 +906,30 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   Future<void> _fetchMessages() async {
     try {
-      final cached = await CacheManager.load('cached_messages_v10');
+      final cached = await CacheManager.load('cached_messages_v14_all_year');
       if (cached != null && mounted) {
         setState(() {
           _messages = cached;
         });
       }
 
-      if (widget.cookie.isEmpty || widget.courses.isEmpty) return;
+      if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
 
       List<dynamic> msgs = [];
 
-      // ★ 修正：こちらもバッチ処理を廃止し、直列処理に変更
-      for (var course in widget.courses) {
-        // ★ 追加ストッパー1：ループ開始時
+      final thisYearCourses = widget.allCourses.where((c) {
+        if (c['is_custom'] == true) return false;
+        return _isCurrentYearCourse(c);
+      }).toList();
+
+      for (var course in thisYearCourses) {
         if (!mounted) return;
 
         final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/discussion_topics?only_announcements=true&per_page=15');
         if (uri == null) continue;
 
-        final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 10));
+        final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 15));
 
-        // ★ 追加ストッパー2：通信完了時
         if (!mounted) return;
 
         if (res.statusCode == 200) {
@@ -929,13 +938,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
             m['course_id'] = course['id'];
             msgs.add(m);
           }
-        } else if (res.statusCode == 401 || res.statusCode == 403) {
-          _triggerErrorState();
-          throw Exception("Unauthorized or Rate Limited");
+        } else if (res.statusCode == 403 || res.statusCode == 401) {
+          continue;
+        } else if (res.statusCode == 429) {
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
         }
 
-        // ★ 追加：リクエスト間の安全なウェイト
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 150));
       }
 
       msgs.sort((a, b) {
@@ -943,7 +953,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         final db = DateTime.tryParse(b['posted_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
         return db.compareTo(da);
       });
-      await CacheManager.save('cached_messages_v10', msgs);
+      await CacheManager.save('cached_messages_v14_all_year', msgs);
       if (mounted) setState(() { _messages = msgs; });
 
     } catch (e) {
@@ -951,7 +961,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _triggerErrorState();
     } finally {
       if (mounted) {
-        setState(() => _isLoadingMessages = false);
+        setState(() { _isLoadingMessages = false; _hasApiError = false; });
         _updateAlertAnimation();
       }
     }
@@ -1043,23 +1053,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       }
     }
 
+
     // ===================================
     // 3. 課題（タスク）
     // ===================================
-    // ★ 修正：未提出タスクは学期無視（ignoreTerm: true）で拾い上げ、完了済みは学期に従う
-    final pendingTasksForDay = _filterTasks(
-            (due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day,
-        wantCompleted: false,
-        ignoreTerm: true
-    );
-    final completedTasksForDay = _filterTasks(
-            (due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day,
-        wantCompleted: true,
-        ignoreTerm: false
-    );
-
-    // 2つを合体させる
-    final tasksForDay = [...pendingTasksForDay, ...completedTasksForDay];
+    // ★ 修正：ignoreTerm を削除し、一番シンプルな形に戻す
+    final tasksForDay = _filterTasks((due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day);
 
     for (var t in tasksForDay) {
       DateTime dueTime = DateTime.tryParse(t['due_at'] ?? '')?.toLocal() ?? DateTime.now();
@@ -1211,18 +1210,22 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     String tName = (courseObj['term']?['name'] ?? '').toString();
     String combined = "$cName $tName".toUpperCase();
 
+    // 現在の年度（例: 2026）が含まれていれば即「今年度」
     if (combined.contains(widget.currentYear.toString())) return true;
 
+    // 過去や未来の年度が明記されている場合は弾く
     for (int y = 2020; y <= 2030; y++) {
       if (y != widget.currentYear && combined.contains(y.toString())) {
         return false;
       }
     }
+
+    // 年度の記載がないもの（通年授業など）は今年度とみなす
     return true;
   }
 
 
-  List<dynamic> _filterTasks(bool Function(DateTime due) condition, {bool wantCompleted = false, bool ignoreTerm = false}) {
+  List<dynamic> _filterTasks(bool Function(DateTime due) condition, {bool wantCompleted = false}) {
     return _assignments.where((t) {
       if (_dismissedTaskIds.contains(t['id'].toString())) return false;
 
@@ -1255,15 +1258,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
         if (courseObj == null) return false;
 
-        // ★ 年度は絶対に一致している必要がある
+        // ★ Q1/Q2に関係なく「今年度」の課題をすべて表示
         if (!_isCurrentYearCourse(courseObj)) return false;
-
-        // ★ 追加：ignoreTerm が false の場合のみ、現在の学期(Q1/Q2等)フィルターを通す
-        if (!ignoreTerm) {
-          if (!TermHelper.shouldDisplayCourse(courseObj, _courseTermOverrides, widget.currentYear, widget.currentTerm)) {
-            return false;
-          }
-        }
       }
 
       return true;
@@ -1824,15 +1820,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final now = DateTime.now();
     final nextWeek = now.add(const Duration(days: 7));
 
-    // ★ 修正：ホーム画面の未提出タスクも学期フィルターを無視して全取得
-    final overdueTasks = _filterTasks((due) => due.isBefore(now), ignoreTerm: true);
-    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), ignoreTerm: true);
-
+    // ★ 修正：ignoreTerm: true を削除
+    final overdueTasks = _filterTasks((due) => due.isBefore(now));
+    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek));
     final unreadMessages = _filterMessages((m) => !_dismissedMessageIds.contains(m['id'].toString()) && (m['read_state'] == null || m['read_state'] != 'read'));
 
     double topPadding = MediaQuery.of(context).padding.top + 24.0;
-// ...以下そのまま
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
+    // ... 以下そのまま
 
     bool isTransitioning = (_dragPosition > 0.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
     Duration animDuration = isTransitioning ? Duration.zero : const Duration(milliseconds: 300);
@@ -3031,13 +3026,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final now = DateTime.now();
     final nextWeek = now.add(const Duration(days: 7));
 
-    // ★ 修正：左側（PENDING）のデータは学期フィルターを無視して今年度の全課題を取得
-    final overdueTasks = _filterTasks((due) => due.isBefore(now), wantCompleted: false, ignoreTerm: true);
-    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), wantCompleted: false, ignoreTerm: true);
-    final futureTasks = _filterTasks((due) => due.isAfter(nextWeek) || due.isAtSameMomentAs(nextWeek), wantCompleted: false, ignoreTerm: true);
+    // ★ 修正：ignoreTerm を削除
+    // 左側：PENDING用データ
+    final overdueTasks = _filterTasks((due) => due.isBefore(now), wantCompleted: false);
+    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), wantCompleted: false);
+    final futureTasks = _filterTasks((due) => due.isAfter(nextWeek) || due.isAtSameMomentAs(nextWeek), wantCompleted: false);
 
-    // ★ 修正：右側（COMPLETED）のデータは、今まで通り現在選択中の学期(Q)に沿って表示する
-    List<dynamic> allCompletedTasks = _filterTasks((due) => true, wantCompleted: true, ignoreTerm: false);
+    // ★ 修正：ignoreTerm を削除
+    // 右側：COMPLETED用データ
+    List<dynamic> allCompletedTasks = _filterTasks((due) => true, wantCompleted: true);
     allCompletedTasks.sort((a, b) {
       DateTime timeA = DateTime.tryParse(a['submission']?['submitted_at'] ?? a['due_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
       DateTime timeB = DateTime.tryParse(b['submission']?['submitted_at'] ?? b['due_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -3045,6 +3042,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     });
 
     bool isDark = Theme.of(context).brightness == Brightness.dark;
+    // ... 以下そのまま
 
     // トグルカプセル用の色（ライト: 黒カプセル/白文字、ダーク: 白カプセル/黒文字）
     // トグルカプセル用の色（ライト: 黒カプセル/白文字、ダーク: 白カプセル/黒文字）
