@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:async'; // ★ 追加：タイマーを使うために必要
+import 'dart:async'; // タイマーを使用
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -15,18 +15,18 @@ class OktaLoginScreen extends StatefulWidget {
 
 class _OktaLoginScreenState extends State<OktaLoginScreen> {
   bool _isSuccessTriggered = false;
-  Timer? _pollingTimer; // ★ 追加：裏で監視し続けるタイマー
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _clearWebViewCache();
-    _startCookiePolling(); // ★ 追加：画面を開いた瞬間からCookieの監視をスタート！
+    _startCookiePolling(); // 画面を開いた瞬間から監視開始
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel(); // ★ 追加：画面が閉じたらタイマーを安全に停止
+    _pollingTimer?.cancel(); // 閉じたらタイマーを止める
     super.dispose();
   }
 
@@ -38,39 +38,51 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     }
   }
 
-  // ★ 追加：WebViewの動きに関係なく、1秒に1回強制的にCookieをチェックする最強のメソッド
+  // ★ 解決の鍵：裏で常にCookieを監視し続ける最強のメソッド
   void _startCookiePolling() {
     _pollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      // すでに成功したか、画面が閉じられていればタイマー終了
       if (_isSuccessTriggered || !mounted) {
         timer.cancel();
         return;
       }
-
-      try {
-        // lms.keio.jp に紐づくCookieを取得（iOSの遅延に関係なく、存在するタイミングで取れる）
-        final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
-
-        // ログインの証である canvas_session か _csrf_token が発行されているかチェック
-        if (cookies.any((c) => c.name.contains('canvas_session') || c.name == '_csrf_token')) {
-          final cookieString = cookies.map((c) => "${c.name}=${c.value}").join("; ");
-
-          // 本当に有効なセッションかAPIを叩いて確認する
-          final isValid = await AuthService.validateSession(cookieString);
-
-          if (isValid && !_isSuccessTriggered && mounted) {
-            _isSuccessTriggered = true;
-            timer.cancel(); // 成功したらタイマーを止める
-
-            await AuthService.saveSession(cookieString); // 保存
-            Navigator.pop(context); // WebViewを閉じる
-            widget.onLoginSuccess(); // ホーム画面を更新
-          }
-        }
-      } catch (e) {
-        debugPrint("Cookie polling error: $e");
-      }
+      await _checkAndValidateCookies();
     });
+  }
+
+  // ★ Cookieを引っこ抜いて検証する処理
+  // コントローラーを保持する変数
+  InAppWebViewController? _webViewController;
+
+  Future<void> _checkAndValidateCookies() async {
+    // WebViewが未初期化ならスキップ
+    if (_webViewController == null) return;
+
+    try {
+      // 1. JSを注入して、WebViewの中の住人（JS）にクッキーを吐き出させる（iOS突破用）
+      final String? jsCookie = await _webViewController!.evaluateJavascript(source: "document.cookie");
+
+      // 2. Android向けに念のため CookieManager も併用
+      final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
+      final String managerCookie = cookies.map((c) => "${c.name}=${c.value}").join("; ");
+
+      // 両方の結果を合体（どちらか片方でも取れればOK）
+      final String cookieString = "${jsCookie ?? ''}; $managerCookie";
+
+      if (cookieString.contains('canvas_session') || cookieString.contains('_csrf_token')) {
+        final isValid = await AuthService.validateSession(cookieString);
+
+        if (isValid && !_isSuccessTriggered && mounted) {
+          _isSuccessTriggered = true;
+          _pollingTimer?.cancel();
+
+          await AuthService.saveSession(cookieString);
+          Navigator.pop(context);
+          widget.onLoginSuccess();
+        }
+      }
+    } catch (e) {
+      debugPrint("Cookie check error: $e");
+    }
   }
 
   @override Widget build(BuildContext context) {
@@ -98,20 +110,26 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
         ),
         body: SafeArea(
             child: InAppWebView(
-              initialUrlRequest: URLRequest(url: WebUri(canvasBaseUrl)),
-              initialSettings: InAppWebViewSettings(
+                onWebViewCreated: (controller) => _webViewController = controller,
+                initialUrlRequest: URLRequest(url: WebUri(canvasBaseUrl)),
+                initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                   thirdPartyCookiesEnabled: true,
-                  sharedCookiesEnabled: true,
+                  // ★ 最重要修正：iOSの同期バグを引き起こす sharedCookiesEnabled を削除(デフォルトfalse)
+                  // ★ 最重要修正：セッション保存を阻害する cacheEnabled: false を削除
                   supportMultipleWindows: true,
                   javaScriptCanOpenWindowsAutomatically: true,
                   userAgent: fakeUserAgent,
-                  cacheEnabled: false,
-                  clearCache: true
-              ),
-              // ★ 修正：onLoadStopなどのイベントに依存してチェックするのをやめる。
-              // タイマーが裏で常に監視しているので、WebView側からは何も報告させなくてOK。
+                ),
+                onLoadStop: (controller, url) {
+                  // ページ読み込み完了時にも念のため即座にチェック
+                  _checkAndValidateCookies();
+                },
+                onUpdateVisitedHistory: (controller, url, isReload) {
+                  // URL履歴が変わった時もチェック
+                  _checkAndValidateCookies();
+                }
             )
         )
     );
