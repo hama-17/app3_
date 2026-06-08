@@ -218,11 +218,11 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                 spacing: 16, runSpacing: 16,
                 children: [
                   // ★ 修正：ソリッド＆サイバーテイストに映える洗練されたカラーに一新
-                  _buildColorSwatch(const Color(0xFFc6e7ec), textCol, cur), // ネオンシアン
+                  _buildColorSwatch(const Color(0xFFaed9e0), textCol, cur), // ネオンシアン
                   _buildColorSwatch(const Color(0xFF671b24), textCol, cur), // ネオンマゼンタ
                   _buildColorSwatch(const Color(0xFF055646), textCol, cur), // ネオンライム
                   _buildColorSwatch(const Color(0xFF034376), textCol, cur), // エレクトリックブルー
-                  _buildColorSwatch(const Color(0xFFe15e42), textCol, cur), // ブライトアンバー
+                  _buildColorSwatch(const Color(0xFFfd4603), textCol, cur), // ブライトアンバー
                   _buildColorSwatch(const Color(0xFFf5bc64), textCol, cur), // インオーガニックグレー
                   GestureDetector(
                     onTap: () {

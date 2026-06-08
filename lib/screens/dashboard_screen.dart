@@ -1908,9 +1908,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     // ★ 既定の3色グラデーション定義
-    const Color defaultTopGradient = Color(0xFF0B0C11);
-    const Color defaultMiddleGradient = Color(0xFF3E5364);
-    const Color defaultBottomGradient = Color(0xFFcdc7c3);
+    const Color defaultTopGradient = Color(0xFF0b0c11);
+    const Color defaultMiddleGradient = Color(0xff3e5364);
+    const Color defaultBottomGradient = Color(0xffcdc7c3);
 
     // --- 左側 (D/W/M) の高さと背景色 ---
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
