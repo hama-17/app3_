@@ -34,19 +34,37 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
 
   Future<void> _checkLoginStatus(Uri? url) async {
     if (url == null || _isSuccessTriggered) return;
-    if (url.host == 'lms.keio.jp') {
+
+    // 完全に一致しなくても、lms.keio.jpドメインに到達していればチェックを開始
+    if (url.host.contains('lms.keio.jp')) {
       try {
-        final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
-        if (cookies.any((c) => c.name.contains('canvas_session') || c.name == '_csrf_token')) {
-          final cookieString = cookies.map((c) => "${c.name}=${c.value}").join("; ");
-          final isValid = await AuthService.validateSession(cookieString);
-          if (isValid && !_isSuccessTriggered) {
-            _isSuccessTriggered = true;
-            await AuthService.saveSession(cookieString);
-            if (mounted) { Navigator.pop(context); widget.onLoginSuccess(); }
+        // ★ 解決の鍵：iOSのCookie同期遅延対策として、0.5秒おきに最大5回（2.5秒間）確認を繰り返す
+        for (int i = 0; i < 5; i++) {
+          if (_isSuccessTriggered || !mounted) return;
+
+          final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
+
+          if (cookies.any((c) => c.name.contains('canvas_session') || c.name == '_csrf_token')) {
+            final cookieString = cookies.map((c) => "${c.name}=${c.value}").join("; ");
+            final isValid = await AuthService.validateSession(cookieString);
+
+            if (isValid && !_isSuccessTriggered) {
+              _isSuccessTriggered = true;
+              await AuthService.saveSession(cookieString);
+              if (mounted) {
+                Navigator.pop(context);
+                widget.onLoginSuccess();
+              }
+              return; // 成功したらループを抜けて完了
+            }
           }
+
+          // Cookieがまだ同期されていない、またはセッションが無効な場合は少し待って再トライ
+          await Future.delayed(const Duration(milliseconds: 500));
         }
-      } catch (e) {}
+      } catch (e) {
+        debugPrint("Check Login Status Error: $e");
+      }
     }
   }
 
