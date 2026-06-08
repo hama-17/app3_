@@ -161,6 +161,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
           : DashboardPage(
           courses: _filteredCourses,
           uniqueCourses: _uniqueSortedCourses,
+          allCourses: _allCourses, // ★ これを追加
           isAuthenticated: _isAuthenticated,
           onLogin: _handleLogin,
           onLogout: _handleLogout,
@@ -170,7 +171,6 @@ class _MainSkeletonState extends State<MainSkeleton> {
           currentTerm: _selectedTerm,
           onTermChanged: (year, term) async {
             setState(() { _selectedYear = year; _selectedTerm = term; });
-            // メニュー等で変更された場合も保存する
             final prefs = await SharedPreferences.getInstance();
             await prefs.setInt('manual_year_v10', year);
             await prefs.setString('manual_term_v10', term);
@@ -186,12 +186,32 @@ enum ViewState { home, fullTasks, fullMessages }
 
 
 class DashboardPage extends StatefulWidget {
-  final List<dynamic> courses; final List<dynamic> uniqueCourses; final bool isAuthenticated;
-  final VoidCallback onLogin; final VoidCallback onLogout; final VoidCallback onSettings; final String cookie;
-  final int currentYear; final String currentTerm; final Function(int, String) onTermChanged;
+  final List<dynamic> courses;
+  final List<dynamic> uniqueCourses;
+  final List<dynamic> allCourses; // ★ これを追加
+  final bool isAuthenticated;
+  final VoidCallback onLogin;
+  final VoidCallback onLogout;
+  final VoidCallback onSettings;
+  final String cookie;
+  final int currentYear;
+  final String currentTerm;
+  final Function(int, String) onTermChanged;
 
-
-  const DashboardPage({super.key, required this.courses, required this.uniqueCourses, required this.isAuthenticated, required this.onLogin, required this.onLogout, required this.onSettings, required this.cookie, required this.currentYear, required this.currentTerm, required this.onTermChanged});
+  const DashboardPage({
+    super.key,
+    required this.courses,
+    required this.uniqueCourses,
+    required this.allCourses, // ★ これを追加
+    required this.isAuthenticated,
+    required this.onLogin,
+    required this.onLogout,
+    required this.onSettings,
+    required this.cookie,
+    required this.currentYear,
+    required this.currentTerm,
+    required this.onTermChanged
+  });
   @override State<DashboardPage> createState() => _DashboardPageState();
 }
 
@@ -1026,13 +1046,27 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     // ===================================
     // 3. 課題（タスク）
     // ===================================
-    final tasksForDay = _filterTasks((due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day);
+    // ★ 修正：未提出タスクは学期無視（ignoreTerm: true）で拾い上げ、完了済みは学期に従う
+    final pendingTasksForDay = _filterTasks(
+            (due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day,
+        wantCompleted: false,
+        ignoreTerm: true
+    );
+    final completedTasksForDay = _filterTasks(
+            (due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day,
+        wantCompleted: true,
+        ignoreTerm: false
+    );
+
+    // 2つを合体させる
+    final tasksForDay = [...pendingTasksForDay, ...completedTasksForDay];
+
     for (var t in tasksForDay) {
       DateTime dueTime = DateTime.tryParse(t['due_at'] ?? '')?.toLocal() ?? DateTime.now();
       combined.add({
         'type': 'task',
         'time': dueTime,
-        'endTime': dueTime.add(const Duration(minutes: 30)), // ★ タスクは仮に30分の枠とする
+        'endTime': dueTime.add(const Duration(minutes: 30)),
         'title': t['name'] ?? 'Task',
         'subtitle': currentLMS.cleanTitle(t['context_name'] ?? ''),
         'courseId': t['course_id'],
@@ -1170,16 +1204,69 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
   }
 
+  // ★ 追加：今年度の授業かどうかを文字列から確実に判定するメソッド
+  bool _isCurrentYearCourse(dynamic courseObj) {
+    if (courseObj == null) return false;
+    String cName = (courseObj['name'] ?? '').toString();
+    String tName = (courseObj['term']?['name'] ?? '').toString();
+    String combined = "$cName $tName".toUpperCase();
 
-  List<dynamic> _filterTasks(bool Function(DateTime due) condition, {bool wantCompleted = false}) {
+    if (combined.contains(widget.currentYear.toString())) return true;
+
+    for (int y = 2020; y <= 2030; y++) {
+      if (y != widget.currentYear && combined.contains(y.toString())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+
+  List<dynamic> _filterTasks(bool Function(DateTime due) condition, {bool wantCompleted = false, bool ignoreTerm = false}) {
     return _assignments.where((t) {
       if (_dismissedTaskIds.contains(t['id'].toString())) return false;
+
       bool isCompleted = false;
-      if (t['course_id'] == 'custom_t' || t['is_app_custom_task'] == true) { isCompleted = t['is_completed'] == true; } else { final sub = t['submission']; isCompleted = sub != null && (sub['workflow_state'] == 'submitted' || sub['workflow_state'] == 'graded' || sub['workflow_state'] == 'graded_excused'); }
-      if (wantCompleted && !isCompleted) return false; if (!wantCompleted && isCompleted) return false;
-      final dueStr = t['due_at']; if (dueStr == null || dueStr.toString().isEmpty) return false;
-      final due = DateTime.tryParse(dueStr)?.toLocal(); if (due == null) return false;
-      return condition(due);
+      bool isCustomTask = t['course_id'] == 'custom_t' || t['is_app_custom_task'] == true;
+
+      if (isCustomTask) {
+        isCompleted = t['is_completed'] == true;
+      } else {
+        final sub = t['submission'];
+        isCompleted = sub != null && (sub['workflow_state'] == 'submitted' || sub['workflow_state'] == 'graded' || sub['workflow_state'] == 'graded_excused');
+      }
+
+      if (wantCompleted && !isCompleted) return false;
+      if (!wantCompleted && isCompleted) return false;
+
+      final dueStr = t['due_at'];
+      if (dueStr == null || dueStr.toString().isEmpty) return false;
+      final due = DateTime.tryParse(dueStr)?.toLocal();
+      if (due == null) return false;
+      if (!condition(due)) return false;
+
+      if (!isCustomTask) {
+        int courseId = t['course_id'];
+
+        var courseObj = widget.allCourses.firstWhere(
+                (c) => c['id'] == courseId,
+            orElse: () => null
+        );
+
+        if (courseObj == null) return false;
+
+        // ★ 年度は絶対に一致している必要がある
+        if (!_isCurrentYearCourse(courseObj)) return false;
+
+        // ★ 追加：ignoreTerm が false の場合のみ、現在の学期(Q1/Q2等)フィルターを通す
+        if (!ignoreTerm) {
+          if (!TermHelper.shouldDisplayCourse(courseObj, _courseTermOverrides, widget.currentYear, widget.currentTerm)) {
+            return false;
+          }
+        }
+      }
+
+      return true;
     }).toList();
   }
 
@@ -1314,14 +1401,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   Widget _buildCoursesView(double topPadding) {
     int maxPeriod = -1;
+    bool hasSaturdayClasses = false; // ★ 追加：土曜授業判定
     for (var item in _weeklySchedule) {
       if (item['period'] > maxPeriod) maxPeriod = item['period'];
+      if (item['day'] == 5) hasSaturdayClasses = true; // 土曜があればフラグを立てる
     }
     if (maxPeriod == -1) maxPeriod = 0;
 
-    double screenWidth = MediaQuery.of(context).size.width;
-    double itemWidth = (screenWidth - 16.0 - 10.0) / 6.0;
+    // ★ 追加：上部のカレンダーと完全に同じロジックで日数を計算
+    int displayDaysCount = hasSaturdayClasses ? 6 : 5;
 
+    double screenWidth = MediaQuery.of(context).size.width;
+    double spacing = 2.0;
+
+    // ★ 修正：カレンダーのマス(itemWidth)が拡大した分を正確に計算する
+    double itemWidth = (screenWidth - 16.0 - (spacing * (displayDaysCount - 1))) / displayDaysCount;
+
+    // この itemWidth を使って headerMaxHeight（カードが始まるY座標）を算出するため、
+    // カレンダーが縦に伸びた分だけ、自動的にカードリストも下に押し下がります。
     double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
     double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
     double shrinkLimit = headerMaxHeight - headerMinHeight;
@@ -1329,7 +1426,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     return Stack(
       key: const ValueKey('course_list'),
       children: [
-        // ★ 修正：RefreshIndicatorを削除し、純粋なScrollViewに変更
         CustomScrollView(
           controller: _mainScrollController,
           physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
@@ -1728,11 +1824,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final now = DateTime.now();
     final nextWeek = now.add(const Duration(days: 7));
 
-    final overdueTasks = _filterTasks((due) => due.isBefore(now));
-    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek));
+    // ★ 修正：ホーム画面の未提出タスクも学期フィルターを無視して全取得
+    final overdueTasks = _filterTasks((due) => due.isBefore(now), ignoreTerm: true);
+    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), ignoreTerm: true);
+
     final unreadMessages = _filterMessages((m) => !_dismissedMessageIds.contains(m['id'].toString()) && (m['read_state'] == null || m['read_state'] != 'read'));
 
     double topPadding = MediaQuery.of(context).padding.top + 24.0;
+// ...以下そのまま
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
 
     bool isTransitioning = (_dragPosition > 0.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
@@ -1829,39 +1928,38 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       final items = _getScheduleForDate(date);
 
       if (items.isNotEmpty) {
-        // ★ 修正：カスタム色が設定されている授業「だけ」を抽出する
-        List<Color> customColors = [];
+        // ★ 修正：授業の時間帯（時限）に基づいて、Top, Mid, Bottom の色を個別に管理
+        Color? customTop;
+        Color? customMid;
+        Color? customBot;
+
         for (var item in items) {
           if (_hasCustomColor(item['courseObj'])) {
-            customColors.add(_getCourseColor(item['courseObj']));
+            Color c = _getCourseColor(item['courseObj']);
+            int hour = (item['time'] as DateTime).hour;
+
+            // 慶應の時間割に合わせた3分割空間マッピング
+            // 1〜2限 (9:00〜12:15) -> グラデーション上部
+            if (hour < 12) {
+              customTop = c;
+            }
+            // 3〜4限 (13:00〜16:15) -> グラデーション中間
+            else if (hour < 16) {
+              customMid = c;
+            }
+            // 5〜6限 (16:30〜19:45) -> グラデーション下部
+            else {
+              customBot = c;
+            }
           }
         }
 
-        // カスタム色が1つでもある場合は、破綻しないように確実に3色のグラデーションを作る
-        if (customColors.isNotEmpty) {
-          if (customColors.length == 1) {
-            // 1色しかない場合：その色を中心に、上下はデフォルト色と少し混ぜて自然になじませる
-            scheduleColors = [
-              Color.lerp(defaultTopGradient, customColors.first, 0.6)!,
-              customColors.first,
-              Color.lerp(defaultBottomGradient, customColors.first, 0.6)!,
-            ];
-          } else if (customColors.length == 2) {
-            // 2色の場合：その2色の中間色を作って3色にする
-            scheduleColors = [
-              customColors.first,
-              Color.lerp(customColors.first, customColors.last, 0.5)!,
-              customColors.last
-            ];
-          } else {
-            // 3色以上の場合：最初、真ん中、最後の色を取る
-            scheduleColors = [
-              customColors.first,
-              customColors[customColors.length ~/ 2],
-              customColors.last
-            ];
-          }
-        }
+        // ★ カスタム色が設定された箇所のみ上書きし、他はデフォルト色を維持する
+        scheduleColors = [
+          customTop ?? defaultTopGradient,
+          customMid ?? defaultMiddleGradient,
+          customBot ?? defaultBottomGradient,
+        ];
       }
     }
 
@@ -1875,15 +1973,28 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
     List<Color> currentGradient = [c1, c2, c3];
 
+    // --- 各種サイズ計算 ---
+    // (以降は元のコードのまま変更不要です)
+
 // ... (以下は元のコードのまま、maxPeriodの計算などが続きます)
 
     // --- 各種サイズ計算 ---
+    // --- 各種サイズ計算 ---
     int maxPeriod = -1;
-    for (var item in _weeklySchedule) { if (item['period'] > maxPeriod) maxPeriod = item['period']; }
+    bool hasSaturdayClasses = false; // ★ 追加：土曜日の授業があるか判定
+    for (var item in _weeklySchedule) {
+      if (item['period'] > maxPeriod) maxPeriod = item['period'];
+      if (item['day'] == 5) hasSaturdayClasses = true; // day == 5 は土曜日
+    }
     if (maxPeriod == -1) maxPeriod = 0;
 
+    // ★ 追加：土曜がなければ5日間(月〜金)、あれば6日間(月〜土)
+    int displayDaysCount = hasSaturdayClasses ? 6 : 5;
+
     double screenWidth = MediaQuery.of(context).size.width;
-    double spacing = 2.0; double itemWidth = (screenWidth - 16.0 - (spacing * 5)) / 6.0;
+    double spacing = 2.0;
+    // ★ 修正：マスの幅を 5等分 or 6等分 に動的に計算し拡大させる
+    double itemWidth = (screenWidth - 16.0 - (spacing * (displayDaysCount - 1))) / displayDaysCount;
 
     double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
     double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
@@ -1901,12 +2012,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
     double dynamicScheduleHeight = math.max(scheduleMinHeight, scheduleHeight - activeTasksScrollOffset);
 
-    // 👇 不足していた計算式（taskT, monoBg, monoTextColor）を復活 👇
     double taskShrinkLimit = math.max(1.0, scheduleHeight - scheduleMinHeight);
     double taskT = (activeTasksScrollOffset / taskShrinkLimit).clamp(0.0, 1.0);
     Color monoBg = isDark ? Colors.black : const Color(0xFFEEEEEE);
     Color monoTextColor = isDark ? Colors.white : Colors.black;
-    // 👆 復活ここまで 👆
 
     double effectiveScheduleHeight = _dragPosition < 0.5 ? dynamicScheduleHeight : scheduleHeight;
     double currentHeight = effectiveScheduleHeight + (calendarHeight - effectiveScheduleHeight) * _dragPosition;
@@ -1921,7 +2030,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     return Hero(
       tag: heroTag,
       child: Material(
-// ... 以下そのまま
         type: MaterialType.transparency,
         child: AnimatedContainer(
           duration: animDuration,
@@ -1930,23 +2038,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           height: currentHeight,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            // ★ currentGradient（確定した3色）を使用して描画
             gradient: LinearGradient(
               colors: currentGradient,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              stops: const [0.0, 0.5, 1.0], // 中間点を中央に固定
+              stops: const [0.0, 0.5, 1.0],
             ),
             borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
           ),
           child: Stack(
             children: [
-              // ...（以下、Stackの中身 _buildInnerSchedule 等は以前のまま変更なし）
               IgnorePointer(
                 ignoring: _dragPosition >= 0.5,
                 child: Opacity(
                   opacity: (1.0 - _dragPosition * 2).clamp(0.0, 1.0),
-                  // ★ 左側のフェードアウト割合(taskT)を渡す
                   child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT),
                 ),
               ),
@@ -1958,8 +2063,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     key: _calendarKey,
                     child: Container(
                       color: Colors.transparent,
-                      // ★ 右側の縮小割合(t)を渡す（元通り）
-                      child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing),
+                      // ★ 修正：displayDaysCount を引数に追加
+                      child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
                     ),
                   ),
                 ),
@@ -2727,14 +2832,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     );
   }
 
-  Widget _buildInnerCalendar(double topPadding, bool isDark, double t, double baseItemWidth, int maxPeriod, double baseSpacing) {
-    // 👇 ここを変更 👇
-    // スワイプによる縮小処理はそのままに、基本の高さを計算
+  // ★ 修正：引数に displayDaysCount を追加
+  Widget _buildInnerCalendar(double topPadding, bool isDark, double t, double baseItemWidth, int maxPeriod, double baseSpacing, int displayDaysCount) {
     double currentItemHeight = baseItemWidth - t * (baseItemWidth - 12.0);
-    // マス目同士の隙間を上下左右「1.0」に固定
     double currentSpacing = 1.0;
-    // 👆 ここまで 👆
-
     double textOpacity = math.max(0.0, 1.0 - t * 3.0);
 
     return Container(
@@ -2753,7 +2854,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       height: 24.0 * textOpacity,
                       child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: ['MON','TUE','WED','THU','FRI','SAT'].asMap().entries.map((entry) {
+                          // ★ 修正：表示日数に合わせて曜日ヘッダーを動的にカットする
+                          children: ['MON','TUE','WED','THU','FRI','SAT'].take(displayDaysCount).toList().asMap().entries.map((entry) {
                             int idx = entry.key; bool isToday = (DateTime.now().weekday - 1) == idx;
 
                             Widget content = Container(
@@ -2783,11 +2885,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   SizedBox(height: 4.0 * textOpacity),
                 ...List.generate(maxPeriod + 1, (periodIndex) {
                   return Padding(
-                    // 👇 行と行の間の隙間を currentSpacing (1.0) に設定 👇
                     padding: EdgeInsets.only(bottom: periodIndex == maxPeriod ? 0 : currentSpacing),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(6, (dayIndex) {
+                      // ★ 修正：表示日数に合わせて列数を動的に生成する
+                      children: List.generate(displayDaysCount, (dayIndex) {
 
                         final matches = _weeklySchedule.where((s) => s['day'] == dayIndex && s['period'] == periodIndex).toList();
 
@@ -2796,6 +2898,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         // ★ セル描画用ヘルパー関数
                         Widget buildCell(Map<String, dynamic> match, double height, bool isHalf) {
                           Color color = _getCourseColor(match['course']);
+
+                          // ★ 追加：授業名と教室名を抽出して分ける
+                          String rawName = match['course']['raw_name'] ?? match['course']['name'] ?? '';
+                          String courseName = CourseTitleParser.getCleanTitle(rawName);
+                          String roomName = '';
+                          if (match['course']['is_custom'] == true) {
+                            roomName = match['course']['room'] ?? '';
+                          } else {
+                            roomName = CourseScheduleParser.getRoomNumber(rawName);
+                          }
+
                           return GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTap: () {
@@ -2811,24 +2924,48 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               height: height,
                               decoration: BoxDecoration(
                                 color: color,
-                                // 👇 角丸(フィレット)を少し大きめの 8.0 に統一 👇
                                 borderRadius: BorderRadius.circular(8.0),
                               ),
-                              alignment: Alignment.center,
-                              padding: EdgeInsets.all(isHalf ? 1.0 : 2.0),
+                              padding: EdgeInsets.all(isHalf ? 2.0 : 4.0),
                               child: Opacity(
                                 opacity: textOpacity,
-                                child: Text(
-                                    CourseTitleParser.getCleanTitle(match['course']['name']),
-                                    style: TextStyle(
-                                        color: AppTheme.getTextColorForBackground(color),
-                                        fontSize: isHalf ? 7.5 : 9,
-                                        fontWeight: FontWeight.w300,
-                                        height: 1.1
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween, // 上下端に要素を散らす
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    // 授業名（上詰め）
+                                    Expanded(
+                                      child: Align(
+                                        alignment: Alignment.topCenter,
+                                        child: Text(
+                                            courseName,
+                                            style: TextStyle(
+                                                color: AppTheme.getTextColorForBackground(color),
+                                                fontSize: isHalf ? 8.5 : 10, // 以前より少し大きめに設定
+                                                fontWeight: FontWeight.w400,
+                                                height: 1.1
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            maxLines: isHalf ? 1 : 3,
+                                            overflow: TextOverflow.ellipsis
+                                        ),
+                                      ),
                                     ),
-                                    textAlign: TextAlign.center,
-                                    maxLines: isHalf ? 2 : 4,
-                                    overflow: TextOverflow.ellipsis
+                                    // 教室名（下詰め）
+                                    if (roomName.isNotEmpty)
+                                      Text(
+                                          roomName,
+                                          style: TextStyle(
+                                              color: AppTheme.getTextColorForBackground(color).withOpacity(0.8), // 少し透過させて控えめに
+                                              fontSize: isHalf ? 6.5 : 8,
+                                              fontWeight: FontWeight.w300,
+                                              height: 1.1
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -2839,7 +2976,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           return buildCell(matches.first, currentItemHeight, false);
                         }
 
-                        // ★ 学期選択中など、2つ以上の授業が重なっている場合はマスを半分に分割して上下に配置
                         Map<String, dynamic>? firstHalfMatch;
                         Map<String, dynamic>? secondHalfMatch;
 
@@ -2863,15 +2999,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         if (secondHalfMatch == null) secondHalfMatch = matches[1];
                         if (firstHalfMatch == secondHalfMatch) secondHalfMatch = matches[1];
 
-                        // 👇 分割マスの場合、上下の間に currentSpacing (1.0) の隙間を空ける計算 👇
                         double halfHeight = (currentItemHeight - currentSpacing) / 2.0;
 
                         return SizedBox(
                             width: baseItemWidth,
                             height: currentItemHeight,
                             child: Column(
-                              // mainAxisAlignment: MainAxisAlignment.spaceBetween にすることで、
-                              // 計算した隙間 (currentSpacing) が上下のセルの間に空きます
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 buildCell(firstHalfMatch, halfHeight, true),
@@ -2898,13 +3031,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final now = DateTime.now();
     final nextWeek = now.add(const Duration(days: 7));
 
-    // 左側：PENDING用データ
-    final overdueTasks = _filterTasks((due) => due.isBefore(now), wantCompleted: false);
-    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), wantCompleted: false);
-    final futureTasks = _filterTasks((due) => due.isAfter(nextWeek) || due.isAtSameMomentAs(nextWeek), wantCompleted: false);
+    // ★ 修正：左側（PENDING）のデータは学期フィルターを無視して今年度の全課題を取得
+    final overdueTasks = _filterTasks((due) => due.isBefore(now), wantCompleted: false, ignoreTerm: true);
+    final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), wantCompleted: false, ignoreTerm: true);
+    final futureTasks = _filterTasks((due) => due.isAfter(nextWeek) || due.isAtSameMomentAs(nextWeek), wantCompleted: false, ignoreTerm: true);
 
-    // 右側：COMPLETED用データ
-    List<dynamic> allCompletedTasks = _filterTasks((due) => true, wantCompleted: true);
+    // ★ 修正：右側（COMPLETED）のデータは、今まで通り現在選択中の学期(Q)に沿って表示する
+    List<dynamic> allCompletedTasks = _filterTasks((due) => true, wantCompleted: true, ignoreTerm: false);
     allCompletedTasks.sort((a, b) {
       DateTime timeA = DateTime.tryParse(a['submission']?['submitted_at'] ?? a['due_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
       DateTime timeB = DateTime.tryParse(b['submission']?['submitted_at'] ?? b['due_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
