@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+	    <key>NSCameraUsageDescription</key>
+        <string>メモに添付する写真をその場で撮影してアプリ内に保存するためにカメラを使用します。</string>
+        <key>NSPhotoLibraryUsageDescription</key>
+        <string>端末に保存されている写真をメモに添付してアプリ内にストックするために、写真ライブラリへアクセスします。</string>
 	    <key>NSCalendarsUsageDescription</key>
         <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
         <key>NSCalendarsFullAccessUsageDescription</key>
