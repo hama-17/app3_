@@ -6,6 +6,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_theme.dart';
 import '../utils/lms_adapter.dart';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 //media_viewers.dart
 
 class InAppBrowserScreen extends StatefulWidget {
@@ -47,6 +51,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
             backgroundColor: AppTheme.bg(context),
             body: Stack(
                 children: [
+                  // --- 1. WebView 本体 ---
                   AnimatedPositioned(
                       duration: const Duration(milliseconds: 300),
                       curve: Curves.easeOutCubic,
@@ -54,10 +59,8 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                       bottom: _isTop ? -statusBarHeight : 0,
                       left: 0,
                       right: 0,
-                      // 1. InAppBrowserScreen の InAppWebView を以下のように修正します
                       child: InAppWebView(
                           onWebViewCreated: (controller) => _webViewController = controller,
-                          // ★ 修正：APIで使っているクッキーをヘッダーに直接注入する
                           initialUrlRequest: URLRequest(
                             url: WebUri(widget.url),
                             headers: {'Cookie': widget.cookie},
@@ -65,7 +68,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                           initialSettings: InAppWebViewSettings(
                             javaScriptEnabled: true,
                             domStorageEnabled: true,
-                            // ★ 追加：ログイン画面のクッキー（認証情報）を共有する必須設定！
                             sharedCookiesEnabled: true,
                             thirdPartyCookiesEnabled: true,
                             useShouldOverrideUrlLoading: true,
@@ -97,6 +99,24 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                             } catch (e) {}
                           }
                       )
+                  ),
+
+                  // ★ 追加 2. 右上の黒い円形閉じる（×）ボタン ---
+                  // 画面を下にスクロールすると自動的に画面外へ隠れ、最上部に戻るとスッと現れます
+                  AnimatedPositioned(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOutCubic,
+                      top: _isTop ? statusBarHeight + 8 : -100,
+                      right: 16,
+                      child: Container(
+                          decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
+                          child: IconButton(
+                              icon: const Icon(Icons.close, color: Colors.white),
+                              onPressed: () {
+                                Navigator.pop(context); // 一発でアプリの元の画面に戻る
+                              }
+                          )
+                      )
                   )
                 ]
             )
@@ -117,6 +137,7 @@ class PdfViewerScreen extends StatefulWidget {
 
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _isTop = true;
+  bool _isSharing = false; // ★ 追加：ダウンロード＆共有処理中の連打ガード
 
   @override
   Widget build(BuildContext context) {
@@ -125,6 +146,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         backgroundColor: AppTheme.bg(context),
         body: Stack(
             children: [
+              // --- PDF ビューア本体 ---
               AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
@@ -154,6 +176,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                       )
                   )
               ),
+
+              // ★ 修正：右上の黒い円形ボタン（高セキュリティ共有型） ---
               AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
@@ -161,14 +185,57 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   right: 16,
                   child: Container(
                       decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
-                      child: IconButton(
-                          icon: const Icon(Icons.download, color: Colors.white),
-                          onPressed: () async {
-                            try {
-                              final uri = Uri.tryParse(widget.url);
-                              if (uri != null && await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            } catch (e) {}
+                      // 通信・書き出し処理中はインジケータを回して連打を完全に防ぐ
+                      child: _isSharing
+                          ? const Padding(
+                        padding: EdgeInsets.all(12.0),
+                        child: SizedBox(
+                          width: 24, height: 24,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        ),
+                      )
+                          : IconButton(
+                        icon: const Icon(Icons.share, color: Colors.white), // ★三角の共有マーク
+                        onPressed: () async {
+                          if (_isSharing) return;
+                          setState(() => _isSharing = true);
+
+                          try {
+                            // 1. クッキーを乗せて認証を突破し、PDFのバイナリを直接叩く
+                            final response = await http.get(
+                              Uri.parse(widget.url),
+                              headers: {'Cookie': widget.cookie},
+                            ).timeout(const Duration(seconds: 15));
+
+                            if (response.statusCode == 200) {
+                              // 2. アプリ専用の一時領域に安全に書き出し
+                              final tempDir = await getTemporaryDirectory();
+                              final filePath = '${tempDir.path}/shared_doc_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                              final file = File(filePath);
+                              await file.writeAsBytes(response.bodyBytes);
+
+                              // 3. 【最重要】iPadOSでポップオーバーがどこから生えるかを計算（これをしないとiPadで100%クラッシュします）
+                              final box = context.findRenderObject() as RenderBox?;
+                              final rect = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
+
+                              // 4. ネイティブの共有シートを起動
+                              await Share.shareXFiles(
+                                [XFile(filePath)],
+                                sharePositionOrigin: rect,
+                              );
+                            } else {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("ファイルの取得に失敗しました。")),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            debugPrint("PDF Share Error: $e");
+                          } finally {
+                            if (mounted) setState(() => _isSharing = false);
                           }
+                        },
                       )
                   )
               )

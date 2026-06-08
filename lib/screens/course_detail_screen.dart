@@ -51,6 +51,8 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
   // 👇 追加：各授業の学期属性（Q1〜Q4）のカスタム上書き情報を保持するマップ
   Map<String, String> _courseTermOverrides = {};
 
+
+
   // initState の中に `_loadTermOverrides();` を追記してください
 
   Future<void> _loadTermOverrides() async {
@@ -86,6 +88,8 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
     _loadOverrides();
     _loadTermOverrides(); // 👈 ここを追加！
   }
+
+
 
 
 
