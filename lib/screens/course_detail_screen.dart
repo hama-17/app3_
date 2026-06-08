@@ -76,14 +76,15 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
     super.initState();
     _currentIndex = widget.initialIndex >= 0 && widget.initialIndex < widget.courses.length ? widget.initialIndex : 0;
 
-
     // ★ 修正：未ログイン時は下部カードの初期インデックスを強制的に「0 (MEMO)」にする
     _currentBottomIndex = widget.isAuthenticated ? widget.initialBottomIndex : 0;
 
-
     _topPageController = PageController(initialPage: _currentIndex);
     _bottomPageController = PageController(initialPage: _currentBottomIndex);
+
+    // ★ 修正：既存の上書き情報と、学期属性（Q1~Q4）の上書き情報を両方とも初期化時にロードする
     _loadOverrides();
+    _loadTermOverrides(); // 👈 ここを追加！
   }
 
 

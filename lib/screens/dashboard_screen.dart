@@ -10,7 +10,7 @@ import '../services/calendar_sync_service.dart';
 import '../utils/lms_adapter.dart';
 import '../utils/course_parser.dart';
 
-import 'login_screen.dart';
+import 'login_screen.dart' hide AuthService;
 import 'settings_screen.dart';
 import 'course_detail_screen.dart'; // 先ほど作った詳細画面
 import 'media_viewers.dart';
