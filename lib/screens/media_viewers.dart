@@ -170,6 +170,8 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   }
 }
 
+// 🟢 修正版 PdfViewerScreen クラス（media_viewers.dart の中身と差し替えてください）
+
 class PdfViewerScreen extends StatefulWidget {
   final String url;
   final String cookie;
@@ -181,6 +183,54 @@ class PdfViewerScreen extends StatefulWidget {
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _isTop = true;
   bool _isSharing = false;
+
+  // 🟢 追加：リダイレクト解析用の状態変数
+  String? _resolvedUrl;
+  Map<String, String>? _resolvedHeaders;
+  bool _isResolving = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolvePdfUrl(); // 👈 起動時にURLの転送先を安全に解析する
+  }
+
+  // 🟢 追加：AWS S3へのCookie流出を徹底的にブロックするプリフライト処理
+  Future<void> _resolvePdfUrl() async {
+    String currentUrl = widget.url;
+    Map<String, String>? currentHeaders = {'Cookie': widget.cookie};
+
+    final lowerUrl = currentUrl.toLowerCase();
+    if (lowerUrl.contains('amazonaws.com') || lowerUrl.contains('sign=')) {
+      currentHeaders = null;
+    } else {
+      try {
+        final client = http.Client();
+        final request = http.Request('GET', Uri.parse(currentUrl))
+          ..headers['Cookie'] = widget.cookie
+          ..followRedirects = false;
+
+        // 🟢 修正：send() の引数にリクエストオブジェクト（request）を渡します
+        final response = await client.send(request).timeout(const Duration(seconds: 5));
+
+        if ((response.statusCode == 301 || response.statusCode == 302) && response.headers['location'] != null) {
+          currentUrl = response.headers['location']!;
+          currentHeaders = null;
+        }
+        client.close();
+      } catch (e) {
+        debugPrint("PDF Pre-flight Redirect Resolve Error: $e");
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _resolvedUrl = currentUrl;
+        _resolvedHeaders = currentHeaders;
+        _isResolving = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -202,7 +252,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                         if (e.delta.dy < -5 && _isTop) setState(() => _isTop = false);
                         else if (e.delta.dy > 5 && !_isTop) setState(() => _isTop = true);
                       },
-                      child: PDF(
+                      // 🟢 修正：URLの解析が終わるまではインジケータを回す
+                      child: _isResolving
+                          ? Center(child: CircularProgressIndicator(color: AppTheme.textMain(context)))
+                          : PDF(
                           swipeHorizontal: false,
                           autoSpacing: false,
                           pageFling: false,
@@ -212,8 +265,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             if (p == 0 && !_isTop) setState(() => _isTop = true);
                           }
                       ).cachedFromUrl(
-                          widget.url,
-                          headers: {'Cookie': widget.cookie},
+                          _resolvedUrl!, // 👈 解析済みの安全なURL
+                          headers: _resolvedHeaders, // 👈 S3の時はキレイにNullになったヘッダー
                           placeholder: (p) => Center(child: CircularProgressIndicator(color: AppTheme.textMain(context))),
                           errorWidget: (e) => Center(child: Icon(Icons.error_outline, color: AppTheme.textMain(context)))
                       )
@@ -243,9 +296,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                           setState(() => _isSharing = true);
 
                           try {
+                            // 🟢 修正：共有のダウンロードロジックも解析済みURLとヘッダーに同期させる
                             final response = await http.get(
-                              Uri.parse(widget.url),
-                              headers: {'Cookie': widget.cookie},
+                              Uri.parse(_resolvedUrl ?? widget.url),
+                              headers: _resolvedHeaders ?? {},
                             ).timeout(const Duration(seconds: 15));
 
                             if (response.statusCode == 200) {
