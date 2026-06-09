@@ -133,56 +133,123 @@ class DummyDataHelper {
   }
 
   // 4. 各授業をタップした時の詳細画面用データ（MODULES / ASSIGNMENTS / GRADES / ANNOUNCE）
-  static List<dynamic> getDetails(String type) {
+  // lib/utils/dummy_data_helper.dart 内の getDetails メソッドを完全に置き換え
+  static List<dynamic> getDetails(String type, int courseId) {
+    // ----------------------------------------------------
+    // ① MODULES タブ（PDF / Fileビューアが開くものを完全に排除）
+    // ----------------------------------------------------
     if (type == 'MODULES') {
+      String courseName = "講義";
+      if (courseId == 991) courseName = "材料力学";
+      if (courseId == 992) courseName = "制御工学";
+      if (courseId == 993) courseName = "熱力学";
+      if (courseId == 994) courseName = "電磁気学";
+      if (courseId == 995) courseName = "流体力学";
+      if (courseId == 996) courseName = "解析力学";
+      if (courseId == 997) courseName = "数理統計学";
+      if (courseId == 998) courseName = "システムデザイン論";
+
       return [
         {
-          'id': 'dm1',
-          'name': '第1回：イントロダクションとシラバス解説',
+          'id': 'dm_${courseId}_1',
+          'name': '第1回：ガイダンスと$courseNameの概要',
           'items': [
-            {'title': '講義ガイドライン配布資料', 'type': 'File', 'url': 'https://example.com/guide.pdf'},
-            {'title': '教科書の紹介と講義スケジュールについて', 'type': 'Page', 'url': 'https://example.com/page1'}
+            // ★ 修正：File型や.pdfを排除し、すべてWebViewで安全に開くPage型やExternalUrl型へ変更
+            {'title': '講義概要・進め方の確認ページ', 'type': 'Page', 'url': 'https://example.com/intro_$courseId'},
+            {'title': '公式ポータル参考オンラインリンク', 'type': 'ExternalUrl', 'url': 'https://keio.jp'}
           ]
         },
         {
-          'id': 'dm2',
-          'name': '第2回：基礎方程式とマトリクス表現',
+          'id': 'dm_${courseId}_2',
+          'name': '第2回：基礎方程式と数式モデルの構築',
           'items': [
-            {'title': '第2回 講義レジュメノート（PDF）', 'type': 'File', 'url': 'https://example.com/resume2.pdf'},
-            {'title': '演習問題：基本プログラミングと数式検証', 'type': 'Assignment', 'url': 'https://example.com/assign2'}
+            {'title': 'オンライン学習項目セルフチェック', 'type': 'Page', 'url': 'https://example.com/check_$courseId'},
+            {'title': '第2回 復習用確認オンラインクイズ', 'type': 'Quiz', 'url': 'https://example.com/quiz_$courseId'}
           ]
-        }
-      ];
-    } else if (type == 'ASSIGNMENTS' || type == 'GRADES') {
-      return [
-        {
-          'id': 'da1',
-          'name': '第1回演習課題の提出（講義内容のまとめ）',
-          'due_at': DateTime.now().add(const Duration(days: 3)).toIso8601String(),
-          'points_possible': 10,
-          'submission_types': ['file_upload'],
-          'allowed_extensions': ['pdf'],
-          'submission': {'score': 8.5, 'workflow_state': 'graded'}
-        },
-        {
-          'id': 'da2',
-          'name': '中間課題：テーマに基づく考察論文',
-          'due_at': DateTime.now().add(const Duration(days: 10)).toIso8601String(),
-          'points_possible': 50,
-          'submission_types': ['file_upload'],
-          'allowed_extensions': ['pdf', 'docx'],
-          'submission': {'score': null, 'workflow_state': 'submitted'}
-        }
-      ];
-    } else {
-      return [
-        {
-          'id': 'dn1',
-          'title': '講義に関する補足説明と質問への回答',
-          'posted_at': DateTime.now().toIso8601String(),
-          'message': '前回の講義後のアンケートで要望の多かった、数式展開の補足ドキュメントを作成しました。詳細なステップを記載していますので各自復習に用いてください。'
         }
       ];
     }
+
+    // ----------------------------------------------------
+    // ② ASSIGNMENTS / GRADES タブ（ホームのTASKSデータとIDを完全一致化）
+    // ----------------------------------------------------
+    if (type == 'ASSIGNMENTS' || type == 'GRADES') {
+      // 各授業IDに紐づく、ホームの getDummyAssignments と完全に一致する課題データを返却
+      if (courseId == 991) {
+        return [
+          {
+            'id': '881', // ホームのタスクID「881」と連携
+            'name': '第3章：不静定応力に関する演習問題レポート',
+            'due_at': DateTime.now().add(const Duration(days: 1)).toIso8601String(),
+            'points_possible': 10,
+            'submission_types': ['online_upload'],
+            'allowed_extensions': ['pdf'],
+            'submission': {'score': 9.0, 'workflow_state': 'graded'}
+          }
+        ];
+      } else if (courseId == 994) {
+        return [
+          {
+            'id': '882', // ホームのタスクID「882」と連携
+            'name': 'マクスウェル方程式の導出と境界条件の考察',
+            'due_at': DateTime.now().add(const Duration(days: 3)).toIso8601String(),
+            'points_possible': 20,
+            'submission_types': ['online_upload'],
+            'allowed_extensions': ['pdf'],
+            'submission': {'score': null, 'workflow_state': 'submitted'}
+          }
+        ];
+      } else if (courseId == 996) {
+        return [
+          {
+            'id': '883', // ホームのタスクID「883」と連携
+            'name': '前半部分の中間振り返りレポート（全2枚）',
+            'due_at': DateTime.now().add(const Duration(days: 6)).toIso8601String(),
+            'points_possible': 100,
+            'submission_types': ['online_upload'],
+            'allowed_extensions': ['pdf', 'docx'],
+            'submission': {'score': null, 'workflow_state': 'unsubmitted'}
+          }
+        ];
+      }
+      return []; // 課題が元々定義されていない授業は、リアルに空のリストを返す
+    }
+
+    // ----------------------------------------------------
+    // ③ ANNOUNCE タブ（ホームのMESSAGESデータとIDを完全一致化）
+    // ----------------------------------------------------
+    if (type == 'ANNOUNCE') {
+      // 各授業IDに紐づく、ホームの getDummyMessages と完全に一致するお知らせデータを返却
+      if (courseId == 991) {
+        return [
+          {
+            'id': '771', // ホームのメッセージID「771」と連携
+            'title': '【重要】来週の講義について（対面からオンデマンドへの一時変更）',
+            'posted_at': DateTime.now().subtract(const Duration(hours: 2)).toIso8601String(),
+            'message': '出張に伴い、来週月曜日の講義はオンデマンド形式（動画視聴と確認クイズ）に変更します。資料はモジュールを確認してください。'
+          }
+        ];
+      } else if (courseId == 994) {
+        return [
+          {
+            'id': '772', // ホームのメッセージID「772」と連携
+            'title': 'レポート課題の評価基準（ルーブリック）の公開について',
+            'posted_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+            'message': '現在公開中の課題について、評価基準をPDFで添付しました。採点時の参考にしてください。'
+          }
+        ];
+      } else if (courseId == 998) {
+        return [
+          {
+            'id': '773', // ホームのメッセージID「773」と連携
+            'title': '【お知らせ】参考図書の紹介と図書室での貸出について',
+            'posted_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+            'message': '講義内で触れた「近代システム工学」の解説書が、理工学図書室の指定図書コーナーに配架されました。自由に活用してください。'
+          }
+        ];
+      }
+      return []; // お知らせが元々定義されていない授業は空リストを返す
+    }
+    return [];
   }
 }

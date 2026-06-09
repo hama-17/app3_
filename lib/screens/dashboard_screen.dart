@@ -135,9 +135,74 @@ class _MainSkeletonState extends State<MainSkeleton> {
 
   void _handleLogin() => Navigator.push(context, MaterialPageRoute(builder: (_) => OktaLoginScreen(onLoginSuccess: _loadData)));
 
+  // lib/screens/dashboard_screen.dart 内の _handleLogout メソッドを上書き
   void _handleLogout() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // 🛡️ 判定：もし現在のセッションがテスト用のダミーデータ環境だった場合
+    if (_cookie == "dummy_test_session") {
+      // 1. セッションの破棄
+      await AuthService.clearSession();
+
+      // 2. 設定やキャッシュキーの全消去
+      await prefs.clear();
+
+      // 3. ダミーの物理キャッシュファイルをすべて空の配列で上書き消滅させる
+      await CacheManager.save('my_course_cache_v10', <dynamic>[]);
+      await CacheManager.save('cached_assignments_v14_all_year', <dynamic>[]);
+      await CacheManager.save('cached_messages_v14_all_year', <dynamic>[]);
+
+      // 4. テスト中に作成されたメモの添付画像や一時ファイルをストレージから一括抹消
+      try {
+        final docDir = await getApplicationDocumentsDirectory();
+        final memoImgDir = Directory('${docDir.path}/memo_images');
+        if (await memoImgDir.exists()) {
+          await memoImgDir.delete(recursive: true);
+        }
+        final tempDir = await getTemporaryDirectory();
+        if (tempDir.existsSync()) {
+          tempDir.listSync().forEach((file) {
+            try { if (file is File) file.deleteSync(); } catch (_) {}
+          });
+        }
+      } catch (e) {
+        debugPrint("Test environment sandbox clear error: $e");
+      }
+
+      if (mounted) {
+        // 5. 設定画面が開いていた場合は、安全に閉じて最前面のホーム（Skeleton）に視点を戻す
+        Navigator.of(context).popUntil((route) => route.isFirst);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('試運転環境を終了し、すべてのテストデータを完全消去しました。')),
+        );
+
+        // 6. メモリ上の State を完全にリセットしてローディングを挟む
+        setState(() {
+          _allCourses = [];
+          _filteredCourses = [];
+          _uniqueSortedCourses = [];
+          _isAuthenticated = false;
+          _cookie = "";
+          _isLoading = true;
+        });
+
+        // 7. 出荷状態のクリーンな状態で年度・学期の再算出へ
+        _initTermAndData();
+      }
+      return;
+    }
+
+    // 🔒 通常のログインアカウントだった場合のログアウト処理（既存の挙動を維持）
     await AuthService.clearSession();
-    if (mounted) setState(() { _isAuthenticated = false; _cookie = ""; });
+    if (mounted) {
+      setState(() {
+        _isAuthenticated = false;
+        _cookie = "";
+      });
+      // ログアウト後の未認証データを安全にリロード
+      _loadData();
+    }
   }
 
   // lib/screens/dashboard_screen.dart 内の _openSettings メソッド

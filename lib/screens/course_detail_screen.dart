@@ -943,15 +943,17 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
     }
   }
 
+  // lib/screens/course_detail_screen.dart 内の _CourseDataListState._fetch() メソッド
   Future<void> _fetch() async {
     setState(() => _isLoading = true);
 
-    // ★ 追加：テストログイン中の場合はオンラインへのHTTP通信を遮断し、ダミーを流し込む
+    // ★ 修正：テストログイン中の場合はオンラインへのHTTP通信を遮断し、ダミーを流し込む
     if (widget.cookie == "dummy_test_session") {
-      await Future.delayed(const Duration(milliseconds: 300)); // リアルなロード感を演出
+      await Future.delayed(const Duration(milliseconds: 300)); // リアルなロード感
       if (mounted) {
         setState(() {
-          _data = DummyDataHelper.getDetails(widget.endpointType);
+          // 👇 ★ 変更：第二引数として「widget.courseId」を確実に流し込む！
+          _data = DummyDataHelper.getDetails(widget.endpointType, widget.courseId);
           _isLoading = false;
         });
       }
@@ -959,6 +961,7 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
     }
 
     String url = "";
+    // ...（以降の既存の本番用通信コードは一切変更なしでOKです）...
     if (widget.endpointType == 'MODULES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/modules?per_page=50&include[]=items';
     // ... 以降、元の既存通信コードが続く
     else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/assignments?per_page=50&order_by=due_at&include[]=submission';

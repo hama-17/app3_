@@ -570,7 +570,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('テスト用ダミーデータをロードしました。')),
+                                  const SnackBar(content: Text('テスト用ダミーデータをロードしました。アプリを再起動してくさだい。')),
                                 );
                                 Navigator.pop(context);
                                 // メイン画面側に更新通知をトス（これでホームが自動でリロードされます）
@@ -654,7 +654,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                       // 5. 完了通知を出し、上位のSkeletonへ「initialized」の合図を投げて画面を閉じる
                                       if (mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('すべてのデータを削除し、初期状態にリセットしました。')),
+                                          const SnackBar(content: Text('すべてのデータを削除し、初期状態にリセットしました。アプリを再起動してください。')),
                                         );
                                         // ★ 変更：合図（result）を渡して設定画面を閉じる
                                         Navigator.pop(context, 'initialized');
