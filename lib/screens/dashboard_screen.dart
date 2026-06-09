@@ -50,20 +50,32 @@ class _MainSkeletonState extends State<MainSkeleton> {
   }
 
   // ★ 修正：起動時の初期化ロジック。手動保存を優先し、なければ自動判定。
+  // lib/screens/dashboard_screen.dart 内の _initTermAndData メジットを上書き
   Future<void> _initTermAndData() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. 手動で保存された設定を読み込む（アプリ再起動後も維持）
+    // 💡 初回起動時に「アプリにカレンダーの予定を表示」のみを自動でONにする
+    if (!prefs.containsKey('calendar_sync_initialized_v10')) {
+      await prefs.setBool('calendar_sync_enabled', true);         // 同期親トグルをON
+      await prefs.setBool('sync_import_enabled', true);          // 「アプリに予定を表示」をON
+      await prefs.setBool('sync_tasks_enabled', false);          // タスク書き出しはOFF
+      await prefs.setBool('sync_schedules_enabled', false);      // 授業書き出しはOFF
+      await prefs.setBool('calendar_sync_initialized_v10', true); // 初期化完了フラグ
+
+      // 初回起動のこのタイミングで即座にOSのカレンダー権限ポップアップを自動起動
+      try {
+        await CalendarSyncService.requestPermissions();
+      } catch (_) {}
+    }
+
     int? savedYear = prefs.getInt('manual_year_v10');
     String? savedTerm = prefs.getString('manual_term_v10');
 
-    // 2. 現在の日付から自動で年度と学期（Q）を算出する
     final now = DateTime.now();
     int defaultYear = now.year;
     if (now.month < 4) defaultYear -= 1; // 1〜3月は前年度扱い
-    String defaultTerm = TermHelper.getTermForDate(now); // 例: "Q1" や "Q2"
+    String defaultTerm = TermHelper.getTermForDate(now);
 
-    // 3. 手動保存があれば優先、なければ自動設定を適用
     _selectedYear = savedYear ?? defaultYear;
     _selectedTerm = savedTerm ?? defaultTerm;
 
@@ -635,8 +647,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       final file = await File('${tempDir.path}/calendar_export.png').create();
       await file.writeAsBytes(pngBytes);
 
-      await Share.shareXFiles([XFile(file.path)], text: "${widget.currentYear} $termLine1 Schedule");
+      final box = context.findRenderObject() as RenderBox?;
+      final rect = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
 
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: "${widget.currentYear} $termLine1 Schedule",
+        sharePositionOrigin: rect, // 👈 これでiPadでも絶対に落ちなくなります
+      );
       // ★ 追加：共有ダイアログが閉じた後、一時ファイルを削除してストレージを解放
       try {
         if (file.existsSync()) file.deleteSync();
@@ -2006,9 +2024,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     // ★ 既定の3色グラデーション定義
-    const Color defaultTopGradient = Color(0xFF0b0c11);
-    const Color defaultMiddleGradient = Color(0xff3e5364);
-    const Color defaultBottomGradient = Color(0xffcdc7c3);
+    const Color defaultTopGradient = Color(0xFF020403);
+    const Color defaultMiddleGradient = Color(0xff2c4f5f);
+    const Color defaultBottomGradient = Color(0xffa8ccdc);
 
     // --- 左側 (D/W/M) の高さと背景色 ---
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
@@ -2148,16 +2166,29 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT),
                 ),
               ),
+
               IgnorePointer(
                 ignoring: _dragPosition < 0.5,
-                child: Opacity(
-                  opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
-                  child: RepaintBoundary(
-                    key: _calendarKey,
-                    child: Container(
-                      color: Colors.transparent,
-                      // ★ 修正：displayDaysCount を引数に追加
-                      child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
+                // ★ 修正：RepaintBoundary（_calendarKey）を、OpacityやGestureDetectorの「外側」に引き上げる！
+                // これにより、高速なリビルドやドラッグが起きてもGlobalKeyがツリー内で絶対に迷子にならなくなります。
+                child: RepaintBoundary(
+                  key: _calendarKey,
+                  child: Opacity(
+                    opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragUpdate: (details) {
+                        if (_mainScrollController.hasClients) {
+                          double newOffset = _mainScrollController.offset - details.primaryDelta!;
+                          double maxScroll = _mainScrollController.position.maxScrollExtent;
+                          _mainScrollController.jumpTo(newOffset.clamp(0.0, maxScroll));
+                        }
+                      },
+                      child: Container(
+                        color: Colors.transparent,
+                        // 内側の key: _calendarKey だった記述は削除され、クリーンに描画だけを行います
+                        child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
+                      ),
                     ),
                   ),
                 ),
@@ -2989,18 +3020,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         if (matches.isEmpty) return SizedBox(width: baseItemWidth, height: currentItemHeight);
 
                         // ★ セル描画用ヘルパー関数
+                        // lib/screens/dashboard_screen.dart 内の _buildInnerCalendar メソッド内の buildCell
+
                         Widget buildCell(Map<String, dynamic> match, double height, bool isHalf) {
                           Color color = _getCourseColor(match['course']);
 
-                          // ★ 追加：授業名と教室名を抽出して分ける
+                          // ★ 追加：iPad（タブレット大画面）かどうかの動的判定
+                          bool isPad = MediaQuery.of(context).size.shortestSide >= 600;
+
                           String rawName = match['course']['raw_name'] ?? match['course']['name'] ?? '';
                           String courseName = CourseTitleParser.getCleanTitle(rawName);
-                          String roomName = '';
-                          if (match['course']['is_custom'] == true) {
-                            roomName = match['course']['room'] ?? '';
-                          } else {
-                            roomName = CourseScheduleParser.getRoomNumber(rawName);
-                          }
+                          String roomName = match['course']['is_custom'] == true ? (match['course']['room'] ?? '') : CourseScheduleParser.getRoomNumber(rawName);
 
                           return GestureDetector(
                             behavior: HitTestBehavior.opaque,
@@ -3023,7 +3053,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               child: Opacity(
                                 opacity: textOpacity,
                                 child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween, // 上下端に要素を散らす
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
                                     // 授業名（上詰め）
@@ -3034,7 +3064,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                             courseName,
                                             style: TextStyle(
                                                 color: AppTheme.getTextColorForBackground(color),
-                                                fontSize: isHalf ? 8.5 : 10, // 以前より少し大きめに設定
+                                                // ★ 修正：iPadの時は文字サイズを大きく（10→15 / 8.5→13）
+                                                fontSize: isHalf
+                                                    ? (isPad ? 13.0 : 8.5)
+                                                    : (isPad ? 15.0 : 10.0),
                                                 fontWeight: FontWeight.w400,
                                                 height: 1.1
                                             ),
@@ -3049,8 +3082,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                       Text(
                                           roomName,
                                           style: TextStyle(
-                                              color: AppTheme.getTextColorForBackground(color).withOpacity(0.8), // 少し透過させて控えめに
-                                              fontSize: isHalf ? 6.5 : 8,
+                                              color: AppTheme.getTextColorForBackground(color).withOpacity(0.8),
+                                              // ★ 修正：iPadの時は文字サイズを大きく（8→12 / 6.5→10）
+                                              fontSize: isHalf
+                                                  ? (isPad ? 10.0 : 6.5)
+                                                  : (isPad ? 12.0 : 8.0),
                                               fontWeight: FontWeight.w300,
                                               height: 1.1
                                           ),

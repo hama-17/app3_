@@ -13,6 +13,7 @@ import 'dart:io';
 import '../utils/dummy_data_helper.dart';
 import '../services/cache_manager.dart';
 import '../services/auth_service.dart';
+import 'package:url_launcher/url_launcher.dart'; // 👈 設定画面へジャンプするために追加
 
 class TermCirclePainter extends CustomPainter {
   final bool q1Active;
@@ -248,11 +249,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     await prefs.setBool('sync_import_enabled', value);
   }
 
+  // lib/screens/settings_screen.dart 内の _toggleSync メソッドを上書き
   Future<void> _toggleSync(bool value) async {
     if (value) {
       bool granted = await CalendarSyncService.requestPermissions();
       if (!granted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('カレンダーへのアクセスが許可されていません')));
+        // ★ 修正：一度不許可にされている場合、ユーザーが端末の設定から直接変更できるように誘導ダイアログを起動
+        _showPermissionGuideDialog();
         return;
       }
       await _fetchCalendars();
@@ -278,6 +281,46 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       await CalendarSyncService.disableTaskSync();
       await CalendarSyncService.disableScheduleSync();
     }
+  }
+
+  // ★ 新設：拒否状態のテスターを端末の設定画面へワンタップで飛ばすソリッドな案内ダイアログ
+  void _showPermissionGuideDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text('カレンダー権限が必要です', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        content: const Text(
+          '一度カレンダーへのアクセスが拒否されたため、アプリ内からダイアログを再表示できません。\n\n同期機能を利用するには、下の「設定を開く」から端末の設定アプリへ移動し、アクセス権限を許可に変更してください。',
+          style: TextStyle(color: Colors.black54, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            child: const Text('キャンセル', style: TextStyle(color: Colors.black54)),
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          TextButton(
+            child: const Text('設定を開く', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                // iOS / Androidシステム共通の「このアプリのシステム設定画面」を直接開くディープリンクを発火
+                final Uri settingUri = Uri.parse('app-settings:');
+                if (await canLaunchUrl(settingUri)) {
+                  await launchUrl(settingUri);
+                }
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('端末の設定アプリ > 本アプリ > カレンダー から許可してください。')),
+                  );
+                }
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _selectTargetCalendar(String? calId) async {
@@ -517,7 +560,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     ),
                     const SizedBox(height: 32),
 
-                    // プライバシー / 利用規約 / ライセンス
+                    // ----------------------------------------------------
+                    // ★ 修正：プライバシー / 利用規約 / ライセンス の統合外部化
+                    // ----------------------------------------------------
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8.0),
                       child: Container(
@@ -525,12 +570,19 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           clipBehavior: Clip.antiAlias,
                           child: Column(
                               children: [
+                                // Privacy Policy（プライバシーポリシー）
                                 _buildCustomListItem("Privacy Policy", onTap: () {
                                   Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/en", title: 'Privacy Policy')));
                                 }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
-                                _buildCustomListItem("Terms of Use", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsOfUseScreen()))),
+
+                                // Terms of Use（利用規約：プライバシーポリシーと同じ外部URLへリダイレクト）
+                                _buildCustomListItem("Terms of Use", onTap: () {
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/en", title: 'Terms of Use')));
+                                }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
+
+                                // Open Source Libraries
                                 _buildCustomListItem("Open Source Libraries", onTap: () {
                                   showLicensePage(context: context, applicationVersion: '1.0.2', applicationLegalese: '© 2026 Developer');
                                 }),
@@ -682,9 +734,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                         gradient: LinearGradient(
                           // 👇 ここを3色のグラデーションに変更 👇
                           colors: [
-                            Color(0xFF0b0c11), // トップ
-                            Color(0xFF3e5364), // ミドル
-                            Color(0xFFcdc7c3), // ボトム
+                            Color(0xFF020403), // トップ
+                            Color(0xFF2c4f5f), // ミドル
+                            Color(0xFFa8ccdc), // ボトム
                           ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
@@ -727,6 +779,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                     )
                                 ),
 
+                                // lib/screens/settings_screen.dart 内の build メソッド中盤
                                 // --- 学期・年度の輪っか ＆ テーマ変更ウィジェット ---
                                 if (contentOpacity > 0)
                                   Expanded(
@@ -736,80 +789,93 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                         opacity: contentOpacity,
                                         child: Column(
                                           children: [
+                                            // ★ 修正：iPadの大画面で円が巨大化してはみ出るのを防ぐため、Center と ConstrainedBox で最大横幅を 380px に美しく制限
                                             Padding(
-                                                padding: const EdgeInsets.only(left: 32.0, right: 32.0, bottom: 8.0, top: 8.0),
-                                                child: Row(children: [
-                                                  // 左：年度（Year）
-                                                  Expanded(
-                                                      flex: 1,
-                                                      child: LayoutBuilder(builder: (context, constraints) {
-                                                        return AspectRatio(
-                                                            aspectRatio: 1.0,
-                                                            child: Stack(
-                                                              alignment: Alignment.center,
-                                                              children: [
-                                                                SizedBox(
-                                                                  width: constraints.maxWidth, height: constraints.maxWidth,
-                                                                  child: AnimatedBuilder(
-                                                                    animation: _pulseController,
-                                                                    builder: (context, child) => CustomPaint(painter: YearCirclePainter(_pulseController.value, _isClockwise, Colors.white, Colors.white.withOpacity(0.2))),
-                                                                  ),
-                                                                ),
-                                                                Column(
-                                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                                  children: [
-                                                                    _buildArrowBtn(Icons.keyboard_arrow_up, () => _animateYear(true), Colors.white),
-                                                                    Text(tempYear.toString(), style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w200, letterSpacing: 2.0, height: 1.0)),
-                                                                    _buildArrowBtn(Icons.keyboard_arrow_down, () => _animateYear(false), Colors.white),
-                                                                  ],
-                                                                )
-                                                              ],
-                                                            ));
-                                                      })
-                                                  ),
-                                                  const SizedBox(width: 32),
-                                                  // 右：学期（Term）
-                                                  Expanded(
-                                                      flex: 1,
-                                                      child: LayoutBuilder(builder: (context, constraints) {
-                                                        return GestureDetector(
-                                                            onTapDown: (details) => _handleCircleTap(details.localPosition, Size(constraints.maxWidth, constraints.maxWidth)),
-                                                            child: AspectRatio(
+                                                padding: const EdgeInsets.only(left: 32.0, right: 32.0, bottom: 8.0, top: 4.0),
+                                                child: Center(
+                                                  child: ConstrainedBox(
+                                                    constraints: const BoxConstraints(maxWidth: 380),
+                                                    child: Row(children: [
+                                                      // 左：年度（Year）
+                                                      Expanded(
+                                                          flex: 1,
+                                                          child: LayoutBuilder(builder: (context, constraints) {
+                                                            return AspectRatio(
                                                                 aspectRatio: 1.0,
                                                                 child: Stack(
                                                                   alignment: Alignment.center,
                                                                   children: [
                                                                     SizedBox(
                                                                       width: constraints.maxWidth, height: constraints.maxWidth,
-                                                                      child: CustomPaint(painter: TermCirclePainter(q1, q2, q3, q4, Colors.white, Colors.white.withOpacity(0.2))),
+                                                                      child: AnimatedBuilder(
+                                                                        animation: _pulseController,
+                                                                        builder: (context, child) => CustomPaint(painter: YearCirclePainter(_pulseController.value, _isClockwise, Colors.white, Colors.white.withOpacity(0.2))),
+                                                                      ),
                                                                     ),
-                                                                    Padding(
-                                                                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                                                                      child: Text(tempTerm, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w300), maxLines: 2, overflow: TextOverflow.ellipsis),
-                                                                    ),
+                                                                    Column(
+                                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                                      children: [
+                                                                        _buildArrowBtn(Icons.keyboard_arrow_up, () => _animateYear(true), Colors.white),
+                                                                        Text(tempYear.toString(), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w200, letterSpacing: 2.0, height: 1.0)),
+                                                                        _buildArrowBtn(Icons.keyboard_arrow_down, () => _animateYear(false), Colors.white),
+                                                                      ],
+                                                                    )
                                                                   ],
-                                                                )));
-                                                      })
+                                                                ));
+                                                          })
+                                                      ),
+                                                      const SizedBox(width: 32),
+                                                      // 右：学期（Term）
+                                                      Expanded(
+                                                          flex: 1,
+                                                          child: LayoutBuilder(builder: (context, constraints) {
+                                                            return GestureDetector(
+                                                                onTapDown: (details) => _handleCircleTap(details.localPosition, Size(constraints.maxWidth, constraints.maxWidth)),
+                                                                child: AspectRatio(
+                                                                    aspectRatio: 1.0,
+                                                                    child: Stack(
+                                                                      alignment: Alignment.center,
+                                                                      children: [
+                                                                        SizedBox(
+                                                                          width: constraints.maxWidth, height: constraints.maxWidth,
+                                                                          child: CustomPaint(painter: TermCirclePainter(q1, q2, q3, q4, Colors.white, Colors.white.withOpacity(0.2))),
+                                                                        ),
+                                                                        Padding(
+                                                                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                                                          child: Text(tempTerm, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w300), maxLines: 2, overflow: TextOverflow.ellipsis),
+                                                                        ),
+                                                                      ],
+                                                                    )));
+                                                          })
+                                                      ),
+                                                    ]),
                                                   ),
-                                                ])
+                                                )
                                             ),
 
-                                            // テーマ変更カプセル
+                                            const SizedBox(height: 8),
+
+                                            // ★ 修正：テーマ変更カプセルも、iPadで横に間伸びしないように最大横幅を円と同期（380px）させて美しく中央配置
                                             Padding(
                                               padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 16.0),
-                                              child: Container(
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white.withOpacity(0.15),
-                                                    borderRadius: BorderRadius.circular(30),
+                                              child: Center(
+                                                child: ConstrainedBox(
+                                                  constraints: const BoxConstraints(maxWidth: 380),
+                                                  child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white.withOpacity(0.15),
+                                                        borderRadius: BorderRadius.circular(30),
+                                                      ),
+                                                      padding: const EdgeInsets.all(4.0),
+                                                      child: Row(
+                                                          children: [
+                                                            _buildThemeSegment("System", ThemeMode.system),
+                                                            _buildThemeSegment("Light", ThemeMode.light),
+                                                            _buildThemeSegment("Dark", ThemeMode.dark),
+                                                          ]
+                                                      )
                                                   ),
-                                                  padding: const EdgeInsets.all(4.0),
-                                                  child: Row(
-                                                      children: [
-                                                        _buildThemeSegment("System", ThemeMode.system),
-                                                        _buildThemeSegment("Light", ThemeMode.light),
-                                                        _buildThemeSegment("Dark", ThemeMode.dark),
-                                                      ]
-                                                  )
+                                                ),
                                               ),
                                             )
                                           ],

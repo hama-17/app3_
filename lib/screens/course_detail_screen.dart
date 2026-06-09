@@ -228,7 +228,7 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                   _buildColorSwatch(const Color(0xFF671b24), textCol, cur), // ネオンマゼンタ
                   _buildColorSwatch(const Color(0xFF055646), textCol, cur), // ネオンライム
                   _buildColorSwatch(const Color(0xFF034376), textCol, cur), // エレクトリックブルー
-                  _buildColorSwatch(const Color(0xFFfd4603), textCol, cur), // ブライトアンバー
+                  _buildColorSwatch(const Color(0xFFd8370b), textCol, cur), // ブライトアンバー
                   _buildColorSwatch(const Color(0xFFf5bc64), textCol, cur), // インオーガニックグレー
                   GestureDetector(
                     onTap: () {
@@ -1574,6 +1574,8 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
   }
 
 
+  // lib/screens/course_detail_screen.dart 内の _CourseMemoWidgetState クラスにある _shareMemo メソッド
+
   Future<void> _shareMemo(int memoIndex) async {
     BuildContext? sheetContext;
 
@@ -1605,12 +1607,18 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
 
     if (pdfResult != null && !pdfResult.startsWith("ERROR:")) {
-      // 共有ダイアログを呼び出す
-      await Share.shareXFiles([XFile(pdfResult)], text: _memos[memoIndex]['title']);
 
-      // ★ 削除：ここにあった `try { File(pdfResult).deleteSync(); } catch (_) {}` を完全に消去。
-      // これにより、ユーザーが共有先を選ぶ前にファイルが消滅するエラーを防止。
-      // 一時ファイル（Temp）に残ったPDFは、アプリが裏に回った際に自動お掃除機能が処理します。
+      // 🛡️ ★ 修正：iPadOS（iPad）でのポップオーバー表示時に発生するクラッシュを完全ガード
+      final box = context.findRenderObject() as RenderBox?;
+      final rect = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
+
+      // 共有ダイアログを呼び出す
+      await Share.shareXFiles(
+        [XFile(pdfResult)],
+        text: _memos[memoIndex]['title'],
+        sharePositionOrigin: rect, // 👈 ★ 追加：これでiPad環境でも安全にシートが開きます
+      );
+
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('PDFエラー: ${pdfResult?.replaceFirst("ERROR:", "") ?? "不明なエラー"}'))
