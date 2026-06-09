@@ -537,7 +537,7 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                     AnimatedPositioned(
                                         duration: const Duration(milliseconds: 300),
                                         curve: Curves.easeOutCubic,
-                                        top: _isCollapsed ? -9 : 18,  // 👈 縮小時にテキストの目線に合わせて少し下に（SafeAreaから46pxの位置へ）下げる
+                                        top: _isCollapsed ? 10 : 18,  // 👈 縮小時にテキストの目線に合わせて少し下に（SafeAreaから46pxの位置へ）下げる
                                         left: _isCollapsed ? 16 : 16,
                                         child: GestureDetector(
                                           behavior: HitTestBehavior.opaque,
@@ -589,7 +589,7 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                     AnimatedPositioned(
                                         duration: const Duration(milliseconds: 300),
                                         curve: Curves.easeOutCubic,
-                                        bottom: _isCollapsed ? 28 : 24,
+                                        bottom: _isCollapsed ? 8 : 18,
                                         left: _isCollapsed ? 60 : 24, // 👈 縮小時は矢印の右隣（60）から綺麗にテキストを開始させる
                                         right: _isCollapsed ? 24 : 90,
                                         child: Column(
