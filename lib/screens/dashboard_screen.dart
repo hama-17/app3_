@@ -108,6 +108,12 @@ class _MainSkeletonState extends State<MainSkeleton> {
         return;
       }
 
+      // ★ 追加：テストログイン中なら、オンライン通信をスキップして即時ダミー認証化する
+      if (_cookie == "dummy_test_session") {
+        if (mounted) setState(() { _isAuthenticated = true; _isLoading = false; });
+        return;
+      }
+
       final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses?per_page=100&include[]=term&include[]=teachers');
       if (uri == null) return;
 
@@ -134,6 +140,8 @@ class _MainSkeletonState extends State<MainSkeleton> {
     if (mounted) setState(() { _isAuthenticated = false; _cookie = ""; });
   }
 
+  // lib/screens/dashboard_screen.dart 内の _openSettings メソッド
+  // lib/screens/dashboard_screen.dart 内の _openSettings メソッドを修正
   void _openSettings() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(
         currentYear: _selectedYear,
@@ -143,13 +151,26 @@ class _MainSkeletonState extends State<MainSkeleton> {
         onLogout: _handleLogout,
         onApply: (year, term) async {
           setState(() { _selectedYear = year; _selectedTerm = term; });
-          // ★ 修正：設定画面での変更を永続的に保存する
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('manual_year_v10', year);
           await prefs.setString('manual_term_v10', term);
           _applyFilter();
         }
-    )));
+    ))).then((result) {
+      // 初期化の合図を受け取ったら、親クラスが持っている変数だけを綺麗にする
+      if (result == 'initialized') {
+        setState(() {
+          _allCourses = [];
+          _filteredCourses = [];
+          _uniqueSortedCourses = [];
+          _isAuthenticated = false;
+          _cookie = "";
+          _isLoading = true; // ★ これにより下位のDashboardPageが自動で解体・リセットされます！
+        });
+        // まっさらな状態で初期データロードを走らせる
+        _initTermAndData();
+      }
+    });
   }
 
   @override
@@ -844,6 +865,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
       if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
 
+      // ★ 追加：テストログイン中は本番APIの走査をスキップして早期リターン
+      if (widget.cookie == "dummy_test_session") {
+        if (mounted) setState(() { _isLoadingAssignments = false; });
+        return;
+      }
+
       List<dynamic> tasks = [];
 
       // ★ 解決の鍵：Q1/Q2に関係なく、今年度のLMS授業をすべて抽出
@@ -914,6 +941,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       }
 
       if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
+
+      // ★ 追加：テストログイン中は本番APIの走査をスキップして早期リターン
+      if (widget.cookie == "dummy_test_session") {
+        if (mounted) setState(() { _isLoadingMessages = false; });
+        return;
+      }
 
       List<dynamic> msgs = [];
 

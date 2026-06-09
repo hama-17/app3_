@@ -10,6 +10,9 @@ import 'info_screens.dart';  // ガイドや規約画面への遷移で使う
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import '../utils/dummy_data_helper.dart';
+import '../services/cache_manager.dart';
+import '../services/auth_service.dart';
 
 class TermCirclePainter extends CustomPainter {
   final bool q1Active;
@@ -533,6 +536,136 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                 }),
                               ]
                           )
+                      ),
+                    ),
+
+                    // settings_screen.dart 内の ListView の最下部付近
+                    // プライバシーや利用規約のコンテナの下に追記します
+
+                    if (!_isAuthenticated) ...[
+                      const SizedBox(height: 32),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.panel(context),
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: _buildCustomListItem(
+                            "Test login",
+                            hideArrow: false,
+                            onTap: () async {
+                              // 1. ダミーデータを最新の選択年度に合わせてキャッシュに直接注入
+                              final dummyCourses = DummyDataHelper.getCourses(tempYear);
+                              final dummyAssignments = DummyDataHelper.getDummyAssignments(tempYear);
+                              final dummyMessages = DummyDataHelper.getDummyMessages();
+
+                              await CacheManager.save('my_course_cache_v10', dummyCourses);
+                              await CacheManager.save('cached_assignments_v14_all_year', dummyAssignments);
+                              await CacheManager.save('cached_messages_v14_all_year', dummyMessages);
+
+                              // 2. セッション情報を特別な文字列でダミー偽装保存
+                              await AuthService.saveSession("dummy_test_session");
+
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('テスト用ダミーデータをロードしました。')),
+                                );
+                                Navigator.pop(context);
+                                // メイン画面側に更新通知をトス（これでホームが自動でリロードされます）
+                                widget.onApply(tempYear, tempTerm);
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                    // 🛠️ 先ほど追加したテストログインのブロックの「すぐ下」に追記します
+                    const SizedBox(height: 32),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppTheme.panel(context),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: _buildCustomListItem(
+                          "アプリを完全に初期状態に戻す",
+                          hideArrow: true,
+                          onTap: () {
+                            // 安全のため、全消去の前に確認ダイアログを挟む
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                backgroundColor: Colors.white,
+                                title: const Text('データの完全初期化', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                                content: const Text(
+                                  '保存されているすべての授業データ、時間割、課題、お知らせ、ローカルのメモ、および写真ファイルが完全に削除されます。\n\nこの操作は取り消せません。よろしいですか？',
+                                  style: TextStyle(color: Colors.black54, fontSize: 13, height: 1.4),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    child: const Text('キャンセル', style: TextStyle(color: Colors.black54)),
+                                    onPressed: () => Navigator.pop(ctx),
+                                  ),
+                                  TextButton(
+                                    child: const Text('すべて削除する', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold)),
+                                    // settings_screen.dart 内の「すべて削除する」ボタンの onPressed 内部
+                                    onPressed: () async {
+                                      Navigator.pop(ctx); // ダイアログを閉じる
+
+                                      // 1. セッション（SecureStorage等）の完全破棄
+                                      await AuthService.clearSession();
+
+                                      // 2. SharedPreferencesの完全消去
+                                      final prefs = await SharedPreferences.getInstance();
+                                      await prefs.clear();
+
+                                      try {
+                                        await CookieManager.instance().deleteAllCookies();
+                                      } catch (e) {
+                                        debugPrint("Settings clear cookies error: $e");
+                                      }
+
+                                      // 3. 【最重要】CacheManagerの物理ファイルを空の配列で上書きして消滅させる
+                                      await CacheManager.save('my_course_cache_v10', <dynamic>[]);
+                                      await CacheManager.save('cached_assignments_v14_all_year', <dynamic>[]);
+                                      await CacheManager.save('cached_messages_v14_all_year', <dynamic>[]);
+
+                                      // 4. ローカルの添付画像やTemp内ファイルの一括削除
+                                      try {
+                                        final docDir = await getApplicationDocumentsDirectory();
+                                        final memoImgDir = Directory('${docDir.path}/memo_images');
+                                        if (await memoImgDir.exists()) {
+                                          await memoImgDir.delete(recursive: true);
+                                        }
+                                        final tempDir = await getTemporaryDirectory();
+                                        if (tempDir.existsSync()) {
+                                          tempDir.listSync().forEach((file) {
+                                            try { if (file is File) file.deleteSync(); } catch (_) {}
+                                          });
+                                        }
+                                      } catch (e) {
+                                        debugPrint("File systems clear error: $e");
+                                      }
+
+                                      // 5. 完了通知を出し、上位のSkeletonへ「initialized」の合図を投げて画面を閉じる
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('すべてのデータを削除し、初期状態にリセットしました。')),
+                                        );
+                                        // ★ 変更：合図（result）を渡して設定画面を閉じる
+                                        Navigator.pop(context, 'initialized');
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ]

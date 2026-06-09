@@ -19,6 +19,7 @@ import '../core/app_snackbar.dart';
 import '../main.dart'; // ★ globalDisableAutoCacheClear を読み込むために必要
 
 import '../utils/term_helper.dart'; // パスは適宜合わせてください
+import '../utils/dummy_data_helper.dart';
 
 //lib/screens/course_detail_screen.dartの中身です。
 
@@ -943,8 +944,23 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
   }
 
   Future<void> _fetch() async {
-    setState(() => _isLoading = true); String url = "";
+    setState(() => _isLoading = true);
+
+    // ★ 追加：テストログイン中の場合はオンラインへのHTTP通信を遮断し、ダミーを流し込む
+    if (widget.cookie == "dummy_test_session") {
+      await Future.delayed(const Duration(milliseconds: 300)); // リアルなロード感を演出
+      if (mounted) {
+        setState(() {
+          _data = DummyDataHelper.getDetails(widget.endpointType);
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
+    String url = "";
     if (widget.endpointType == 'MODULES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/modules?per_page=50&include[]=items';
+    // ... 以降、元の既存通信コードが続く
     else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/assignments?per_page=50&order_by=due_at&include[]=submission';
     else url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/discussion_topics?only_announcements=true&per_page=20';
     try { // 修正前： final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie});
