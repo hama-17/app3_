@@ -572,13 +572,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                               children: [
                                 // Privacy Policy（プライバシーポリシー）
                                 _buildCustomListItem("Privacy Policy", onTap: () {
-                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/en", title: 'Privacy Policy')));
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/english#h.et6qunor9pa4", title: 'Privacy Policy')));
                                 }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
 
                                 // Terms of Use（利用規約：プライバシーポリシーと同じ外部URLへリダイレクト）
                                 _buildCustomListItem("Terms of Use", onTap: () {
-                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/en", title: 'Terms of Use')));
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/english#h.c6csp7my3tz7", title: 'Terms of Use')));
                                 }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
 
