@@ -520,17 +520,45 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                             else activeDot = 2;
                           }
 
+                          // lib/screens/course_detail_screen.dart 内の PageView.builder > itemBuilder 戻り値の Stack内部
+
+                          // lib/screens/course_detail_screen.dart 内の PageView.builder > itemBuilder 内の Stack 直下
+
                           return Container(
                               decoration: BoxDecoration(color: pageColor, borderRadius: BorderRadius.circular(32)),
                               child: SafeArea(
                                   bottom: false,
                                   child: Stack(children: [
-                                    // ★ 修正：縮小した際には3点メニューボタンを完全に非表示(不透明度0 & タップ無効)にする
+
+                                    // 🟢 ① 修正：縮小時に、教科名テキストの左隣に回り込むよう座標（left / top）を動的シフト
+                                    // lib/screens/course_detail_screen.dart 内の 戻る矢印ボタン部分
+
+                                    // 🟢 修正：縮小時、上へ這い上がる教科名（fontSize 16）の高さラインにぴったり揃うよう、topを「16」から「46」へシフト
+                                    AnimatedPositioned(
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutCubic,
+                                        top: _isCollapsed ? -9 : 18,  // 👈 縮小時にテキストの目線に合わせて少し下に（SafeAreaから46pxの位置へ）下げる
+                                        left: _isCollapsed ? 16 : 16,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () => Navigator.pop(context),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(8),
+                                            child: Icon(
+                                              Icons.arrow_back_ios_new,
+                                              color: AppTheme.getTextColorForBackground(pageColor),
+                                              size: _isCollapsed ? 18 : 20,
+                                            ),
+                                          ),
+                                        )
+                                    ),
+
+                                    // 3点メニューボタン（通常時のみアクティブ）
                                     AnimatedPositioned(
                                         duration: const Duration(milliseconds: 300),
                                         curve: Curves.easeOutCubic,
                                         top: _isCollapsed ? 20 : 16,
-                                        left: 16,
+                                        left: 52, // 通常時は戻るボタンのすぐ右隣
                                         child: AnimatedOpacity(
                                           duration: const Duration(milliseconds: 200),
                                           opacity: _isCollapsed ? 0.0 : 1.0,
@@ -557,12 +585,12 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                         )
                                     ),
 
-                                    // ★ 修正：3点ボタンが消えるため、縮小時の left を左端の「24」に寄せて美しく整列
+                                    // 🟢 ② 修正：縮小時に、左に回り込んできた矢印ボタンの幅(56px分)を確保して綺麗に並ぶよう left を調整
                                     AnimatedPositioned(
                                         duration: const Duration(milliseconds: 300),
                                         curve: Curves.easeOutCubic,
                                         bottom: _isCollapsed ? 28 : 24,
-                                        left: 24,
+                                        left: _isCollapsed ? 60 : 24, // 👈 縮小時は矢印の右隣（60）から綺麗にテキストを開始させる
                                         right: _isCollapsed ? 24 : 90,
                                         child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,

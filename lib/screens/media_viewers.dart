@@ -73,6 +73,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                             useShouldOverrideUrlLoading: true,
                             mediaPlaybackRequiresUserGesture: true,
                             allowsInlineMediaPlayback: true,
+                            useOnDownloadStart: true, // 👈 ★追加：iOSでPDFが直接降ってきたイベントを確実に捕まえるために必須
                           ),
                           onScrollChanged: (c, x, y) {
                             if (y <= 0 && !_isTop) setState(() => _isTop = true);
@@ -85,6 +86,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                               final urlLower = urlStr.toLowerCase();
                               bool isVideo = urlLower.contains('isvideo=1') || urlLower.contains('.mp4') || urlLower.contains('.mov') || urlLower.contains('.webm');
 
+                              // 🟢 通常のLMS内のファイルプレビューリンクの横取り
                               if (urlStr.contains('/files/') && !urlStr.contains('download') && !isVideo) {
                                 final downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
                                 Future.microtask(() => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie))));
@@ -93,7 +95,27 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                             }
                             return NavigationActionPolicy.ALLOW;
                           },
+
+                          // 🟢 🔥修正：iOSでリダイレクトの末にPDFバイナリが流れてきた瞬間を100%捕獲して橋渡しする
                           onDownloadStartRequest: (c, req) async {
+                            final urlStr = req.url.toString();
+                            final urlLower = urlStr.toLowerCase();
+
+                            // iOSが勝手にインライン描画しようとしたストリームURLや、.pdfリンクを判定
+                            if (urlLower.contains('.pdf') || urlStr.contains('download_frd=1') || urlLower.contains('response-content-type=application/pdf')) {
+                              String downloadUrl = urlStr;
+                              if (urlStr.contains('/files/') && !urlStr.contains('download')) {
+                                downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
+                              }
+
+                              // 自作のPdfViewerScreenへ引き渡してWebViewをリプレイス（これまでのAndroidと同じ挙動）
+                              if (context.mounted) {
+                                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie)));
+                              }
+                              return;
+                            }
+
+                            // PDF以外の本当の一般ファイル（zip等）は外部アプリケーションへ
                             try {
                               if (await canLaunchUrl(req.url)) await launchUrl(req.url, mode: LaunchMode.externalApplication);
                             } catch (e) {}
