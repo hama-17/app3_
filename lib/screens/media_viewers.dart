@@ -10,7 +10,6 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-//media_viewers.dart
 
 class InAppBrowserScreen extends StatefulWidget {
   final String url;
@@ -20,15 +19,42 @@ class InAppBrowserScreen extends StatefulWidget {
   State<InAppBrowserScreen> createState() => _InAppBrowserScreenState();
 }
 
-
 class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   bool _isTop = true;
   InAppWebViewController? _webViewController;
 
+  // 🟢 Web内で遭遇するあらゆる形式のPDFURL（拡張子、Canvas、リダイレクト等）を判定するロジック
+  bool _checkIsPdf(String urlStr) {
+    final urlLower = urlStr.toLowerCase();
+    if (urlLower.contains('.pdf') || urlStr.contains('download_frd=1') || urlLower.contains('response-content-type=application/pdf')) {
+      return true;
+    }
+    if (urlStr.contains('/files/') && !urlStr.contains('download')) {
+      bool isVideo = urlLower.contains('isvideo=1') || urlLower.contains('.mp4') || urlLower.contains('.mov') || urlLower.contains('.webm');
+      if (!isVideo) return true;
+    }
+    return false;
+  }
+
+  // 🟢 Web内からPDFビューアへ完全に画面をすり替える処理（戻り先をアプリに固定する要）
+  void _replaceWithPdfViewer(String urlStr) {
+    String downloadUrl = urlStr;
+    if (urlStr.contains('/files/') && !urlStr.contains('download')) {
+      downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
+    }
+    if (context.mounted) {
+      // ⚠️ pushReplacement にすることで、現在のWebView画面（ブラウザ）を履歴ごとスタックから完全に消滅させます。
+      // これにより、PDFViewer側で戻るボタンを押した時、Webを挟まずに直接「アプリの元の画面」へ一発で戻れます。
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie)),
+      );
+    }
+  }
+
   @override
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    // ★ 追加：ブラウザを閉じたら、そのブラウザが溜めた一時的なキャッシュを削除する
     _webViewController?.clearCache();
     super.dispose();
   }
@@ -73,49 +99,47 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                             useShouldOverrideUrlLoading: true,
                             mediaPlaybackRequiresUserGesture: true,
                             allowsInlineMediaPlayback: true,
-                            useOnDownloadStart: true, // 👈 ★追加：iOSでPDFが直接降ってきたイベントを確実に捕まえるために必須
+                            useOnDownloadStart: true, // 👈 iOS用のPDFストリームを確実に横取りするためのトリガー
                           ),
                           onScrollChanged: (c, x, y) {
                             if (y <= 0 && !_isTop) setState(() => _isTop = true);
                             else if (y > 5 && _isTop) setState(() => _isTop = false);
                           },
+
+                          // 🔥 iOS対策：WebViewがロード処理を開始した瞬間を監視。画面に白・黒のノイズが出る前に即座にフリーズさせて引き剥がす
+                          onLoadStart: (controller, url) async {
+                            if (url != null) {
+                              final urlStr = url.toString();
+                              if (_checkIsPdf(urlStr)) {
+                                await controller.stopLoading(); // 👈 即座にWebViewの読み込み・描画を停止させてゾンビ画面の発生を防ぐ
+                                _replaceWithPdfViewer(urlStr);
+                              }
+                            }
+                          },
+
+                          // 🔥 Android / 通常リンクタップ時の横取り
                           shouldOverrideUrlLoading: (c, nav) async {
                             final uri = nav.request.url;
                             if (uri != null) {
                               final urlStr = uri.toString();
-                              final urlLower = urlStr.toLowerCase();
-                              bool isVideo = urlLower.contains('isvideo=1') || urlLower.contains('.mp4') || urlLower.contains('.mov') || urlLower.contains('.webm');
-
-                              // 🟢 通常のLMS内のファイルプレビューリンクの横取り
-                              if (urlStr.contains('/files/') && !urlStr.contains('download') && !isVideo) {
-                                final downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
-                                Future.microtask(() => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie))));
-                                return NavigationActionPolicy.CANCEL;
+                              if (_checkIsPdf(urlStr)) {
+                                // 描画処理が走る前に裏側でストップ
+                                await c.stopLoading();
+                                Future.microtask(() => _replaceWithPdfViewer(urlStr));
+                                return NavigationActionPolicy.CANCEL; // WebView内でのリダイレクト遷移を完全に遮断
                               }
                             }
                             return NavigationActionPolicy.ALLOW;
                           },
 
-                          // 🟢 🔥修正：iOSでリダイレクトの末にPDFバイナリが流れてきた瞬間を100%捕獲して橋渡しする
+                          // 🔥 iOSのバックグラウンドストリーム処理用の包囲網
                           onDownloadStartRequest: (c, req) async {
                             final urlStr = req.url.toString();
-                            final urlLower = urlStr.toLowerCase();
-
-                            // iOSが勝手にインライン描画しようとしたストリームURLや、.pdfリンクを判定
-                            if (urlLower.contains('.pdf') || urlStr.contains('download_frd=1') || urlLower.contains('response-content-type=application/pdf')) {
-                              String downloadUrl = urlStr;
-                              if (urlStr.contains('/files/') && !urlStr.contains('download')) {
-                                downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
-                              }
-
-                              // 自作のPdfViewerScreenへ引き渡してWebViewをリプレイス（これまでのAndroidと同じ挙動）
-                              if (context.mounted) {
-                                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie)));
-                              }
+                            if (_checkIsPdf(urlStr)) {
+                              await c.stopLoading();
+                              _replaceWithPdfViewer(urlStr);
                               return;
                             }
-
-                            // PDF以外の本当の一般ファイル（zip等）は外部アプリケーションへ
                             try {
                               if (await canLaunchUrl(req.url)) await launchUrl(req.url, mode: LaunchMode.externalApplication);
                             } catch (e) {}
@@ -123,8 +147,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                       )
                   ),
 
-                  // ★ 追加 2. 右上の黒い円形閉じる（×）ボタン ---
-                  // 画面を下にスクロールすると自動的に画面外へ隠れ、最上部に戻るとスッと現れます
+                  // 右上の黒い円形閉じる（×）ボタン
                   AnimatedPositioned(
                       duration: const Duration(milliseconds: 300),
                       curve: Curves.easeOutCubic,
@@ -135,7 +158,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                           child: IconButton(
                               icon: const Icon(Icons.close, color: Colors.white),
                               onPressed: () {
-                                Navigator.pop(context); // 一発でアプリの元の画面に戻る
+                                Navigator.pop(context);
                               }
                           )
                       )
@@ -147,7 +170,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   }
 }
 
-
 class PdfViewerScreen extends StatefulWidget {
   final String url;
   final String cookie;
@@ -156,10 +178,9 @@ class PdfViewerScreen extends StatefulWidget {
   State<PdfViewerScreen> createState() => _PdfViewerScreenState();
 }
 
-
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _isTop = true;
-  bool _isSharing = false; // ★ 追加：ダウンロード＆共有処理中の連打ガード
+  bool _isSharing = false;
 
   @override
   Widget build(BuildContext context) {
@@ -199,7 +220,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   )
               ),
 
-              // ★ 修正：右上の黒い円形ボタン（高セキュリティ共有型） ---
+              // 右上の黒い円形ボタン（高セキュリティ共有型）
               AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
@@ -207,7 +228,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   right: 16,
                   child: Container(
                       decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
-                      // 通信・書き出し処理中はインジケータを回して連打を完全に防ぐ
                       child: _isSharing
                           ? const Padding(
                         padding: EdgeInsets.all(12.0),
@@ -217,30 +237,26 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                         ),
                       )
                           : IconButton(
-                        icon: const Icon(Icons.share, color: Colors.white), // ★三角の共有マーク
+                        icon: const Icon(Icons.share, color: Colors.white),
                         onPressed: () async {
                           if (_isSharing) return;
                           setState(() => _isSharing = true);
 
                           try {
-                            // 1. クッキーを乗せて認証を突破し、PDFのバイナリを直接叩く
                             final response = await http.get(
                               Uri.parse(widget.url),
                               headers: {'Cookie': widget.cookie},
                             ).timeout(const Duration(seconds: 15));
 
                             if (response.statusCode == 200) {
-                              // 2. アプリ専用の一時領域に安全に書き出し
                               final tempDir = await getTemporaryDirectory();
                               final filePath = '${tempDir.path}/shared_doc_${DateTime.now().millisecondsSinceEpoch}.pdf';
                               final file = File(filePath);
                               await file.writeAsBytes(response.bodyBytes);
 
-                              // 3. 【最重要】iPadOSでポップオーバーがどこから生えるかを計算（これをしないとiPadで100%クラッシュします）
                               final box = context.findRenderObject() as RenderBox?;
                               final rect = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
 
-                              // 4. ネイティブの共有シートを起動
                               await Share.shareXFiles(
                                 [XFile(filePath)],
                                 sharePositionOrigin: rect,
@@ -267,7 +283,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 }
 
-
 class VideoViewerScreen extends StatefulWidget {
   final String url;
   final String cookie;
@@ -275,7 +290,6 @@ class VideoViewerScreen extends StatefulWidget {
   @override
   State<VideoViewerScreen> createState() => _VideoViewerScreenState();
 }
-
 
 class _VideoViewerScreenState extends State<VideoViewerScreen> {
   bool _isTop = true;
@@ -291,16 +305,14 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
   Widget build(BuildContext context) {
     final double statusBarHeight = MediaQuery.of(context).padding.top;
 
-
-
     return PopScope(
         canPop: false,
         onPopInvoked: (didPop) async {
           if (didPop) return;
           if (_webViewController != null && await _webViewController!.canGoBack()) {
-            _webViewController!.goBack(); // Webの履歴があれば戻る
+            _webViewController!.goBack();
           } else {
-            if (context.mounted) Navigator.pop(context); // なければ画面を閉じる
+            if (context.mounted) Navigator.pop(context);
           }
         },
         child: Scaffold(
@@ -319,10 +331,8 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
                     if (e.delta.dy < -5 && _isTop) setState(() => _isTop = false);
                     else if (e.delta.dy > 5 && !_isTop) setState(() => _isTop = true);
                   },
-                  // 1. InAppBrowserScreen の InAppWebView を以下のように修正します
                   child: InAppWebView(
                     onWebViewCreated: (controller) => _webViewController = controller,
-                    // ★ 修正：クッキーをヘッダーに注入
                     initialUrlRequest: URLRequest(
                       url: WebUri(widget.url),
                       headers: {'Cookie': widget.cookie},
@@ -330,7 +340,6 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
                     initialSettings: InAppWebViewSettings(
                       javaScriptEnabled: true,
                       domStorageEnabled: true,
-                      // ★ 追加：クッキーの共有設定
                       sharedCookiesEnabled: true,
                       thirdPartyCookiesEnabled: true,
                       mediaPlaybackRequiresUserGesture: true,
@@ -350,43 +359,33 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
   }
 }
 
-
 Future<void> openSmartUrl(BuildContext context, String url, String cookie, {String? title}) async {
   try {
     String fullUrl = url.startsWith('/') ? '$canvasBaseUrl$url' : url;
     if (Uri.tryParse(fullUrl) == null) return;
 
-
     String checkStr = (fullUrl + (title ?? '')).toLowerCase();
 
-
-    // ★ 動画だけでなく、Office系ドキュメント（PPTX, DOCX, XLSX）もWebViewへ逃がす
     bool isMediaOrDoc = checkStr.contains('.mp4') || checkStr.contains('.mov') || checkStr.contains('.webm') ||
         checkStr.contains('.pptx') || checkStr.contains('.ppt') ||
         checkStr.contains('.docx') || checkStr.contains('.doc') ||
         checkStr.contains('.xlsx') || checkStr.contains('.xls');
 
-
     if (isMediaOrDoc) {
-      // WebViewがフリーズ（強制保存）しないよう、純粋なCanvasプレビューURLに変換する
       String safeUrl = fullUrl.replaceAll(RegExp(r'[?&]download_frd=1'), '');
       if (safeUrl.endsWith('/download')) {
         safeUrl = safeUrl.substring(0, safeUrl.length - 9);
       }
-      // 前回シンプルにしたVideoViewerScreen（安全なWebView）へ送る
       Navigator.push(context, MaterialPageRoute(builder: (_) => VideoViewerScreen(url: safeUrl, cookie: cookie)));
     }
-    // ★ PDFの場合（今まで通り専用の高速ビューアへ）
     else if (fullUrl.toLowerCase().contains('.pdf') || fullUrl.contains('download_frd=1')) {
       if (fullUrl.contains('/files/') && !fullUrl.contains('download')) {
         fullUrl = "${fullUrl.split('?').first}/download?download_frd=1";
       }
       Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: fullUrl, cookie: cookie)));
     }
-    // ★ その他の場合
     else {
       Navigator.push(context, MaterialPageRoute(builder: (_) => InAppBrowserScreen(url: fullUrl, cookie: cookie)));
     }
   } catch (e) {}
 }
-
