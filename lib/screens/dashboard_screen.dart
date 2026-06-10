@@ -1109,8 +1109,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     String dateStr = "${targetDate.year}-${targetDate.month.toString().padLeft(2,'0')}-${targetDate.day.toString().padLeft(2,'0')}";
 
     int month = targetDate.month;
-    bool isSpringMonth = currentLMS.isSpringMonth(month);
-    bool isFallMonth = currentLMS.isFallMonth(month);
 
     // ===================================
     // 1. 通常の授業
@@ -1118,30 +1116,26 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     if (dayIdx <= 5) {
       final classes = _weeklySchedule.where((s) => s['day'] == dayIdx).toList();
       for (var c in classes) {
-
-        // 👇 変更後 👇
         String targetQ = TermHelper.getTermForDate(targetDate);
 
-        // ターゲットの日付から年度を計算（1〜3月は前年度扱い）
         int targetYear = targetDate.year;
         if (targetDate.month < 4) targetYear -= 1;
 
         if (!TermHelper.shouldDisplayCourse(c['course'], _courseTermOverrides, targetYear, targetQ)) {
           continue;
         }
-        // 👆 変更後ここまで 👆
 
         String cId = c['course']['is_custom'] == true ? (c['course']['raw_name'] ?? c['course']['name']) : c['course']['id'].toString();
         int status = _courseOverrides[cId]?[dateStr] ?? 0;
-        if (status == 2) continue; // 休講ならスケジュールから除外
+        if (status == 2) continue;
 
         int startHour = periods[c['period']]!['start']! ~/ 100;
         int startMin = periods[c['period']]!['start']! % 100;
-        int endHour = periods[c['period']]!['end']! ~/ 100; // ★ 追加
-        int endMin = periods[c['period']]!['end']! % 100; // ★ 追加
+        int endHour = periods[c['period']]!['end']! ~/ 100;
+        int endMin = periods[c['period']]!['end']! % 100;
 
         DateTime classTime = DateTime(targetDate.year, targetDate.month, targetDate.day, startHour, startMin);
-        DateTime classEndTime = DateTime(targetDate.year, targetDate.month, targetDate.day, endHour, endMin); // ★ 追加
+        DateTime classEndTime = DateTime(targetDate.year, targetDate.month, targetDate.day, endHour, endMin);
 
         combined.add({'type': 'class', 'time': classTime, 'endTime': classEndTime, 'title': currentLMS.cleanTitle(c['course']['name']), 'subtitle': currentLMS.extractRoom(c['course']['name']), 'courseId': c['course']['id'], 'isCustom': c['course']['is_custom'] == true, 'rawName': c['course']['raw_name'], 'courseObj': c['course'], 'status': status});
       }
@@ -1159,21 +1153,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
         int startHour = periods[cc['period']]!['start']! ~/ 100;
         int startMin = periods[cc['period']]!['start']! % 100;
-        int endHour = periods[cc['period']]!['end']! ~/ 100; // ★ 追加
-        int endMin = periods[cc['period']]!['end']! % 100; // ★ 追加
+        int endHour = periods[cc['period']]!['end']! ~/ 100;
+        int endMin = periods[cc['period']]!['end']! % 100;
 
         DateTime classTime = DateTime(targetDate.year, targetDate.month, targetDate.day, startHour, startMin);
-        DateTime classEndTime = DateTime(targetDate.year, targetDate.month, targetDate.day, endHour, endMin); // ★ 追加
+        DateTime classEndTime = DateTime(targetDate.year, targetDate.month, targetDate.day, endHour, endMin);
 
         combined.add({'type': 'class', 'time': classTime, 'endTime': classEndTime, 'title': cc['name'], 'subtitle': cc['room'], 'courseId': cc['id'], 'isCustom': true, 'rawName': cc['name'], 'courseObj': cc, 'status': status});
       }
     }
 
-
     // ===================================
     // 3. 課題（タスク）
     // ===================================
-    // ★ 修正：ignoreTerm を削除し、一番シンプルな形に戻す
+    // 🟢 LMS情報は元々正常なので、_filterTasks内でJST変換されたdueの年月日がページと一致するかだけで綺麗に仕分けます
     final tasksForDay = _filterTasks((due) => due.year == targetDate.year && due.month == targetDate.month && due.day == targetDate.day);
 
     for (var t in tasksForDay) {
@@ -1269,11 +1262,38 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
 
     // Dモード
+    // --- メソッドの最下部、Dモードのロジック部分を以下に差し替え ---
+    // Dモード
     DateTime date = now.add(Duration(days: offset));
-    String dateKey = "${date.year}-${date.month}-${date.day}";
-    int externalCount = _externalEventsCache[dateKey]?.length ?? 0;
     final items = _getScheduleForDate(date);
-    int totalItems = items.length + externalCount;
+
+    // 🟢 決定打：_buildDayPageと完全に足並みを揃え、
+    // 前後3日分のプールから「純粋に日本時間の当日に表示される外部予定」の正確な個数を割り出します。
+    final DateTime prevDate = date.subtract(const Duration(days: 1));
+    final DateTime nextDate = date.add(const Duration(days: 1));
+
+    List<Map<String, dynamic>> rawExternalPool = [
+      ...(_externalEventsCache["${prevDate.year}-${prevDate.month}-${prevDate.day}"] ?? []),
+      ...(_externalEventsCache["${date.year}-${date.month}-${date.day}"] ?? []),
+      ...(_externalEventsCache["${nextDate.year}-${nextDate.month}-${nextDate.day}"] ?? []),
+    ];
+
+    int correctedExternalCount = 0;
+    Set<String> seenEvents = {};
+
+    for (var item in rawExternalPool) {
+      DateTime localTime = (item['time'] as DateTime).toLocal();
+      if (localTime.year == date.year && localTime.month == date.month && localTime.day == date.day) {
+        String eventKey = "${item['title']}_${localTime.millisecondsSinceEpoch}";
+        if (!seenEvents.contains(eventKey)) {
+          seenEvents.add(eventKey);
+          correctedExternalCount++; // 実際にこの日に描画されるものだけをインクリメント
+        }
+      }
+    }
+
+    // 授業・タスク数 ＋ 厳選された外部予定数
+    int totalItems = items.length + correctedExternalCount;
 
     double baseHeight = topPadding + 48.0 + 20.0 + 8.0;
     if (totalItems == 0) return baseHeight + 32.0;
@@ -2310,8 +2330,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     return _buildMonthPage(targetMonth, topPadding, tCol);
                   }
 
+                  // --- 既存のWモード・Mモードの分岐のすぐ下、Dモードの処理部分 ---
                   DateTime pageDate = now.add(Duration(days: offsetDays));
+
+                  // 🟢 決定打：_buildDayPageの3日分プール結合を100%機能させるため、
+                  // 前後の日付の外部予定もバックグラウンドで同時に先読み（事前ロード）させます。
+                  _fetchExternalEventsForDate(pageDate.subtract(const Duration(days: 1)));
                   _fetchExternalEventsForDate(pageDate);
+                  _fetchExternalEventsForDate(pageDate.add(const Duration(days: 1)));
+
                   return _buildDayPage(pageDate, index, topPadding, tCol);
                 }
             ),
@@ -2414,9 +2441,44 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   Widget _buildDayPage(DateTime pageDate, int index, double topPadding, Color tCol) {
     final pageItems = _getScheduleForDate(pageDate);
 
-    String dateKey = "${pageDate.year}-${pageDate.month}-${pageDate.day}";
-    List<Map<String, dynamic>> externalEvents = _externalEventsCache[dateKey] ?? [];
-    List<Map<String, dynamic>> allItems = List.from(pageItems)..addAll(externalEvents);
+    // 🟢 決定打：OSカレンダー（UTC起因）の「朝9時の呪い」を完全に粉砕する結合＆再仕分けロジック
+    final DateTime prevDate = pageDate.subtract(const Duration(days: 1));
+    final DateTime nextDate = pageDate.add(const Duration(days: 1));
+
+    // 前日・当日・翌日のキャッシュをごっそり1つのプールにまとめる（9時間のズレによる漏れをここで全回収）
+    List<Map<String, dynamic>> rawExternalPool = [
+      ...(_externalEventsCache["${prevDate.year}-${prevDate.month}-${prevDate.day}"] ?? []),
+      ...(_externalEventsCache["${pageDate.year}-${pageDate.month}-${pageDate.day}"] ?? []),
+      ...(_externalEventsCache["${nextDate.year}-${nextDate.month}-${nextDate.day}"] ?? []),
+    ];
+
+    List<Map<String, dynamic>> correctedExternal = [];
+    Set<String> seenEvents = {};
+
+    for (var item in rawExternalPool) {
+      // 全イベントの時間を100%ピュアな日本ローカル時間（JST）へ強制変換
+      DateTime localTime = (item['time'] as DateTime).toLocal();
+      DateTime localEndTime = item['endTime'] != null
+          ? (item['endTime'] as DateTime).toLocal()
+          : localTime.add(const Duration(hours: 1));
+
+      // 🟢 純粋に日本時間基準で「今日（pageDate）」の年月日と完全一致するものだけを厳選ホールド
+      if (localTime.year == pageDate.year && localTime.month == pageDate.month && localTime.day == pageDate.day) {
+        String eventKey = "${item['title']}_${localTime.millisecondsSinceEpoch}";
+        // 重複して結合されるのを防止
+        if (!seenEvents.contains(eventKey)) {
+          seenEvents.add(eventKey);
+
+          Map<String, dynamic> correctedItem = Map.from(item);
+          correctedItem['time'] = localTime;
+          correctedItem['endTime'] = localEndTime;
+          correctedExternal.add(correctedItem);
+        }
+      }
+    }
+
+    // 日本時間で綺麗に整列し直した外部イベントを授業データとマージ
+    List<Map<String, dynamic>> allItems = List.from(pageItems)..addAll(correctedExternal);
     allItems.sort((a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime));
 
     final daysEn = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -2431,7 +2493,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     return Align(
       alignment: Alignment.topCenter,
       child: Padding(
-        // ★ 修正 1：topPadding + 48.0 から + 36.0 にして全体を少し上に配置
         padding: EdgeInsets.only(left: 24, right: 24, top: topPadding + 24.0, bottom: 8.0),
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
@@ -2446,39 +2507,35 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           },
           child: SingleChildScrollView(
             physics: const NeverScrollableScrollPhysics(),
-            // ★ 修正 2：SizedBoxで幅をいっぱいにし、予定が0件でも確実に左端に固定する
             child: SizedBox(
               width: double.infinity,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ★ 修正 3：Stackと固定高さの箱を使って、TODAYの有無で日付が上下するのを防ぐ
                   SizedBox(
-                    height: 36, // TODAYと日付がぴったり収まる高さ
+                    height: 36,
                     child: Stack(
                       children: [
                         Positioned(
-                          top: 0,
-                          left: 0,
+                          top: 0, left: 0,
                           child: Text(
-                            relativeLabel ?? '', // TODAYが無い日は空文字を入れるだけ
+                            relativeLabel ?? '',
                             style: TextStyle(
-                              color: tCol.withOpacity(0.6), // 少し透明度を上げて上品に
-                              fontSize: 10,                 // 小さめ
-                              fontWeight: FontWeight.w300,  // 細文字
-                              letterSpacing: 1.2,           // 少し字間を空けるとかっこいいです
+                              color: tCol.withOpacity(0.6),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w300,
+                              letterSpacing: 1.2,
                             ),
                           ),
                         ),
                         Positioned(
-                          bottom: 0, // ★ 日付テキストを常に箱の下端に固定
-                          left: 0,
+                          bottom: 0, left: 0,
                           child: Text(
-                            dateAndDay, // 例: 10/24 THU
+                            dateAndDay,
                             style: TextStyle(
                               color: tCol.withOpacity(0.9),
                               fontSize: 18,
-                              fontWeight: FontWeight.w300,  // 細文字
+                              fontWeight: FontWeight.w300,
                               height: 1.0,
                             ),
                           ),
@@ -2486,107 +2543,184 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8), // 日付と予定の間の余白
+                  const SizedBox(height: 8),
 
                   if (allItems.isNotEmpty)
-                    Column(
-                      children: allItems.map((item) {
-                        bool isTask = item['type'] == 'task';
-                        bool isExternal = item['type'] == 'external_event';
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // ① 極細の縦直線
+                        Positioned(
+                          top: 16.0,
+                          bottom: 0,
+                          left: 51.0,
+                          child: Container(
+                            width: 0.5,
+                            color: tCol.withOpacity(0.25),
+                          ),
+                        ),
 
-                        DateTime time = item['time'];
-                        String startTimeStr = "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}";
+                        // ② 現在時刻のインジケータ極細横直線
+                        if (index == 10000)
+                          Builder(
+                            builder: (context) {
+                              final now = DateTime.now();
+                              int nowMins = now.hour * 60 + now.minute;
+                              double? lineY;
 
-                        String endTimeStr = "";
-                        if (item['endTime'] != null) {
-                          DateTime endTime = item['endTime'];
-                          endTimeStr = "${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}";
-                        } else {
-                          DateTime fakeEnd = time.add(const Duration(hours: 1));
-                          endTimeStr = "${fakeEnd.hour.toString().padLeft(2, '0')}:${fakeEnd.minute.toString().padLeft(2, '0')}";
-                        }
+                              DateTime firstStart = allItems.first['time'];
+                              int firstStartMins = firstStart.hour * 60 + firstStart.minute;
+                              DateTime lastEnd = allItems.last['endTime'] ?? allItems.last['time'].add(const Duration(hours: 1));
+                              int lastEndMins = lastEnd.hour * 60 + lastEnd.minute;
 
-                        if (isExternal && item['isAllDay'] == true) {
-                          startTimeStr = "ALL";
-                          endTimeStr = "DAY";
-                        }
+                              if (nowMins < firstStartMins) {
+                                lineY = 12.0;
+                              }
+                              else if (nowMins > lastEndMins) {
+                                int i = allItems.length - 1;
+                                lineY = i * 56.0 + 43.0 + 6.0;
+                              }
+                              else {
+                                for (int i = 0; i < allItems.length; i++) {
+                                  final item = allItems[i];
+                                  DateTime start = item['time'];
+                                  DateTime end = item['endTime'] ?? start.add(const Duration(hours: 1));
+                                  int startMins = start.hour * 60 + start.minute;
+                                  int endMins = end.hour * 60 + end.minute;
 
-                        int status = item['status'] ?? 0;
-                        double itemOpacity = 1.0;
-                        Color subTextColor = tCol.withOpacity(0.7);
-                        String subText = item['subtitle']?.toString() ?? '';
+                                  if (nowMins >= startMins && nowMins <= endMins) {
+                                    lineY = i * 56.0 + 31.0;
+                                    break;
+                                  }
 
-                        if (!isTask && !isExternal) {
-                          if (status == 1) { subText = "Ondemand"; itemOpacity = 0.4; }
-                          else if (status == 3) { subText = "Exam"; }
-                        }
+                                  if (i < allItems.length - 1) {
+                                    final nextItem = allItems[i + 1];
+                                    DateTime nextStart = nextItem['time'];
+                                    int nextStartMins = nextStart.hour * 60 + nextStart.minute;
 
-                        return SizedBox(
-                            height: 56,
-                            child: Opacity(
-                              opacity: itemOpacity,
-                              child: Padding(
-                                  padding: const EdgeInsets.only(top: 16.0),
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTap: () {
-                                      if (isExternal) return;
-                                      if (isTask) {
-                                        if (item['courseId'] == 'custom_t') {
-                                          _showCompleteCustomTaskDialog(item['taskId']);
-                                        } else {
-                                          String url = item['targetUrl'] ?? '';
-                                          if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: item['title']);
-                                          else {
+                                    if (nowMins > endMins && nowMins < nextStartMins) {
+                                      lineY = i * 56.0 + 57.5;
+                                      break;
+                                    }
+                                  }
+                                }
+                              }
+
+                              if (lineY == null) return const SizedBox();
+
+                              return Positioned(
+                                top: lineY,
+                                left: 0,
+                                width: 51.0,
+                                child: Container(
+                                  height: 0.5,
+                                  color: tCol.withOpacity(0.4),
+                                ),
+                              );
+                            },
+                          ),
+
+                        // ③ 元の予定リスト本体
+                        Column(
+                          children: allItems.map((item) {
+                            bool isTask = item['type'] == 'task';
+                            bool isExternal = item['type'] == 'external_event';
+
+                            DateTime time = item['time'];
+                            String startTimeStr = "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}";
+
+                            String endTimeStr = "";
+                            if (item['endTime'] != null) {
+                              DateTime endTime = item['endTime'];
+                              endTimeStr = "${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}";
+                            } else {
+                              DateTime fakeEnd = time.add(const Duration(hours: 1));
+                              endTimeStr = "${fakeEnd.hour.toString().padLeft(2, '0')}:${fakeEnd.minute.toString().padLeft(2, '0')}";
+                            }
+
+                            if (isExternal && item['isAllDay'] == true) {
+                              startTimeStr = "ALL";
+                              endTimeStr = "DAY";
+                            }
+
+                            int status = item['status'] ?? 0;
+                            double itemOpacity = 1.0;
+                            Color subTextColor = tCol.withOpacity(0.7);
+                            String subText = item['subtitle']?.toString() ?? '';
+
+                            if (!isTask && !isExternal) {
+                              if (status == 1) { subText = "Ondemand"; itemOpacity = 0.4; }
+                              else if (status == 3) { subText = "Exam"; }
+                            }
+
+                            return SizedBox(
+                                height: 56,
+                                child: Opacity(
+                                  opacity: itemOpacity,
+                                  child: Padding(
+                                      padding: const EdgeInsets.only(top: 16.0),
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: () {
+                                          if (isExternal) return;
+                                          if (isTask) {
+                                            if (item['courseId'] == 'custom_t') {
+                                              _showCompleteCustomTaskDialog(item['taskId']);
+                                            } else {
+                                              String url = item['targetUrl'] ?? '';
+                                              if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: item['title']);
+                                              else {
+                                                int cIdx = _courseIndexMap[item['courseId']] ?? -1;
+                                                if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: item['taskId']);
+                                              }
+                                            }
+                                          } else if (item['isCustom'] == true) {
+                                            _navigateToCustomDetail(item['courseObj']);
+                                          } else {
                                             int cIdx = _courseIndexMap[item['courseId']] ?? -1;
-                                            if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: item['taskId']);
+                                            if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
                                           }
-                                        }
-                                      } else if (item['isCustom'] == true) {
-                                        _navigateToCustomDetail(item['courseObj']);
-                                      } else {
-                                        int cIdx = _courseIndexMap[item['courseId']] ?? -1;
-                                        if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
-                                      }
-                                    },
-                                    child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          SizedBox(
-                                              width: 45,
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(startTimeStr, style: TextStyle(color: tCol, fontSize: 14, fontWeight: FontWeight.w300, height: 1.0)),
-                                                  const SizedBox(height: 2),
-                                                  Text(endTimeStr, style: TextStyle(color: tCol.withOpacity(0.6), fontSize: 11, fontWeight: FontWeight.w300, height: 1.0)),
-                                                ],
-                                              )
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
+                                        },
+                                        child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              SizedBox(
+                                                  width: 45,
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(startTimeStr, style: TextStyle(color: tCol, fontSize: 14, fontWeight: FontWeight.w300, height: 1.0)),
+                                                      const SizedBox(height: 2),
+                                                      Text(endTimeStr, style: TextStyle(color: tCol.withOpacity(0.6), fontSize: 11, fontWeight: FontWeight.w300, height: 1.0)),
+                                                    ],
+                                                  )
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
-                                                    if (isTask) ...[Icon(Icons.assignment_late, size: 12, color: tCol), const SizedBox(width: 4)],
-                                                    if (isExternal) ...[Icon(Icons.event, size: 12, color: tCol.withOpacity(0.5)), const SizedBox(width: 4)],
-                                                    Expanded(child: Text(item['title'], style: TextStyle(color: isExternal ? tCol.withOpacity(0.8) : tCol, fontSize: 14, fontWeight: isExternal ? FontWeight.w400 : FontWeight.w300, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                                    Row(
+                                                      children: [
+                                                        if (isTask) ...[Icon(Icons.assignment_late, size: 12, color: tCol), const SizedBox(width: 4)],
+                                                        if (isExternal) ...[Icon(Icons.event, size: 12, color: tCol.withOpacity(0.5)), const SizedBox(width: 4)],
+                                                        Expanded(child: Text(item['title'], style: TextStyle(color: isExternal ? tCol.withOpacity(0.8) : tCol, fontSize: 14, fontWeight: isExternal ? FontWeight.w400 : FontWeight.w300, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 2),
+                                                    Text(subText, style: TextStyle(color: subTextColor, fontSize: 10, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis),
                                                   ],
                                                 ),
-                                                const SizedBox(height: 2),
-                                                Text(subText, style: TextStyle(color: subTextColor, fontSize: 10, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                              ],
-                                            ),
-                                          ),
-                                        ]
-                                    ),
-                                  )
-                              ),
-                            )
-                        );
-                      }).toList(),
+                                              ),
+                                            ]
+                                        ),
+                                      )
+                                  ),
+                                )
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ),
                 ],
               ),
