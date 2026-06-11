@@ -5,15 +5,15 @@ import 'dart:math' as math;
 
 import '../core/app_theme.dart';
 import '../services/calendar_sync_service.dart';
-import 'media_viewers.dart'; // フィードバックのWebViewで使う
-import 'info_screens.dart';  // ガイドや規約画面への遷移で使う
+import 'media_viewers.dart';
+import 'info_screens.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../utils/dummy_data_helper.dart';
 import '../services/cache_manager.dart';
 import '../services/auth_service.dart';
-import 'package:url_launcher/url_launcher.dart'; // 👈 設定画面へジャンプするために追加
+import 'package:url_launcher/url_launcher.dart';
 
 class TermCirclePainter extends CustomPainter {
   final bool q1Active;
@@ -23,44 +23,36 @@ class TermCirclePainter extends CustomPainter {
   final Color activeColor;
   final Color inactiveColor;
 
-
   TermCirclePainter(this.q1Active, this.q2Active, this.q3Active, this.q4Active, this.activeColor, this.inactiveColor);
-
 
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 // 極細の円環
+      ..strokeWidth = 2.0
       ..strokeCap = StrokeCap.round;
-
 
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2 - 10;
     final double gap = 0.2;
     final double sweep = (math.pi / 2) - gap;
 
-
     // Q1 (右下)
     paint.color = q1Active ? activeColor : inactiveColor;
     canvas.drawArc(Rect.fromCircle(center: center, radius: radius), gap / 2, sweep, false, paint);
-
 
     // Q2 (左下)
     paint.color = q2Active ? activeColor : inactiveColor;
     canvas.drawArc(Rect.fromCircle(center: center, radius: radius), math.pi / 2 + gap / 2, sweep, false, paint);
 
-
     // Q3 (左上)
     paint.color = q3Active ? activeColor : inactiveColor;
     canvas.drawArc(Rect.fromCircle(center: center, radius: radius), math.pi + gap / 2, sweep, false, paint);
-
 
     // Q4 (右上)
     paint.color = q4Active ? activeColor : inactiveColor;
     canvas.drawArc(Rect.fromCircle(center: center, radius: radius), 3 * math.pi / 2 + gap / 2, sweep, false, paint);
   }
-
 
   @override
   bool shouldRepaint(covariant TermCirclePainter oldDelegate) {
@@ -71,53 +63,37 @@ class TermCirclePainter extends CustomPainter {
   }
 }
 
-
 class YearCirclePainter extends CustomPainter {
   final double pulseValue;
   final bool isClockwise;
   final Color activeColor;
   final Color inactiveColor;
 
-
   YearCirclePainter(this.pulseValue, this.isClockwise, this.activeColor, this.inactiveColor);
-
 
   @override
   void paint(Canvas canvas, Size size) {
     final Paint basePaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 // 極細線
+      ..strokeWidth = 2.0
       ..color = inactiveColor
       ..strokeCap = StrokeCap.round;
-
 
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2 - 10;
 
-
-    // 分割のない1周のベースライン
     canvas.drawCircle(center, radius, basePaint);
 
-
-    // パルスアニメーション (0.0 〜 1.0 で1周)
     if (pulseValue > 0.0 && pulseValue < 1.0) {
       canvas.save();
       canvas.translate(center.dx, center.dy);
 
-
-      // アニメーションの進行に合わせてキャンバスを回転
       double currentAngle = -math.pi / 2 + (isClockwise ? pulseValue * 2 * math.pi : -pulseValue * 2 * math.pi);
       canvas.rotate(currentAngle);
 
-
       final Rect localRect = Rect.fromCircle(center: Offset.zero, radius: radius);
-
-
-      // サイン波でフェードイン・フェードアウトする不透明度
       final double opacity = math.sin(pulseValue * math.pi);
 
-
-      // 美しいグラデーションの尾を引くパルス
       final Gradient gradient = SweepGradient(
         colors: isClockwise
             ? [activeColor.withOpacity(0.0), activeColor.withOpacity(0.0), activeColor.withOpacity(opacity)]
@@ -125,27 +101,22 @@ class YearCirclePainter extends CustomPainter {
         stops: const [0.0, 0.5, 1.0],
       );
 
-
       final Paint pulsePaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0
         ..shader = gradient.createShader(localRect)
         ..strokeCap = StrokeCap.round;
 
-
-      // 回転したキャンバス上に円を描画することで、グラデーションが回っているように見せる
       canvas.drawCircle(Offset.zero, radius, pulsePaint);
       canvas.restore();
     }
   }
-
 
   @override
   bool shouldRepaint(covariant YearCirclePainter oldDelegate) {
     return oldDelegate.pulseValue != pulseValue || oldDelegate.isClockwise != isClockwise;
   }
 }
-
 
 class SettingsScreen extends StatefulWidget {
   final int currentYear;
@@ -160,7 +131,6 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-
 class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
   late int tempYear;
   late String tempTerm;
@@ -169,7 +139,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   late AnimationController _pulseController;
   bool _isClockwise = true;
 
-  // スクロール検知用コントローラー
   late ScrollController _scrollController;
 
   // カレンダー同期用ステート
@@ -180,6 +149,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _syncTasksEnabled = false;
   bool _syncSchedulesEnabled = false;
   bool _importEventsEnabled = false;
+
+  // 🟢 ライブ通知（カウントダウン）用のステート変数
+  bool _isLiveNotifyEnabled = true;
+  bool _liveNotifyClasses = true;
+  bool _liveNotifyTasks = true;
 
   @override
   void initState() {
@@ -213,6 +187,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       _syncTasksEnabled = prefs.getBool('sync_tasks_enabled') ?? false;
       _syncSchedulesEnabled = prefs.getBool('sync_schedules_enabled') ?? false;
       _importEventsEnabled = prefs.getBool('sync_import_enabled') ?? false;
+
+      // 🟢 通知設定の読み込み（未設定時はデフォルトでONにする）
+      _isLiveNotifyEnabled = prefs.getBool('live_notify_enabled') ?? true;
+      _liveNotifyClasses = prefs.getBool('live_notify_classes') ?? true;
+      _liveNotifyTasks = prefs.getBool('live_notify_tasks') ?? true;
     });
     if (_isSyncEnabled) {
       await _fetchCalendars();
@@ -249,12 +228,41 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     await prefs.setBool('sync_import_enabled', value);
   }
 
-  // lib/screens/settings_screen.dart 内の _toggleSync メソッドを上書き
+  // 🟢 ライブ通知 親トグルロジック
+  Future<void> _toggleLiveNotify(bool value) async {
+    setState(() {
+      _isLiveNotifyEnabled = value;
+      if (!value) {
+        _liveNotifyClasses = false;
+        _liveNotifyTasks = false;
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('live_notify_enabled', value);
+    if (!value) {
+      await prefs.setBool('live_notify_classes', false);
+      await prefs.setBool('live_notify_tasks', false);
+    }
+  }
+
+  // 🟢 授業通知 トグルロジック
+  Future<void> _toggleLiveNotifyClasses(bool value) async {
+    setState(() => _liveNotifyClasses = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('live_notify_classes', value);
+  }
+
+  // 🟢 課題通知 トグルロジック
+  Future<void> _toggleLiveNotifyTasks(bool value) async {
+    setState(() => _liveNotifyTasks = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('live_notify_tasks', value);
+  }
+
   Future<void> _toggleSync(bool value) async {
     if (value) {
       bool granted = await CalendarSyncService.requestPermissions();
       if (!granted) {
-        // ★ 修正：一度不許可にされている場合、ユーザーが端末の設定から直接変更できるように誘導ダイアログを起動
         _showPermissionGuideDialog();
         return;
       }
@@ -283,7 +291,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     }
   }
 
-  // ★ 新設：拒否状態のテスターを端末の設定画面へワンタップで飛ばすソリッドな案内ダイアログ
   void _showPermissionGuideDialog() {
     showDialog(
       context: context,
@@ -304,7 +311,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             onPressed: () async {
               Navigator.pop(ctx);
               try {
-                // iOS / Androidシステム共通の「このアプリのシステム設定画面」を直接開くディープリンクを発火
                 final Uri settingUri = Uri.parse('app-settings:');
                 if (await canLaunchUrl(settingUri)) {
                   await launchUrl(settingUri);
@@ -541,6 +547,61 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     ),
                     const SizedBox(height: 32),
 
+                    // 🟢 新設：完全に独立した「ライブカウントダウン通知」カード
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                      child: Container(
+                        decoration: BoxDecoration(color: AppTheme.panel(context), borderRadius: BorderRadius.circular(30)),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text("ライブカウントダウン通知", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
+                                  SizedBox(
+                                    height: 20,
+                                    child: Transform.scale(
+                                      scale: 0.75,
+                                      child: Switch(
+                                        value: _isLiveNotifyEnabled,
+                                        onChanged: _toggleLiveNotify,
+                                        activeColor: AppTheme.textMain(context),
+                                        activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
+                                        inactiveThumbColor: AppTheme.textSub(context),
+                                        inactiveTrackColor: Colors.transparent,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeOutCubic,
+                              child: _isLiveNotifyEnabled
+                                  ? Column(
+                                children: [
+                                  Divider(height: 1, color: AppTheme.bg(context)),
+                                  _buildSyncSubToggle("授業開始15分前の常駐通知", _liveNotifyClasses, _toggleLiveNotifyClasses),
+                                  Divider(height: 1, color: AppTheme.bg(context)),
+                                  _buildSyncSubToggle("未提出課題1時間前の常駐通知", _liveNotifyTasks, _toggleLiveNotifyTasks),
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 20.0, right: 20.0, bottom: 20.0, top: 12.0),
+                                    child: Text("通知をタップすると、対象の教室や課題内容へ直接アクセスできます", style: TextStyle(color: AppTheme.textSub(context).withOpacity(0.5), fontSize: 10, height: 1.4)),
+                                  )
+                                ],
+                              ) : const SizedBox(width: double.infinity, height: 0),
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
                     // ガイド / バージョン / キャッシュクリア
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -560,9 +621,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     ),
                     const SizedBox(height: 32),
 
-                    // ----------------------------------------------------
-                    // ★ 修正：プライバシー / 利用規約 / ライセンス の統合外部化
-                    // ----------------------------------------------------
+                    // プライバシー / 利用規約 / ライセンス の統合外部化
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8.0),
                       child: Container(
@@ -570,19 +629,14 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           clipBehavior: Clip.antiAlias,
                           child: Column(
                               children: [
-                                // Privacy Policy（プライバシーポリシー）
                                 _buildCustomListItem("Privacy Policy", onTap: () {
                                   Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/english#h.et6qunor9pa4", title: 'Privacy Policy')));
                                 }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
-
-                                // Terms of Use（利用規約：プライバシーポリシーと同じ外部URLへリダイレクト）
                                 _buildCustomListItem("Terms of Use", onTap: () {
                                   Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsWebBrowserScreen(url: "https://sites.google.com/view/kportal-app/english#h.c6csp7my3tz7", title: 'Terms of Use')));
                                 }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
-
-                                // Open Source Libraries
                                 _buildCustomListItem("Open Source Libraries", onTap: () {
                                   showLicensePage(context: context, applicationVersion: '1.0.2', applicationLegalese: '© 2026 Developer');
                                 }),
@@ -590,9 +644,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           )
                       ),
                     ),
-
-                    // settings_screen.dart 内の ListView の最下部付近
-                    // プライバシーや利用規約のコンテナの下に追記します
 
                     if (!_isAuthenticated) ...[
                       const SizedBox(height: 32),
@@ -608,7 +659,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                             "Test login",
                             hideArrow: false,
                             onTap: () async {
-                              // 1. ダミーデータを最新の選択年度に合わせてキャッシュに直接注入
                               final dummyCourses = DummyDataHelper.getCourses(tempYear);
                               final dummyAssignments = DummyDataHelper.getDummyAssignments(tempYear);
                               final dummyMessages = DummyDataHelper.getDummyMessages();
@@ -617,7 +667,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                               await CacheManager.save('cached_assignments_v14_all_year', dummyAssignments);
                               await CacheManager.save('cached_messages_v14_all_year', dummyMessages);
 
-                              // 2. セッション情報を特別な文字列でダミー偽装保存
                               await AuthService.saveSession("dummy_test_session");
 
                               if (mounted) {
@@ -625,7 +674,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                   const SnackBar(content: Text('テスト用ダミーデータをロードしました。アプリを再起動してくさだい。')),
                                 );
                                 Navigator.pop(context);
-                                // メイン画面側に更新通知をトス（これでホームが自動でリロードされます）
                                 widget.onApply(tempYear, tempTerm);
                               }
                             },
@@ -633,7 +681,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                         ),
                       ),
                     ],
-                    // 🛠️ 先ほど追加したテストログインのブロックの「すぐ下」に追記します
                     const SizedBox(height: 32),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -647,7 +694,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           "アプリを完全に初期状態に戻す",
                           hideArrow: true,
                           onTap: () {
-                            // 安全のため、全消去の前に確認ダイアログを挟む
                             showDialog(
                               context: context,
                               builder: (ctx) => AlertDialog(
@@ -664,14 +710,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                   ),
                                   TextButton(
                                     child: const Text('すべて削除する', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold)),
-                                    // settings_screen.dart 内の「すべて削除する」ボタンの onPressed 内部
                                     onPressed: () async {
-                                      Navigator.pop(ctx); // ダイアログを閉じる
+                                      Navigator.pop(ctx);
 
-                                      // 1. セッション（SecureStorage等）の完全破棄
                                       await AuthService.clearSession();
 
-                                      // 2. SharedPreferencesの完全消去
                                       final prefs = await SharedPreferences.getInstance();
                                       await prefs.clear();
 
@@ -681,12 +724,10 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                         debugPrint("Settings clear cookies error: $e");
                                       }
 
-                                      // 3. 【最重要】CacheManagerの物理ファイルを空の配列で上書きして消滅させる
                                       await CacheManager.save('my_course_cache_v10', <dynamic>[]);
                                       await CacheManager.save('cached_assignments_v14_all_year', <dynamic>[]);
                                       await CacheManager.save('cached_messages_v14_all_year', <dynamic>[]);
 
-                                      // 4. ローカルの添付画像やTemp内ファイルの一括削除
                                       try {
                                         final docDir = await getApplicationDocumentsDirectory();
                                         final memoImgDir = Directory('${docDir.path}/memo_images');
@@ -703,12 +744,10 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                         debugPrint("File systems clear error: $e");
                                       }
 
-                                      // 5. 完了通知を出し、上位のSkeletonへ「initialized」の合図を投げて画面を閉じる
                                       if (mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           const SnackBar(content: Text('すべてのデータを削除し、初期状態にリセットしました。アプリを再起動してください。')),
                                         );
-                                        // ★ 変更：合図（result）を渡して設定画面を閉じる
                                         Navigator.pop(context, 'initialized');
                                       }
                                     },
@@ -732,11 +771,10 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   child: Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
-                          // 👇 ここを3色のグラデーションに変更 👇
                           colors: [
-                            Color(0xFF020403), // トップ
-                            Color(0xFF2c4f5f), // ミドル
-                            Color(0xFFa8ccdc), // ボトム
+                            Color(0xFF020403),
+                            Color(0xFF2c4f5f),
+                            Color(0xFFa8ccdc),
                           ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
@@ -750,7 +788,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           bottom: false,
                           child: Column(
                               children: [
-                                // --- 戻るボタン ＆ ログアウトボタン領域 ---
                                 Container(
                                     height: 56.0,
                                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -763,7 +800,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                               child: Row(mainAxisSize: MainAxisSize.min, children: const [
                                                 Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
                                                 SizedBox(width: 8),
-                                                // ★ 修正：SETTINGS の文字を細字 (w300) に変更
                                                 Text("SETTINGS", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w300, letterSpacing: 1.0)),
                                               ])
                                           ),
@@ -779,8 +815,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                     )
                                 ),
 
-                                // lib/screens/settings_screen.dart 内の build メソッド中盤
-                                // --- 学期・年度の輪っか ＆ テーマ変更ウィジェット ---
                                 if (contentOpacity > 0)
                                   Expanded(
                                     child: SingleChildScrollView(
@@ -789,14 +823,12 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                         opacity: contentOpacity,
                                         child: Column(
                                           children: [
-                                            // ★ 修正：iPadの大画面で円が巨大化してはみ出るのを防ぐため、Center と ConstrainedBox で最大横幅を 380px に美しく制限
                                             Padding(
                                                 padding: const EdgeInsets.only(left: 32.0, right: 32.0, bottom: 8.0, top: 4.0),
                                                 child: Center(
                                                   child: ConstrainedBox(
                                                     constraints: const BoxConstraints(maxWidth: 380),
                                                     child: Row(children: [
-                                                      // 左：年度（Year）
                                                       Expanded(
                                                           flex: 1,
                                                           child: LayoutBuilder(builder: (context, constraints) {
@@ -825,7 +857,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                                           })
                                                       ),
                                                       const SizedBox(width: 32),
-                                                      // 右：学期（Term）
                                                       Expanded(
                                                           flex: 1,
                                                           child: LayoutBuilder(builder: (context, constraints) {
@@ -855,7 +886,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
                                             const SizedBox(height: 8),
 
-                                            // ★ 修正：テーマ変更カプセルも、iPadで横に間伸びしないように最大横幅を円と同期（380px）させて美しく中央配置
                                             Padding(
                                               padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 16.0),
                                               child: Center(
@@ -889,14 +919,10 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   )
               ),
 
-              // ----------------------------------------------------
-              // 3. フィードバックボタンの真ん中より下を隠す背景
-              // ----------------------------------------------------
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
-                // ★ 修正：FEEDBACKボタンの高さ(60)の半分(30) ＋ 下部余白(16) ＋ OSの底面余白 分をベタ塗り
                 height: 30.0 + 16.0 + MediaQuery.of(context).padding.bottom,
                 child: IgnorePointer(
                   child: Container(
@@ -905,9 +931,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 ),
               ),
 
-              // ----------------------------------------------------
-              // 4. 画面下部に完全固定されるフィードバックボタン
-              // ----------------------------------------------------
               Align(
                 alignment: Alignment.bottomCenter,
                 child: Padding(
@@ -939,7 +962,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   ),
                 ),
               ),
-
             ]
         )
     );
@@ -975,13 +997,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     );
   }
 
-
-  // ★ テーマ変更カプセルのトグル色をモードに合わせて動的に変更
   Widget _buildThemeSegment(String title, ThemeMode mode) {
     bool isSelected = appThemeNotifier.value == mode;
     bool isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // ★ 修正：ダークモード時の選択色は真っ黒ではなく「濃い灰色 (0xFF333333)」
     Color activeBgColor = isDark ? const Color(0xFF222222) : Colors.white;
 
     return Expanded(
@@ -1018,12 +1036,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   }
 }
 
-
-
-// ★ settings_screen.dart の一番下に追加したクラスを以下に差し替えてください ★
 class SettingsWebBrowserScreen extends StatefulWidget {
   final String url;
-  final String title; // 呼び出し側でのエラーを防ぐため変数は残しておきます
+  final String title;
 
   const SettingsWebBrowserScreen({super.key, required this.url, required this.title});
 
@@ -1035,10 +1050,8 @@ class _SettingsWebBrowserScreenState extends State<SettingsWebBrowserScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ★ 最小限のヘッダー：ステータスバー（時計や電池残量の裏側）の背景色のみ指定
       backgroundColor: AppTheme.panel(context),
       body: SafeArea(
-        // ★ 最小限のフッター：iOSのホームバーやAndroidのシステムバーへの被りだけを防ぐ
         top: true,
         bottom: true,
         child: InAppWebView(
@@ -1048,4 +1061,3 @@ class _SettingsWebBrowserScreenState extends State<SettingsWebBrowserScreen> {
     );
   }
 }
-
