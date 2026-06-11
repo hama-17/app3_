@@ -55,6 +55,7 @@ dependencies:
   pdf: ^3.12.0
   printing: ^5.14.3
   android_alarm_manager_plus: ^4.0.3
+  home_widget: ^0.7.0  # 🟢 ウィジェット連携用パッケージを追加
 
 dev_dependencies:
   flutter_test:

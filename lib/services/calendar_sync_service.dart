@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_calendar/device_calendar.dart' as dc;
 import '../utils/lms_adapter.dart'; // currentLMS を使うために必要
+import 'widget_update_service.dart';
 //calendar_sync_service.dart
 
 // ----------------------------------------------------
@@ -108,6 +109,7 @@ class CalendarSyncService {
     }
     toRemove.forEach((k) => eventMapping.remove(k));
     await prefs.setString('cal_map_tasks', jsonEncode(eventMapping));
+    await WidgetUpdateService.updateHomeWidgets(tasks: tasks);
   }
 
   // ★ 要件クリア：タスク同期オフ時に完全一掃する
@@ -232,6 +234,7 @@ class CalendarSyncService {
     }
     toRemove.forEach((k) => eventMapping.remove(k));
     await prefs.setString('cal_map_schedules', jsonEncode(eventMapping));
+    await WidgetUpdateService.updateHomeWidgets(courses: courses);
   }
 
   // ★ 要件クリア：スケジュール同期オフ時に完全一掃する

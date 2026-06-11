@@ -25,6 +25,7 @@ import '../core/app_snackbar.dart';
 
 import '../utils/term_helper.dart';
 import 'package:flutter/services.dart';
+import '../services/widget_update_service.dart';
 //lib/screens/dashboard_screen.dartの中身です。
 
 
@@ -134,6 +135,10 @@ class _MainSkeletonState extends State<MainSkeleton> {
         _allCourses = jsonDecode(response.body) as List;
         await CacheManager.save('my_course_cache_v10', _allCourses);
         _applyFilter();
+
+        // 🟢 追加：授業キャッシュが新しくなったら、即座にウィジェットへも同期
+        await WidgetUpdateService.updateHomeWidgets(courses: _allCourses);
+
         if (mounted) setState(() { _isAuthenticated = true; _isLoading = false; });
       }
       else if (response.statusCode == 401 || response.statusCode == 403) {
@@ -933,6 +938,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _displayCourses = display;
     });
     CalendarSyncService.syncSchedules(display, widget.currentYear, widget.currentTerm);
+
+    // 🟢 追加：時間割の最終確定・並び替えが終わった瞬間にウィジェットへ射出
+    WidgetUpdateService.updateHomeWidgets(courses: display);
   }
 
 
@@ -1002,6 +1010,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       await CacheManager.save('cached_assignments_v14_all_year', finalTasks);
       if (mounted) setState(() { _assignments = finalTasks; });
       CalendarSyncService.syncTasks(finalTasks);
+
+      await WidgetUpdateService.updateHomeWidgets(tasks: finalTasks);
 
     } catch (e) {
       debugPrint("Dashboard._fetchAssignments Error: $e");
@@ -3674,7 +3684,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
                   iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
                 } else if (isLoading) {
-                  bg = Color.lerp(Colors.black, Colors.white, _colorAnimController.value) ?? Colors.black;
+                  // 🟢 元の白黒パルスをベースに、アニメーション開始前の「値が0.0」の瞬間だけbaseBgColorで隠す
+                  bg = _colorAnimController.value == 0.0
+                      ? baseBgColor
+                      : (Color.lerp(Colors.black, Colors.white, _colorAnimController.value) ?? Colors.black);
                   iconData = Icons.sync;
                 } else {
                   bg = baseBgColor; // ★ 修正：カスタム色を適用
