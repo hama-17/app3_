@@ -335,6 +335,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   final GlobalKey _calendarKey = GlobalKey();
   bool _isCapturing = false;
 
+  // 🟢 追加：時間表示の開閉状態を管理
+  bool _isTimeVisible = true;
+
 
 
   // ★ 追加：授業がデフォルト色かカスタム色かを判定するヘルパーメソッド
@@ -1550,17 +1553,18 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
     if (maxPeriod == -1) maxPeriod = 0;
 
-    // ★ 追加：上部のカレンダーと完全に同じロジックで日数を計算
     int displayDaysCount = hasSaturdayClasses ? 6 : 5;
 
     double screenWidth = MediaQuery.of(context).size.width;
     double spacing = 2.0;
 
-    // ★ 修正：カレンダーのマス(itemWidth)が拡大した分を正確に計算する
-    double itemWidth = (screenWidth - 16.0 - (spacing * (displayDaysCount - 1))) / displayDaysCount;
+    // 🟢 修正：現在の時刻ON/OFF状態に合わせてタイムカラムの幅を動的に決定
+    double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
 
-    // この itemWidth を使って headerMaxHeight（カードが始まるY座標）を算出するため、
-    // カレンダーが縦に伸びた分だけ、自動的にカードリストも下に押し下がります。
+    // 🟢 修正：時刻非表示の時は、広がったマスのサイズ（itemWidth）が計算されます
+    double itemWidth = (screenWidth - 16.0 - timeColumnWidth - (spacing * (displayDaysCount - 1))) / displayDaysCount;
+
+    // 🟢 修正：拡大された itemWidth をベースに、動的な最大・最小高さを算出
     double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
     double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
     double shrinkLimit = headerMaxHeight - headerMinHeight;
@@ -1573,6 +1577,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
           slivers: [
             SliverToBoxAdapter(
+              // 🟢 headerMaxHeight が自動で増減するため、最初の空のスペースが
+              // 時間割の縦幅の変化と完全にシンクロして伸縮し、カードを押し下げます
               child: SizedBox(height: headerMaxHeight + 8.0),
             ),
             SliverToBoxAdapter(
@@ -2119,29 +2125,36 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 // ... (以下は元のコードのまま、maxPeriodの計算などが続きます)
 
-    // --- 各種サイズ計算 ---
+
     // --- 各種サイズ計算 ---
     int maxPeriod = -1;
-    bool hasSaturdayClasses = false; // ★ 追加：土曜日の授業があるか判定
+    bool hasSaturdayClasses = false;
     for (var item in _weeklySchedule) {
       if (item['period'] > maxPeriod) maxPeriod = item['period'];
-      if (item['day'] == 5) hasSaturdayClasses = true; // day == 5 は土曜日
+      if (item['day'] == 5) hasSaturdayClasses = true;
     }
     if (maxPeriod == -1) maxPeriod = 0;
 
-    // ★ 追加：土曜がなければ5日間(月〜金)、あれば6日間(月〜土)
     int displayDaysCount = hasSaturdayClasses ? 6 : 5;
-
     double screenWidth = MediaQuery.of(context).size.width;
     double spacing = 2.0;
-    // ★ 修正：マスの幅を 5等分 or 6等分 に動的に計算し拡大させる
-    double itemWidth = (screenWidth - 16.0 - (spacing * (displayDaysCount - 1))) / displayDaysCount;
 
+    // 1️⃣ 時刻列のON/OFFに応じて横幅を確定
+    double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
+    double itemWidth = (screenWidth - 16.0 - timeColumnWidth - (spacing * (displayDaysCount - 1))) / displayDaysCount;
+
+    // 2️⃣ 🟢 【重要】大きく広がった itemWidth をベースに、ヘッダーの最大・最小高さを動的に再計算
+    // これにより、時刻非表示時にマスが大きくなると、headerMaxHeight も自動的にその分増加します
     double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
     double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
     double shrinkLimit = headerMaxHeight - headerMinHeight;
+
+    // 3️⃣ スクロール割合 t の確定
     double t = shrinkLimit > 0 ? (_courseScrollOffset / shrinkLimit).clamp(0.0, 1.0) : 0.0;
 
+    // 4️⃣ 🟢 展開時・縮小時の最終的な高さを割り出す
+    // 下部の授業一覧の margin や padding、あるいは CustomScrollView の SliverPersistentHeader などの
+    // 高さの基準（extent）としてこの値が使われるため、下のコンテンツが自動的に押し下げられます
     double calendarHeight = headerMaxHeight - t * shrinkLimit;
 
     double scheduleMinHeight = topPadding + 40.0;
@@ -2172,119 +2185,128 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       tag: heroTag,
       child: Material(
         type: MaterialType.transparency,
-        child: AnimatedContainer(
-          duration: animDuration,
-          curve: Curves.easeOutCubic,
-          width: double.infinity,
-          height: currentHeight,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: currentGradient,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              stops: const [0.0, 0.5, 1.0],
-            ),
-            borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
-          ),
-          child: Stack(
-            children: [
-              IgnorePointer(
-                ignoring: _dragPosition >= 0.5,
-                child: Opacity(
-                  opacity: (1.0 - _dragPosition * 2).clamp(0.0, 1.0),
-                  child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT),
-                ),
+        child: GestureDetector(
+          // 🟢 ヘッダー領域全域でスワイプを検知
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (details) {
+            if (details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
+              setState(() {
+                _isTimeVisible = details.primaryVelocity! > 0;
+              });
+            }
+          },
+          child: AnimatedContainer(
+            duration: animDuration,
+            curve: Curves.easeOutCubic,
+            width: double.infinity,
+            height: currentHeight,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: currentGradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: const [0.0, 0.5, 1.0],
               ),
-
-              IgnorePointer(
-                ignoring: _dragPosition < 0.5,
-                // ★ 修正：RepaintBoundary（_calendarKey）を、OpacityやGestureDetectorの「外側」に引き上げる！
-                // これにより、高速なリビルドやドラッグが起きてもGlobalKeyがツリー内で絶対に迷子にならなくなります。
-                child: RepaintBoundary(
-                  key: _calendarKey,
+              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
+            ),
+            child: Stack(
+              children: [
+                IgnorePointer(
+                  ignoring: _dragPosition >= 0.5,
                   child: Opacity(
-                    opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onVerticalDragUpdate: (details) {
-                        if (_mainScrollController.hasClients) {
-                          double newOffset = _mainScrollController.offset - details.primaryDelta!;
-                          double maxScroll = _mainScrollController.position.maxScrollExtent;
-                          _mainScrollController.jumpTo(newOffset.clamp(0.0, maxScroll));
-                        }
-                      },
-                      child: Container(
-                        color: Colors.transparent,
-                        // 内側の key: _calendarKey だった記述は削除され、クリーンに描画だけを行います
-                        child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
+                    opacity: (1.0 - _dragPosition * 2).clamp(0.0, 1.0),
+                    child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT),
+                  ),
+                ),
+
+                IgnorePointer(
+                  ignoring: _dragPosition < 0.5,
+                  child: RepaintBoundary(
+                    key: _calendarKey,
+                    child: Opacity(
+                      opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: (details) {
+                          if (_mainScrollController.hasClients) {
+                            double newOffset = _mainScrollController.offset - details.primaryDelta!;
+                            double maxScroll = _mainScrollController.position.maxScrollExtent;
+                            _mainScrollController.jumpTo(newOffset.clamp(0.0, maxScroll));
+                          }
+                        },
+                        child: Container(
+                          color: Colors.transparent,
+                          // 🟢 状態変数 _isTimeVisible をカレンダー生成に渡す
+                          child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
 
-              Positioned(
-                top: topPadding - 35,
-                left: 8.0,
-                child: IgnorePointer(
-                  ignoring: _dragPosition < 0.5,
-                  child: Opacity(
-                    opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
-                    child: Builder(
-                        builder: (context) {
-                          String term = widget.currentTerm.toUpperCase();
-                          String line1 = term;
-                          String line2 = "";
+                Positioned(
+                  top: topPadding - 20,
+                  left: 8.0,
+                  child: IgnorePointer(
+                    ignoring: _dragPosition < 0.5,
+                    child: Opacity(
+                      opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
+                      child: Builder(
+                          builder: (context) {
+                            String term = widget.currentTerm.toUpperCase();
+                            String line1 = term;
+                            String line2 = "";
 
-                          if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) {
-                            line1 = "SPRING"; line2 = "SEMESTER";
-                          } else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) {
-                            line1 = "FALL"; line2 = "SEMESTER";
-                          } else if (term.startsWith('Q')) {
-                            line1 = "QUARTER";
-                            String n = term.replaceAll(RegExp(r'[^0-9]'), '');
-                            line2 = n == '1' ? "ONE" : n == '2' ? "TWO" : n == '3' ? "THREE" : n == '4' ? "FOUR" : n;
+                            if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) {
+                              line1 = "SPRING"; line2 = "SEMESTER";
+                            } else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) {
+                              line1 = "FALL"; line2 = "SEMESTER";
+                            } else if (term.startsWith('Q')) {
+                              line1 = "QUARTER";
+                              String n = term.replaceAll(RegExp(r'[^0-9]'), '');
+                              line2 = n == '1' ? "ONE" : n == '2' ? "TWO" : n == '3' ? "THREE" : n == '4' ? "FOUR" : n;
+                            }
+
+                            return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(line1, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
+                                  if (line2.isNotEmpty) Text(line2, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
+                                  Text("(${widget.currentYear})", style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5))
+                                ]
+                            );
                           }
-
-                          return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(line1, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
-                                if (line2.isNotEmpty) Text(line2, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
-                                Text("(${widget.currentYear})", style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5))
-                              ]
-                          );
-                        }
+                      ),
                     ),
                   ),
                 ),
-              ),
 
-              Positioned(
-                top: topPadding - 32,
-                right: 16,
-                child: IgnorePointer(
-                  ignoring: _dragPosition < 0.5,
-                  child: Opacity(
-                    opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
-                    child: Row(
-                      children: [
-                        if (_dragPosition > 0.95)
+                Positioned(
+                  top: topPadding - 32,
+                  right: 16,
+                  child: IgnorePointer(
+                    ignoring: _dragPosition < 0.5,
+                    child: Opacity(
+                      opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
+                      child: Row(
+                        children: [
+                          if (_dragPosition > 0.95)
+                            IconButton(
+                              icon: Icon(Icons.share, color: tCol, size: 22),
+                              onPressed: _shareCalendarImage,
+                            ),
                           IconButton(
-                            icon: Icon(Icons.share, color: tCol, size: 22),
-                            onPressed: _shareCalendarImage,
+                            icon: Icon(Icons.add, color: tCol, size: 24),
+                            onPressed: _showAddCourseDialog,
                           ),
-                        IconButton(
-                          icon: Icon(Icons.add, color: tCol, size: 24),
-                          onPressed: _showAddCourseDialog,
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -3101,204 +3123,295 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   // ★ 修正：引数に displayDaysCount を追加
+  // ★ 修正：引数に displayDaysCount を追加
+  // ★ 修正：引数に displayDaysCount を追加
   Widget _buildInnerCalendar(double topPadding, bool isDark, double t, double baseItemWidth, int maxPeriod, double baseSpacing, int displayDaysCount) {
     double currentItemHeight = baseItemWidth - t * (baseItemWidth - 12.0);
     double currentSpacing = 1.0;
     double textOpacity = math.max(0.0, 1.0 - t * 3.0);
 
+    // 時刻列のON/OFFを動的に反映
+    double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
+
     return Container(
         key: const ValueKey('calendar'),
         width: double.infinity,
+        // paddingのトップ位置を固定し、上部への突き抜けを防止
         padding: EdgeInsets.only(top: topPadding + 8.0, bottom: 12.0, left: 8.0, right: 8.0),
+        alignment: Alignment.topCenter,
         child: SingleChildScrollView(
           physics: const NeverScrollableScrollPhysics(),
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (textOpacity > 0)
-                  Opacity(
-                    opacity: textOpacity,
-                    child: SizedBox(
-                      height: 24.0 * textOpacity,
+          // 🟢 Align で包むことで上詰め（トップ基準）のアンカーに固定し、下向きに拡大させます
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (textOpacity > 0)
+                    Opacity(
+                      opacity: textOpacity,
+                      child: SizedBox(
+                        height: 24.0 * textOpacity,
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: [
+                              SizedBox(width: timeColumnWidth), // 時刻の有無で動的に伸縮
+                              ...['MON','TUE','WED','THU','FRI','SAT'].take(displayDaysCount).toList().asMap().entries.map((entry) {
+                                int idx = entry.key; bool isToday = (DateTime.now().weekday - 1) == idx;
+
+                                Widget content = Container(
+                                  width: baseItemWidth,
+                                  decoration: (isToday && !_isCapturing)
+                                      ? BoxDecoration(
+                                      color: Colors.white.withOpacity(0.9),
+                                      borderRadius: BorderRadius.circular(12)
+                                  )
+                                      : null,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                      entry.value,
+                                      style: TextStyle(
+                                          color: (isToday && !_isCapturing) ? Colors.black : Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold
+                                      )
+                                  ),
+                                );
+
+                                return Padding(
+                                  padding: EdgeInsets.only(right: entry.key == displayDaysCount - 1 ? 0 : baseSpacing),
+                                  child: isToday && !_isCapturing
+                                      ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: BackdropFilter(
+                                      filter: ui.ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
+                                      child: content,
+                                    ),
+                                  )
+                                      : content,
+                                );
+                              }).toList()
+                            ]
+                        ),
+                      ),
+                    ),
+                  if (textOpacity > 0)
+                    SizedBox(height: 4.0 * textOpacity),
+                  ...List.generate(maxPeriod + 1, (periodIndex) {
+
+                    String startStr = "";
+                    String endStr = "";
+                    final pData = periods[periodIndex];
+                    if (pData != null) {
+                      int start = pData['start']!;
+                      int end = pData['end']!;
+                      startStr = "${start ~/ 100}:${(start % 100).toString().padLeft(2, '0')}";
+                      endStr = "${end ~/ 100}:${(end % 100).toString().padLeft(2, '0')}";
+                    }
+
+                    return Padding(
+                      padding: EdgeInsets.only(bottom: periodIndex == maxPeriod ? 0 : currentSpacing),
                       child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          // ★ 修正：表示日数に合わせて曜日ヘッダーを動的にカットする
-                          children: ['MON','TUE','WED','THU','FRI','SAT'].take(displayDaysCount).toList().asMap().entries.map((entry) {
-                            int idx = entry.key; bool isToday = (DateTime.now().weekday - 1) == idx;
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          // 左端の時間インジケータ
+                          if (timeColumnWidth > 0)
+                            Opacity(
+                              opacity: textOpacity,
+                              child: Builder(
+                                builder: (context) {
+                                  bool isCurrentPeriod = false;
+                                  if (!_isCapturing && pData != null) {
+                                    final now = DateTime.now();
+                                    int nowMins = now.hour * 100 + now.minute;
+                                    if (nowMins >= pData['start']! && nowMins <= pData['end']!) {
+                                      isCurrentPeriod = true;
+                                    }
+                                  }
 
-                            Widget content = Container(
-                              width: baseItemWidth,
-                              decoration: (isToday && !_isCapturing)
-                                  ? BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(12))
-                                  : null,
-                              alignment: Alignment.center,
-                              child: Text(entry.value, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                            );
+                                  double dynamicFontSize = 8.5;
 
-                            if (isToday && !_isCapturing) {
-                              return ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: BackdropFilter(
-                                  filter: ui.ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
-                                  child: content,
+                                  if (isCurrentPeriod) {
+                                    return Container(
+                                      width: timeColumnWidth - 2.0,
+                                      height: currentItemHeight,
+                                      margin: const EdgeInsets.only(left: 1.0),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.95),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Container(
+                                        alignment: Alignment.centerRight,
+                                        padding: const EdgeInsets.only(right: 2.0),
+                                        child: RotatedBox(
+                                          quarterTurns: 1,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(startStr, style: TextStyle(color: Colors.black, fontSize: dynamicFontSize, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+                                              Text(" - ", style: TextStyle(color: Colors.black.withOpacity(0.5), fontSize: dynamicFontSize - 1)),
+                                              Text(endStr, style: TextStyle(color: Colors.black, fontSize: dynamicFontSize, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+
+                                  return Container(
+                                    width: timeColumnWidth,
+                                    height: currentItemHeight,
+                                    padding: const EdgeInsets.only(right: 2.0),
+                                    alignment: Alignment.centerRight,
+                                    child: RotatedBox(
+                                      quarterTurns: 1,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(startStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: dynamicFontSize, fontWeight: FontWeight.w400)),
+                                          Text(" - ", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: dynamicFontSize - 1)),
+                                          Text(endStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: dynamicFontSize, fontWeight: FontWeight.w400)),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+
+                          // 授業マス目自動等分生成ロジック
+                          ...List.generate(displayDaysCount, (dayIndex) {
+                            final matches = _weeklySchedule.where((s) => s['day'] == dayIndex && s['period'] == periodIndex).toList();
+
+                            Widget buildCell(Map<String, dynamic> match, double height, bool isHalf) {
+                              Color color = _getCourseColor(match['course']);
+                              bool isPad = MediaQuery.of(context).size.shortestSide >= 600;
+                              String rawName = match['course']['raw_name'] ?? match['course']['name'] ?? '';
+                              String courseName = CourseTitleParser.getCleanTitle(rawName);
+                              String roomName = match['course']['is_custom'] == true ? (match['course']['room'] ?? '') : CourseScheduleParser.getRoomNumber(rawName);
+
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (match['course']['is_custom'] == true) {
+                                    _navigateToCustomDetail(match['course']);
+                                  } else {
+                                    int courseIdx = _courseIndexMap[match['course']['id']] ?? -1;
+                                    if (courseIdx != -1) _navigateToDetail(courseIdx);
+                                  }
+                                },
+                                child: Container(
+                                  width: baseItemWidth,
+                                  height: height,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    borderRadius: BorderRadius.circular(8.0),
+                                  ),
+                                  padding: EdgeInsets.all(isHalf ? 2.0 : 4.0),
+                                  child: Opacity(
+                                    opacity: textOpacity,
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        Expanded(
+                                          child: Align(
+                                            alignment: Alignment.topCenter,
+                                            child: Text(
+                                                courseName,
+                                                style: TextStyle(
+                                                    color: AppTheme.getTextColorForBackground(color),
+                                                    fontSize: isHalf ? (isPad ? 13.0 : 8.5) : (isPad ? 15.0 : 10.0),
+                                                    fontWeight: FontWeight.w400,
+                                                    height: 1.1
+                                                ),
+                                                textAlign: TextAlign.center,
+                                                maxLines: isHalf ? 1 : 3,
+                                                overflow: TextOverflow.ellipsis
+                                            ),
+                                          ),
+                                        ),
+                                        if (roomName.isNotEmpty)
+                                          Text(
+                                              roomName,
+                                              style: TextStyle(
+                                                  color: AppTheme.getTextColorForBackground(color).withOpacity(0.8),
+                                                  fontSize: isHalf ? (isPad ? 10.0 : 6.5) : (isPad ? 12.0 : 8.0),
+                                                  fontWeight: FontWeight.w300,
+                                                  height: 1.1
+                                              ),
+                                              textAlign: TextAlign.center,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis
+                                          ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               );
                             }
-                            return content;
-                          }).toList()
-                      ),
-                    ),
-                  ),
-                if (textOpacity > 0)
-                  SizedBox(height: 4.0 * textOpacity),
-                ...List.generate(maxPeriod + 1, (periodIndex) {
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: periodIndex == maxPeriod ? 0 : currentSpacing),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      // ★ 修正：表示日数に合わせて列数を動的に生成する
-                      children: List.generate(displayDaysCount, (dayIndex) {
 
-                        final matches = _weeklySchedule.where((s) => s['day'] == dayIndex && s['period'] == periodIndex).toList();
+                            Widget currentCell;
+                            if (matches.isEmpty) {
+                              currentCell = SizedBox(width: baseItemWidth, height: currentItemHeight);
+                            } else if (matches.length == 1) {
+                              currentCell = buildCell(matches.first, currentItemHeight, false);
+                            } else {
+                              Map<String, dynamic>? firstHalfMatch;
+                              Map<String, dynamic>? secondHalfMatch;
 
-                        if (matches.isEmpty) return SizedBox(width: baseItemWidth, height: currentItemHeight);
+                              for (var m in matches) {
+                                String rawName = m['course']['raw_name'] ?? m['course']['name'] ?? '';
+                                String termName = m['course']['term']?['name'] ?? '';
+                                String combined = "$rawName $termName".toUpperCase();
 
-                        // ★ セル描画用ヘルパー関数
-                        // lib/screens/dashboard_screen.dart 内の _buildInnerCalendar メソッド内の buildCell
+                                bool isQ2 = combined.contains("Q2") || combined.contains("2Q") || combined.contains("第2クォーター") || combined.contains("春学期後半");
+                                bool isQ4 = combined.contains("Q4") || combined.contains("4Q") || combined.contains("第4クォーター") || combined.contains("秋学期後半");
+                                bool isLate = combined.contains("後半") || combined.contains("後期");
 
-                        Widget buildCell(Map<String, dynamic> match, double height, bool isHalf) {
-                          Color color = _getCourseColor(match['course']);
-
-                          // ★ 追加：iPad（タブレット大画面）かどうかの動的判定
-                          bool isPad = MediaQuery.of(context).size.shortestSide >= 600;
-
-                          String rawName = match['course']['raw_name'] ?? match['course']['name'] ?? '';
-                          String courseName = CourseTitleParser.getCleanTitle(rawName);
-                          String roomName = match['course']['is_custom'] == true ? (match['course']['room'] ?? '') : CourseScheduleParser.getRoomNumber(rawName);
-
-                          return GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              if (match['course']['is_custom'] == true) {
-                                _navigateToCustomDetail(match['course']);
-                              } else {
-                                int courseIdx = _courseIndexMap[match['course']['id']] ?? -1;
-                                if (courseIdx != -1) _navigateToDetail(courseIdx);
+                                if (isQ2 || isQ4 || isLate) {
+                                  secondHalfMatch ??= m;
+                                } else {
+                                  firstHalfMatch ??= m;
+                                }
                               }
-                            },
-                            child: Container(
-                              width: baseItemWidth,
-                              height: height,
-                              decoration: BoxDecoration(
-                                color: color,
-                                borderRadius: BorderRadius.circular(8.0),
-                              ),
-                              padding: EdgeInsets.all(isHalf ? 2.0 : 4.0),
-                              child: Opacity(
-                                opacity: textOpacity,
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    // 授業名（上詰め）
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.topCenter,
-                                        child: Text(
-                                            courseName,
-                                            style: TextStyle(
-                                                color: AppTheme.getTextColorForBackground(color),
-                                                // ★ 修正：iPadの時は文字サイズを大きく（10→15 / 8.5→13）
-                                                fontSize: isHalf
-                                                    ? (isPad ? 13.0 : 8.5)
-                                                    : (isPad ? 15.0 : 10.0),
-                                                fontWeight: FontWeight.w400,
-                                                height: 1.1
-                                            ),
-                                            textAlign: TextAlign.center,
-                                            maxLines: isHalf ? 1 : 3,
-                                            overflow: TextOverflow.ellipsis
-                                        ),
-                                      ),
-                                    ),
-                                    // 教室名（下詰め）
-                                    if (roomName.isNotEmpty)
-                                      Text(
-                                          roomName,
-                                          style: TextStyle(
-                                              color: AppTheme.getTextColorForBackground(color).withOpacity(0.8),
-                                              // ★ 修正：iPadの時は文字サイズを大きく（8→12 / 6.5→10）
-                                              fontSize: isHalf
-                                                  ? (isPad ? 10.0 : 6.5)
-                                                  : (isPad ? 12.0 : 8.0),
-                                              fontWeight: FontWeight.w300,
-                                              height: 1.1
-                                          ),
-                                          textAlign: TextAlign.center,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }
 
-                        if (matches.length == 1) {
-                          return buildCell(matches.first, currentItemHeight, false);
-                        }
+                              if (firstHalfMatch == null) firstHalfMatch = matches[0];
+                              if (secondHalfMatch == null) secondHalfMatch = matches[1];
+                              if (firstHalfMatch == secondHalfMatch) secondHalfMatch = matches[1];
 
-                        Map<String, dynamic>? firstHalfMatch;
-                        Map<String, dynamic>? secondHalfMatch;
+                              double halfHeight = (currentItemHeight - baseSpacing) / 2.0;
 
-                        for (var m in matches) {
-                          String rawName = m['course']['raw_name'] ?? m['course']['name'] ?? '';
-                          String termName = m['course']['term']?['name'] ?? '';
-                          String combined = "$rawName $termName".toUpperCase();
+                              currentCell = SizedBox(
+                                  width: baseItemWidth,
+                                  height: currentItemHeight,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      buildCell(firstHalfMatch, halfHeight, true),
+                                      buildCell(secondHalfMatch, halfHeight, true),
+                                    ],
+                                  )
+                              );
+                            }
 
-                          bool isQ2 = combined.contains("Q2") || combined.contains("2Q") || combined.contains("第2クォーター") || combined.contains("春学期後半");
-                          bool isQ4 = combined.contains("Q4") || combined.contains("4Q") || combined.contains("第4クォーター") || combined.contains("秋学期後半");
-                          bool isLate = combined.contains("後半") || combined.contains("後期");
-
-                          if (isQ2 || isQ4 || isLate) {
-                            secondHalfMatch ??= m;
-                          } else {
-                            firstHalfMatch ??= m;
-                          }
-                        }
-
-                        if (firstHalfMatch == null) firstHalfMatch = matches[0];
-                        if (secondHalfMatch == null) secondHalfMatch = matches[1];
-                        if (firstHalfMatch == secondHalfMatch) secondHalfMatch = matches[1];
-
-                        double halfHeight = (currentItemHeight - currentSpacing) / 2.0;
-
-                        return SizedBox(
-                            width: baseItemWidth,
-                            height: currentItemHeight,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                buildCell(firstHalfMatch, halfHeight, true),
-                                buildCell(secondHalfMatch, halfHeight, true),
-                              ],
-                            )
-                        );
-                      }),
-                    ),
-                  );
-                }),
-              ]
+                            return Padding(
+                              padding: EdgeInsets.only(right: dayIndex == displayDaysCount - 1 ? 0 : baseSpacing),
+                              child: currentCell,
+                            );
+                          }),
+                        ],
+                      ),
+                    );
+                  }),
+                ]
+            ),
           ),
         )
     );
-  }
-
-
-
-
-  // ★ 修正：バグの原因となっていた自前のスワイプ判定を削除し、データフィルタリングを固定
+  }// ★ 修正：バグの原因となっていた自前のスワイプ判定を削除し、データフィルタリングを固定
   // ★ 修正：＋ボタンの常時表示と、スワイプ物理特性の最適化
   Widget _buildFullTasksContent() {
     final now = DateTime.now();
