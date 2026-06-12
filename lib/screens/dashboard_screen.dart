@@ -26,6 +26,10 @@ import '../core/app_snackbar.dart';
 import '../utils/term_helper.dart';
 import 'package:flutter/services.dart';
 import '../services/widget_update_service.dart';
+// 🟢 既存のインポート文のすぐ下に、以下の3行を追記してシステムを認識させます
+import 'package:camera/camera.dart';
+import 'package:path/path.dart' show join;
+import 'package:gal/gal.dart';
 //lib/screens/dashboard_screen.dartの中身です。
 
 
@@ -324,6 +328,86 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   late PageController _coursesWidgetController;
   late PageController _schedulePageController;
   late PageController _taskPageController;
+  // 🟢 最左面用のインラインカメラ制御用ステート変数
+  CameraController? _cameraController;
+  List<CameraDescription> _cameraList = [];
+  int _selectedCamIdx = 0;
+  bool _isCamInitialized = false;
+  bool _isCamInitializing = false;
+  bool _isCamTakingPicture = false;
+  double _camCurrentZoom = 1.0;
+  double _camMinZoom = 1.0;
+  double _camMaxZoom = 1.0;
+  double _camBaseZoom = 1.0;
+  bool _camShowZoomText = false;
+
+  // 🟢 独自カメラのオンデマンドライフサイクル制御
+  Future<void> _prepareAvailableCameras() async {
+    try { _cameraList = await availableCameras(); } catch (_) {}
+  }
+
+  Future<void> _initInlineCamera() async {
+    if (_isCamInitialized || _isCamInitializing || _cameraList.isEmpty) return;
+
+    _isCamInitializing = true;
+    try {
+      _cameraController = CameraController(
+        _cameraList[_selectedCamIdx],
+        ResolutionPreset.max, // 🟢 最高画質に完全復活！
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      await _cameraController!.initialize();
+
+      _camMinZoom = await _cameraController!.getMinZoomLevel();
+      double deviceMax = await _cameraController!.getMaxZoomLevel();
+      _camMaxZoom = math.min(20.0, deviceMax);
+      _camCurrentZoom = _camMinZoom;
+
+      if (mounted) {
+        setState(() => _isCamInitialized = true);
+      }
+    } catch (e) {
+      debugPrint("Camera Init Error: $e");
+    } finally {
+      _isCamInitializing = false;
+    }
+  }
+
+  Future<void> _disposeInlineCamera() async {
+    if (!_isCamInitialized) return;
+    await _cameraController?.dispose();
+    _cameraController = null;
+    if (mounted) setState(() => _isCamInitialized = false);
+  }
+
+  void _switchCameraFacing() {
+    if (_cameraList.length < 2 || _isCamTakingPicture) return;
+    setState(() { _isCamInitialized = false; _selectedCamIdx = (_selectedCamIdx + 1) % _cameraList.length; });
+    _initInlineCamera();
+  }
+
+  Future<void> _takeInlineCameraPhoto() async {
+    if (_cameraController == null || !_isCamInitialized || _isCamTakingPicture) return;
+    setState(() => _isCamTakingPicture = true);
+    try {
+      await Future.delayed(const Duration(milliseconds: 100));
+      final XFile rawImage = await _cameraController!.takePicture();
+      final docDir = await getApplicationDocumentsDirectory();
+      final memoImgDir = Directory('${docDir.path}/memo_images');
+      if (!await memoImgDir.exists()) await memoImgDir.create(recursive: true);
+
+      final String permanentPath = join(memoImgDir.path, 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await File(rawImage.path).copy(permanentPath);
+      await Gal.putImage(permanentPath); // スマホ本体へ自動エクスポート
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('写真を撮影し、カメラロールに保存しました。')));
+    } catch (_) {
+    } finally { // 👈 🟢 修正：コンパイルエラーの原因だった 'finalPackages' を 正しい 'finally' に修正
+      setState(() => _isCamTakingPicture = false);
+    }
+  }
 
 
 
@@ -680,49 +764,63 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   @override void initState() {
     super.initState();
 
-
-
-
     _mainScrollController = ScrollController();
     _mainScrollController.addListener(_onMainScroll);
-
 
     _tasksScrollController = ScrollController();
     _tasksScrollController.addListener(_onTasksScroll);
 
-
     _schedulePageController = PageController(initialPage: _currentSchedulePage);
     _taskPageController = PageController(initialPage: _showCompletedTasks ? 1 : 0);
 
-
     _colorAnimController = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
     _errorAnimController = AnimationController(duration: const Duration(milliseconds: 400), vsync: this);
-
-
-    // ★ 追加：1秒で1回転するコントローラー
     _spinAnimController = AnimationController(duration: const Duration(seconds: 1), vsync: this);
 
+    // 🟢 修正：下限値を -1.0 に拡張して、左側へのカメラスワイプゾーンを確保
+    _dragAnimController = AnimationController(duration: const Duration(milliseconds: 300), vsync: this, lowerBound: -1.0, upperBound: 1.0);
 
-    _dragAnimController = AnimationController(duration: const Duration(milliseconds: 300), vsync: this);
-    _dragAnimController.addListener(() { setState(() { _dragPosition = _dragAnimController.value; }); });
+    // 🟢 修正：スワイプ位置と連動して、カメラの自動初期化 / 破棄、およびステータスバーを滑らかに隠す
+    // 🟢 修正：指の移動中に、起動条件を満たしている最初の1回「だけ」安全に命令を通すようにロジックを最適化
+    // 🟢 修正：伸縮アニメーションとカメラ起動を完全に分離します
+    _dragAnimController.addListener(() {
+      setState(() {
+        _dragPosition = _dragAnimController.value;
 
+        // 🟢 指で動かしている最中はカメラを一切動かさず、完全に左画面（-1.0）に到達した瞬間のみ起動トリガーを引く
+        if (_dragPosition == -1.0) {
+          if (!_isCamInitialized && !_isCamInitializing) {
+            _initInlineCamera();
+          }
+        }
+        // 中央面（0.0以上）側へ引き返し始めたら、即座にリソースを解放してホームの軽さを維持
+        else if (_dragPosition >= 0.0 && (_isCamInitialized || _isCamInitializing)) {
+          _disposeInlineCamera();
+        }
+
+        if (_dragPosition < -0.9) {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        } else {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        }
+      });
+    });
 
     _loadDismissedIds(); _loadCustomData(); _buildCourseIndexMap(); _fetchDataParallel();
-
+    _prepareAvailableCameras(); // 🟢 カメラハードウェアの事前ロード
 
     _updateAlertAnimation();
-
 
     int initialPage = _findBestCourseIndex();
     _currentCourseIndex = initialPage;
     _coursesWidgetController = PageController(initialPage: initialPage, viewportFraction: 1.0);
   }
 
-
   @override void dispose() {
+    _cameraController?.dispose(); // 🟢 追加：カメラの安全解放
     _colorAnimController.dispose();
     _errorAnimController.dispose();
-    _spinAnimController.dispose(); // ★ 追加
+    _spinAnimController.dispose();
     _mainScrollController.dispose();
     _tasksScrollController.dispose();
     _dragAnimController.dispose();
@@ -730,6 +828,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     if (_taskPageController.hasClients) { _taskPageController.dispose(); }
     super.dispose();
   }
+
+
 
 
 
@@ -1972,17 +2072,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final now = DateTime.now();
     final nextWeek = now.add(const Duration(days: 7));
 
-    // ★ 修正：ignoreTerm: true を削除
     final overdueTasks = _filterTasks((due) => due.isBefore(now));
     final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek));
     final unreadMessages = _filterMessages((m) => !_dismissedMessageIds.contains(m['id'].toString()) && (m['read_state'] == null || m['read_state'] != 'read'));
 
     double topPadding = MediaQuery.of(context).padding.top + 24.0;
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
-    // ... 以下そのまま
 
-    bool isTransitioning = (_dragPosition > 0.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
+    bool isTransitioning = (_dragPosition > -1.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
     Duration animDuration = isTransitioning ? Duration.zero : const Duration(milliseconds: 300);
+
+    double screenWidth = MediaQuery.of(context).size.width;
 
     return Stack(
       children: [
@@ -1990,23 +2090,93 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
             child: GestureDetector(
               onHorizontalDragUpdate: (details) {
                 setState(() {
-                  _dragPosition -= details.delta.dx / MediaQuery.of(context).size.width;
-                  _dragPosition = _dragPosition.clamp(0.0, 1.0);
+                  _dragPosition -= details.delta.dx / screenWidth;
+                  _dragPosition = _dragPosition.clamp(-1.0, 1.0);
                 });
                 _dragAnimController.value = _dragPosition;
               },
               onHorizontalDragEnd: (details) {
+                // 🟢 修正：大元のスワイプは画面の切り替え（吸着）のみに専念させ、操作性の競合を排除します
                 if (details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
-                  _dragPosition = details.primaryVelocity! > 0 ? 0.0 : 1.0;
+                  if (details.primaryVelocity! > 0) {
+                    _dragPosition = _dragPosition > 0.0 ? 0.0 : -1.0;
+                  } else {
+                    _dragPosition = _dragPosition < 0.0 ? 0.0 : 1.0;
+                  }
                 } else {
-                  _dragPosition = _dragPosition > 0.5 ? 1.0 : 0.0;
+                  if (_dragPosition < -0.5) _dragPosition = -1.0;
+                  else if (_dragPosition > 0.5) _dragPosition = 1.0;
+                  else _dragPosition = 0.0;
                 }
                 _dragAnimController.animateTo(_dragPosition, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
               },
               child: Stack(
                 children: [
+                  // ① 最左面：カメラ操作専用ベース画面
+                  // 🟢 修正：ヘッダー側の camMargin = 8.0px への極細化と完全に座標計算を同期
                   Transform.translate(
-                      offset: Offset(-_dragPosition * MediaQuery.of(context).size.width, 0),
+                    offset: Offset((-1.0 - _dragPosition) * screenWidth, 0),
+                    child: Container(
+                      width: screenWidth,
+                      height: double.infinity,
+                      color: AppTheme.bg(context),
+                      child: Builder(
+                          builder: (context) {
+                            double camMargin = 8.0; // 👈 8.0px に完全追従
+                            double previewW = screenWidth - (camMargin * 2);
+                            double previewH = previewW * 16 / 9;
+                            double cameraHeaderBottomY = camMargin + previewH + camMargin;
+
+                            return Column(
+                              children: [
+                                SizedBox(height: cameraHeaderBottomY),
+                                // 拡大された16:9ファインダーの直下に、ボタンバーが綺麗に回り込みます
+                                Expanded(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                                    alignment: Alignment.center,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        // 🟢 修正：インカメラ反転（再読み込みマーク）を「左側」へ配置換え
+                                        IconButton(
+                                          icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
+                                          onPressed: _switchCameraFacing,
+                                        ),
+
+                                        // 中央：シンプルな白い単一正円シャッター
+                                        GestureDetector(
+                                          onTap: _takeInlineCameraPhoto,
+                                          child: Container(
+                                            width: 72, height: 72,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: _isCamTakingPicture ? Colors.white.withOpacity(0.5) : Colors.white,
+                                            ),
+                                          ),
+                                        ),
+
+                                        // 🟢 修正：戻るボタンを「右側」へ配置換えし、アイコンをスマートな右矢印マークに変更
+                                        IconButton(
+                                          icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 28),
+                                          onPressed: () {
+                                            _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+                      ),
+                    ),
+                  ),
+
+                  // ② 中央面：TASKS/MESSAGES
+                  Transform.translate(
+                      offset: Offset(-_dragPosition * screenWidth, 0),
                       child: NotificationListener<ScrollNotification>(
                         onNotification: (info) {
                           if (info.metrics.axis == Axis.vertical) {
@@ -2014,7 +2184,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           }
                           return false;
                         },
-                        // ★ 修正：RefreshIndicatorを削除し、純粋なListViewに変更
                         child: ListView(
                           key: const ValueKey('tasks_list'),
                           controller: _tasksScrollController,
@@ -2031,8 +2200,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         ),
                       )
                   ),
+
+                  // ③ 最右面：COURSES時間割
                   Transform.translate(
-                    offset: Offset((1.0 - _dragPosition) * MediaQuery.of(context).size.width, 0),
+                    offset: Offset((1.0 - _dragPosition) * screenWidth, 0),
                     child: _buildCoursesView(topPadding),
                   ),
                 ],
@@ -2043,7 +2214,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         Positioned(
           top: 0.0,
           left: 0, right: 0,
-          child: _buildDynamicHeaderWidget(topPadding),
+          child: _buildDynamicHeaderWidget(topPadding), // 👈 🟢 修正：-24.0 を削除して元の正しい高さを渡します
         ),
       ],
     );
@@ -2058,77 +2229,39 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   Widget _buildDynamicHeaderWidget(double topPadding) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // ★ 既定の3色グラデーション定義
     const Color defaultTopGradient = Color(0xFF020403);
     const Color defaultMiddleGradient = Color(0xff2c4f5f);
     const Color defaultBottomGradient = Color(0xffa8ccdc);
 
-    // --- 左側 (D/W/M) の高さと背景色 ---
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
-
-    // スケジュール側のベース3色は、ひとまずデフォルト色をセット
     List<Color> scheduleColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
 
     if (_scheduleMode == 'D') {
       DateTime date = DateTime.now().add(Duration(days: _currentSchedulePage - 10000));
       final items = _getScheduleForDate(date);
-
       if (items.isNotEmpty) {
-        // ★ 修正：授業の時間帯（時限）に基づいて、Top, Mid, Bottom の色を個別に管理
-        Color? customTop;
-        Color? customMid;
-        Color? customBot;
-
+        Color? customTop; Color? customMid; Color? customBot;
         for (var item in items) {
           if (_hasCustomColor(item['courseObj'])) {
             Color c = _getCourseColor(item['courseObj']);
             int hour = (item['time'] as DateTime).hour;
-
-            // 慶應の時間割に合わせた3分割空間マッピング
-            // 1〜2限 (9:00〜12:15) -> グラデーション上部
-            if (hour < 12) {
-              customTop = c;
-            }
-            // 3〜4限 (13:00〜16:15) -> グラデーション中間
-            else if (hour < 16) {
-              customMid = c;
-            }
-            // 5〜6限 (16:30〜19:45) -> グラデーション下部
-            else {
-              customBot = c;
-            }
+            if (hour < 12) customTop = c; else if (hour < 16) customMid = c; else customBot = c;
           }
         }
-
-        // ★ カスタム色が設定された箇所のみ上書きし、他はデフォルト色を維持する
-        scheduleColors = [
-          customTop ?? defaultTopGradient,
-          customMid ?? defaultMiddleGradient,
-          customBot ?? defaultBottomGradient,
-        ];
+        scheduleColors = [customTop ?? defaultTopGradient, customMid ?? defaultMiddleGradient, customBot ?? defaultBottomGradient];
       }
     }
 
-    // --- 右側 (COURSESカレンダー) ---
     List<Color> calendarColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
 
-    // --- 左右のブレンド（スワイプアニメーション用） ---
-    Color c1 = Color.lerp(scheduleColors[0], calendarColors[0], _dragPosition)!;
-    Color c2 = Color.lerp(scheduleColors[1], calendarColors[1], _dragPosition)!;
-    Color c3 = Color.lerp(scheduleColors[2], calendarColors[2], _dragPosition)!;
+    double blendPos = _dragPosition.clamp(0.0, 1.0);
+    Color c1 = Color.lerp(scheduleColors[0], calendarColors[0], blendPos)!;
+    Color c2 = Color.lerp(scheduleColors[1], calendarColors[1], blendPos)!;
+    Color c3 = Color.lerp(scheduleColors[2], calendarColors[2], blendPos)!;
 
     List<Color> currentGradient = [c1, c2, c3];
 
-    // --- 各種サイズ計算 ---
-    // (以降は元のコードのまま変更不要です)
-
-// ... (以下は元のコードのまま、maxPeriodの計算などが続きます)
-
-
-    // --- 各種サイズ計算 ---
-    int maxPeriod = -1;
-    bool hasSaturdayClasses = false;
+    int maxPeriod = -1; bool hasSaturdayClasses = false;
     for (var item in _weeklySchedule) {
       if (item['period'] > maxPeriod) maxPeriod = item['period'];
       if (item['day'] == 5) hasSaturdayClasses = true;
@@ -2139,22 +2272,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     double screenWidth = MediaQuery.of(context).size.width;
     double spacing = 2.0;
 
-    // 1️⃣ 時刻列のON/OFFに応じて横幅を確定
     double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
     double itemWidth = (screenWidth - 16.0 - timeColumnWidth - (spacing * (displayDaysCount - 1))) / displayDaysCount;
 
-    // 2️⃣ 🟢 【重要】大きく広がった itemWidth をベースに、ヘッダーの最大・最小高さを動的に再計算
-    // これにより、時刻非表示時にマスが大きくなると、headerMaxHeight も自動的にその分増加します
     double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
     double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
     double shrinkLimit = headerMaxHeight - headerMinHeight;
 
-    // 3️⃣ スクロール割合 t の確定
-    double t = shrinkLimit > 0 ? (_courseScrollOffset / shrinkLimit).clamp(0.0, 1.0) : 0.0;
-
-    // 4️⃣ 🟢 展開時・縮小時の最終的な高さを割り出す
-    // 下部の授業一覧の margin や padding、あるいは CustomScrollView の SliverPersistentHeader などの
-    // 高さの基準（extent）としてこの値が使われるため、下のコンテンツが自動的に押し下げられます
+    double t = shrinkLimit > 0 ? (_courseScrollOffset  / shrinkLimit).clamp(0.0, 1.0) : 0.0;
     double calendarHeight = headerMaxHeight - t * shrinkLimit;
 
     double scheduleMinHeight = topPadding + 40.0;
@@ -2165,34 +2290,42 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
 
     double dynamicScheduleHeight = math.max(scheduleMinHeight, scheduleHeight - activeTasksScrollOffset);
-
-    double taskShrinkLimit = math.max(1.0, scheduleHeight - scheduleMinHeight);
-    double taskT = (activeTasksScrollOffset / taskShrinkLimit).clamp(0.0, 1.0);
+    double taskT = (activeTasksScrollOffset / math.max(1.0, scheduleHeight - scheduleMinHeight)).clamp(0.0, 1.0);
     Color monoBg = isDark ? Colors.black : const Color(0xFFEEEEEE);
     Color monoTextColor = isDark ? Colors.white : Colors.black;
 
     double effectiveScheduleHeight = _dragPosition < 0.5 ? dynamicScheduleHeight : scheduleHeight;
-    double currentHeight = effectiveScheduleHeight + (calendarHeight - effectiveScheduleHeight) * _dragPosition;
+
+    // 🟢 修正：4方向の均一枠をさらに細く「8.0px」へ。プレビューサイズを最大化
+    double camMargin = 8.0;
+    double previewW = screenWidth - (camMargin * 2);
+    double previewH = previewW * 16 / 9;
+    double cameraTargetHeight = camMargin + previewH + camMargin;
+
+    double currentHeight;
+    if (_dragPosition >= 0.0) {
+      currentHeight = effectiveScheduleHeight + (calendarHeight - effectiveScheduleHeight) * _dragPosition;
+    } else {
+      double camFactor = _dragPosition.abs();
+      currentHeight = ui.lerpDouble(effectiveScheduleHeight, cameraTargetHeight, camFactor)!;
+    }
 
     String heroTag = 'top_widget_hero';
     Color tCol = Colors.white;
 
-    bool isTransitioning = (_dragPosition > 0.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
+    bool isTransitioning = (_dragPosition > -1.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
     bool isVerticalScrolling = _courseScrollOffset > 0 || _tasksScrollOffset > 0;
-    Duration animDuration = (isTransitioning || isVerticalScrolling) ? Duration.zero : const Duration(milliseconds: 300);
+    Duration animDuration = isVerticalScrolling ? Duration.zero : const Duration(milliseconds: 300);
 
     return Hero(
       tag: heroTag,
       child: Material(
         type: MaterialType.transparency,
         child: GestureDetector(
-          // 🟢 ヘッダー領域全域でスワイプを検知
           behavior: HitTestBehavior.opaque,
           onHorizontalDragEnd: (details) {
-            if (details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
-              setState(() {
-                _isTimeVisible = details.primaryVelocity! > 0;
-              });
+            if (_dragPosition > 0.5 && details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
+              setState(() { _isTimeVisible = details.primaryVelocity! > 0; });
             }
           },
           child: AnimatedContainer(
@@ -2202,24 +2335,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
             height: currentHeight,
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: currentGradient,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                stops: const [0.0, 0.5, 1.0],
-              ),
+              gradient: LinearGradient(colors: [c1, c2, c3], begin: Alignment.topLeft, end: Alignment.bottomRight, stops: const [0.0, 0.5, 1.0]),
               borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
             ),
             child: Stack(
               children: [
+                // 🟢 解決の鍵：if文条件分岐を撤廃。カメラ中も常時ツリー裏で保持することでページ位置を100%固定記憶！
                 IgnorePointer(
-                  ignoring: _dragPosition >= 0.5,
-                  child: Opacity(
-                    opacity: (1.0 - _dragPosition * 2).clamp(0.0, 1.0),
+                  ignoring: _dragPosition < -0.01 || _dragPosition >= 0.5,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 150),
+                    opacity: _dragPosition >= 0.0 ? (1.0 - _dragPosition * 2).clamp(0.0, 1.0) : (1.0 - _dragPosition.abs() * 3).clamp(0.0, 1.0),
                     child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT),
                   ),
                 ),
-
                 IgnorePointer(
                   ignoring: _dragPosition < 0.5,
                   child: RepaintBoundary(
@@ -2228,16 +2357,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onVerticalDragUpdate: (details) {
-                          if (_mainScrollController.hasClients) {
-                            double newOffset = _mainScrollController.offset - details.primaryDelta!;
-                            double maxScroll = _mainScrollController.position.maxScrollExtent;
-                            _mainScrollController.jumpTo(newOffset.clamp(0.0, maxScroll));
-                          }
-                        },
                         child: Container(
                           color: Colors.transparent,
-                          // 🟢 状態変数 _isTimeVisible をカレンダー生成に渡す
                           child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
                         ),
                       ),
@@ -2245,6 +2366,142 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   ),
                 ),
 
+                // カメラプレビュー領域（16:9インセット）
+                if (_dragPosition < 0.0) ...[
+                  Positioned(
+                    top: camMargin,
+                    left: camMargin,
+                    width: previewW,
+                    height: previewH,
+                    child: Opacity(
+                      opacity: _dragPosition.abs(),
+                      child: Container(
+                        clipBehavior: Clip.antiAlias,
+                        decoration: const BoxDecoration(
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(32.0),
+                            topRight: Radius.circular(32.0),
+                            bottomLeft: Radius.circular(24.0),
+                            bottomRight: Radius.circular(24.0),
+                          ),
+                          color: Colors.black,
+                        ),
+                        child: _isCamInitialized && _cameraController != null
+                            ? Stack(
+                          children: [
+                            Positioned.fill(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque, // 🟢 プレビュー全域で確実にタッチを拾う
+                                onScaleStart: (details) {
+                                  _camBaseZoom = _camCurrentZoom;
+                                },
+                                onScaleUpdate: (details) async {
+                                  // --------------------------------------------------------
+                                  // 🟢 ① 2本指の時：どこを触っても確実に作動する「超高感度ズーム」
+                                  // --------------------------------------------------------
+                                  if (details.pointerCount == 2) {
+                                    if (_camMaxZoom <= _camMinZoom) return;
+                                    // 指数計算の感度を 1.5倍 に引き上げ、微細なピンチでも確実にズーム・ルーズが追従
+                                    double nz = (_camBaseZoom * math.pow(details.scale, 1.5)).clamp(_camMinZoom, _camMaxZoom);
+                                    setState(() {
+                                      _camCurrentZoom = nz;
+                                      _camShowZoomText = true;
+                                    });
+                                    await _cameraController!.setZoomLevel(nz);
+                                  }
+                                  // --------------------------------------------------------
+                                  // 🟢 ② 1本指の時：プレビュー内からの「リアルタイムスライド戻り」
+                                  // --------------------------------------------------------
+                                  else if (details.pointerCount == 1) {
+                                    // 指の移動量（focalPointDelta）を画面幅で割ってリアルタイムにホームへ同期
+                                    double deltaX = details.focalPointDelta.dx / screenWidth;
+                                    setState(() {
+                                      // カメラ画面（-1.0）から右スライド（プラス方向）で中央ホーム（0.0）へ向かう
+                                      _dragPosition = (_dragPosition + deltaX).clamp(-1.0, 0.0);
+                                    });
+                                    _dragAnimController.value = _dragPosition;
+                                  }
+                                },
+                                onScaleEnd: (details) {
+                                  setState(() => _camShowZoomText = false);
+
+                                  // 🟢 1本指でのスライド戻りから指が離れた瞬間の「吸着アニメーション」
+                                  // 大元のスワイプ処理と完全に足並みを揃え、もともと見ていた日割りのページを壊さず復元
+                                  if (_dragPosition < 0.0) {
+                                    if (_dragPosition > -0.5) {
+                                      _dragPosition = 0.0;
+                                    } else {
+                                      _dragPosition = -1.0;
+                                    }
+                                    _dragAnimController.animateTo(
+                                        _dragPosition,
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutCubic
+                                    );
+                                  }
+                                },
+                                child: ClipRRect(
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(32.0),
+                                    topRight: Radius.circular(32.0),
+                                    bottomLeft: Radius.circular(24.0),
+                                    bottomRight: Radius.circular(24.0),
+                                  ),
+                                  child: OverflowBox(
+                                    alignment: Alignment.center,
+                                    child: FittedBox(
+                                      fit: BoxFit.cover,
+                                      child: SizedBox(
+                                        width: _cameraController!.value.previewSize!.height,
+                                        height: _cameraController!.value.previewSize!.width,
+                                        child: CameraPreview(_cameraController!),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // ダイヤル目盛りバー（ここは従来通りの完璧な挙動を維持）
+                            Positioned(
+                              bottom: 16, left: 0, right: 0,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 200),
+                                    opacity: _camShowZoomText ? 1.0 : 0.0,
+                                    child: Text("${_camCurrentZoom.toStringAsFixed(1)}x", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w200, letterSpacing: 1.0)),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onHorizontalDragStart: (_) => setState(() => _camShowZoomText = true),
+                                    onHorizontalDragUpdate: (details) async {
+                                      if (_camMaxZoom <= _camMinZoom) return;
+                                      double dz = -details.delta.dx * 0.04;
+                                      double tgt = _camCurrentZoom + dz;
+                                      setState(() => _camCurrentZoom = tgt.clamp(_camMinZoom, _camMaxZoom));
+                                      await _cameraController!.setZoomLevel(_camCurrentZoom);
+                                    },
+                                    onHorizontalDragEnd: (_) => setState(() => _camShowZoomText = false),
+                                    child: SizedBox(
+                                      width: previewW, height: 24,
+                                      child: CustomPaint(painter: _SlidingDialTicksPainter(progress: (_camCurrentZoom - _camMinZoom) / (_camMaxZoom - _camMinZoom))),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          ],
+                        )
+                            : const Center(child: CircularProgressIndicator(color: Colors.white)),
+                      ),
+                    ),
+                  ),
+                ],
+
+                // 左上：学期タイトル
                 Positioned(
                   top: topPadding - 20,
                   left: 8.0,
@@ -2255,19 +2512,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       child: Builder(
                           builder: (context) {
                             String term = widget.currentTerm.toUpperCase();
-                            String line1 = term;
-                            String line2 = "";
-
-                            if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) {
-                              line1 = "SPRING"; line2 = "SEMESTER";
-                            } else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) {
-                              line1 = "FALL"; line2 = "SEMESTER";
-                            } else if (term.startsWith('Q')) {
-                              line1 = "QUARTER";
-                              String n = term.replaceAll(RegExp(r'[^0-9]'), '');
-                              line2 = n == '1' ? "ONE" : n == '2' ? "TWO" : n == '3' ? "THREE" : n == '4' ? "FOUR" : n;
-                            }
-
+                            String line1 = term; String line2 = "";
+                            if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) { line1 = "SPRING"; line2 = "SEMESTER"; }
+                            else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) { line1 = "FALL"; line2 = "SEMESTER"; }
+                            else if (term.startsWith('Q')) { line1 = "QUARTER"; String n = term.replaceAll(RegExp(r'[^0-9]'), ''); line2 = n == '1' ? "ONE" : n == '2' ? "TWO" : n == '3' ? "THREE" : n == '4' ? "FOUR" : n; }
                             return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -2282,6 +2530,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   ),
                 ),
 
+                // 右上：各種コントロールボタン
                 Positioned(
                   top: topPadding - 32,
                   right: 16,
@@ -3958,19 +4207,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   Widget build(BuildContext context) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // ★ 修正：ホーム画面(グラデーション背景)なら白文字、それ以外はライトモードなら黒文字に設定
     SystemUiOverlayStyle overlayStyle = _currentViewState == ViewState.home
         ? SystemUiOverlayStyle.light
         : (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark);
 
+    // 🟢 修正：左画面にスワイプする時（_dragPosition < 0）のみ、下部バー群がホーム画面と同期して右側に「すーっ」と掃ける
+    double leftSwipeOffset = _dragPosition < 0.0 ? -_dragPosition * MediaQuery.of(context).size.width : 0.0;
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlayStyle,
       child: PopScope(
-        canPop: _currentViewState == ViewState.home,
+        // 🟢 修正：無地画面のときは、戻るボタン（またはスワイプ戻り）で中央面へ引き返せるようにガード
+        canPop: _currentViewState == ViewState.home && _dragPosition == 0.0,
         onPopInvoked: (didPop) {
           if (didPop) return;
-          if (_currentViewState != ViewState.home) {
-            _handleBackNavigation();
+          if (_dragPosition < 0.0) {
+            _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+          } else if (_currentViewState != ViewState.home) {
+            _handleBackNavigation(); // 👈 🟢 修正：末尾に () を追加して関数を確実に実行させます
           }
         },
         child: Stack(
@@ -3986,8 +4240,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 )
             ),
 
+            // 下部かすみ用グラデーションマスク
             Positioned(
-              bottom: 0, left: 0, right: 0,
+              bottom: 0,
+              left: leftSwipeOffset, // 👈 🟢 追従オフセットを適用
+              right: -leftSwipeOffset, // 👈 🟢 追従オフセットを適用
               height: 140.0 + MediaQuery.of(context).padding.bottom + 16.0,
               child: IgnorePointer(
                 child: Column(
@@ -4025,8 +4282,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               ),
             ),
 
+            // 下部ナビゲーションユニット本体
             Positioned(
-                bottom: 0, left: 0, right: 0,
+                bottom: 0,
+                left: leftSwipeOffset, // 👈 🟢 追従オフセットを適用
+                right: -leftSwipeOffset, // 👈 🟢 追従オフセットを適用
                 child: _buildBottomNavigation()
             )
           ],
@@ -4160,3 +4420,32 @@ class _SwipeToDeleteWidgetState extends State<_SwipeToDeleteWidget> with SingleT
   }
 }
 
+// 🟢 ファイル最末尾に追記：中央基準で目盛りが左右に流れるインライン用ダイヤルペインター
+class _SlidingDialTicksPainter extends CustomPainter {
+  final double progress;
+  _SlidingDialTicksPainter({required this.progress});
+
+  @override void paint(Canvas canvas, Size size) {
+    final double centerX = size.width / 2;
+    const int totalTicks = 80; const double tickSpacing = 14.0;
+    final Paint paint = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.0;
+    double activeOffset = progress * totalTicks * tickSpacing;
+
+    for (int i = 0; i <= totalTicks; i++) {
+      double x = centerX + (i * tickSpacing) - activeOffset;
+      if (x < 0 || x > size.width) continue;
+      double dist = (x - centerX).abs();
+      double opacity = (1.0 - (dist / centerX)).clamp(0.0, 1.0);
+      opacity = math.pow(opacity, 2.5).toDouble();
+      if (opacity <= 0.02) continue;
+      paint.color = Colors.white.withOpacity(opacity);
+      double th = size.height * (i % 5 == 0 ? 0.8 : 0.4);
+      double topY = (size.height - th) / 2;
+      canvas.drawLine(Offset(x, topY), Offset(x, topY + th), paint);
+    }
+    final Paint cp = Paint()..color = Colors.white..style = PaintingStyle.fill;
+    Path tp = Path(); tp.moveTo(centerX - 4, size.height); tp.lineTo(centerX + 4, size.height); tp.lineTo(centerX, size.height - 6); tp.close();
+    canvas.drawPath(tp, cp);
+  }
+  @override bool shouldRepaint(covariant _SlidingDialTicksPainter old) => old.progress != progress;
+}
