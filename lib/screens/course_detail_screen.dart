@@ -20,6 +20,7 @@ import '../main.dart'; // ★ globalDisableAutoCacheClear を読み込むため�
 
 import '../utils/term_helper.dart'; // パスは適宜合わせてください
 import '../utils/dummy_data_helper.dart';
+import 'custom_camera_screen.dart';
 
 //lib/screens/course_detail_screen.dartの中身です。
 
@@ -1131,8 +1132,8 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                                   alignment: Alignment.centerLeft,
                                   child: TextButton.icon(
                                       onPressed: () => openSmartUrl(context, targetUrl, widget.cookie, title: title),
-                                      icon: Icon(Icons.open_in_browser, size: 16, color: btnTextColor),
-                                      label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.w400, letterSpacing: 1.0)),
+
+                                      label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.w500, letterSpacing: 1.0)),
                                       style: TextButton.styleFrom(
                                           backgroundColor: btnBgColor,
                                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -1486,22 +1487,28 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
   }
 
 
+  // 🟢 修正：image_picker 経由の OS 標準カメラを廃止し、内製カスタムカメラへルーティングする
   Future<void> _takePhoto() async {
     try {
-      // ★ 追加：これからカメラを開くので、お掃除ストップを宣言！
+      // 1. カメラ画面を開くため、一時ファイルのお掃除ストップを宣言
       globalDisableAutoCacheClear = true;
 
-      final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80, maxWidth: 2400);
+      // 2. 🟢 内製カスタムカメラ画面（CustomCameraScreen）を起動し、戻り値として写真のパスを待つ
+      final String? savedPath = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(builder: (_) => const CustomCameraScreen()),
+      );
 
-      if (photo != null) {
-        // 一時パスから安全な領域へコピーして保存
-        final savedPath = await _saveImageToLocal(photo.path);
+      // 3. 🟢 写真のパスが正常に返ってきたら（撮影が成功したら）、メモにアイテムを追加
+      // ※ CustomCameraScreen 側で既に永続化ディレクトリへの保存が完了しているため、
+      // ここでの _saveImageToLocal ロジックは不要（パスをそのまま渡すだけ）になります
+      if (savedPath != null && savedPath.isNotEmpty) {
         _addItemToMemo('image', savedPath);
       }
     } catch (e) {
-      debugPrint("Take Photo Error: $e");
+      debugPrint("Take Photo via Custom Camera Error: $e");
     } finally {
-      // ★ 追加：カメラから戻ってきた（またはエラーで終わった）ので、お掃除を再開OKにする
+      // 4. アプリにお掃除の再開を許可する
       globalDisableAutoCacheClear = false;
     }
   }

@@ -3550,7 +3550,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         children: [
                           Icon(Icons.arrow_back_ios, color: AppTheme.textMain(context), size: 20),
                           const SizedBox(width: 8),
-                          Text("TASKS", style: TextStyle(color: AppTheme.textMain(context), fontSize: 24, fontWeight: FontWeight.w200, letterSpacing: 2.0)),
+                          Text("TASKS", style: TextStyle(color: AppTheme.textMain(context), fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 2.0)),
                         ]
                     ),
                   ),
@@ -3752,7 +3752,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         style: TextStyle(
                             color: AppTheme.textMain(context),
                             fontSize: 24,
-                            fontWeight: FontWeight.w200,
+                            fontWeight: FontWeight.w300,
                             letterSpacing: 2.0
                         )
                     ),
