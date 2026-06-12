@@ -113,12 +113,19 @@ class _CyberCanvasAppState extends State<CyberCanvasApp> with WidgetsBindingObse
               title: 'k.portal',
               debugShowCheckedModeBanner: false,
               themeMode: currentMode,
+
+              // 🟢 ライトモードのテーマ設定にフォントを追加
               theme: ThemeData(
                   brightness: Brightness.light,
+                  fontFamily: 'GenInterfaceJP', // 👈 追記
                   scaffoldBackgroundColor: const Color(0xFFF5F5F7)),
+
+              // 🟢 ダークモードのテーマ設定にフォントを追加
               darkTheme: ThemeData(
                   brightness: Brightness.dark,
+                  fontFamily: 'GenInterfaceJP', // 👈 追記
                   scaffoldBackgroundColor: Colors.black),
+
               home: const MainSkeleton());
         });
   }
