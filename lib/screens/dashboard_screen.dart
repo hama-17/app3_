@@ -206,6 +206,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
           _isAuthenticated = false;
           _cookie = "";
           _isLoading = true;
+
         });
 
         // 7. 出荷状態のクリーンな状態で年度・学期の再算出へ
@@ -346,6 +347,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   bool _camShowZoomText = false;
   // 🟢 追加：メモ入力欄が今開いているかどうかのフラグ
   bool _isMemoFieldOpen = false;
+  // 🟢 追加：カメラ画面の対応メモ手動置き換え用の管理ステート
+  String _cameraCourseMode = 'auto';
+  Map<String, dynamic>? _cameraManualCourseObj;
+
+  late AnimationController _cameraCaptureAnimController;
+  String? _capturedImagePathForAnim;
 
   // 🟢 独自カメラのオンデマンドライフサイクル制御
   Future<void> _prepareAvailableCameras() async {
@@ -394,24 +401,346 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     _initInlineCamera();
   }
 
-  Future<void> _takeInlineCameraPhoto() async {
-    if (_cameraController == null || !_isCamInitialized || _isCamTakingPicture) return;
-    setState(() => _isCamTakingPicture = true);
+  // 🟢 追加：永続化コピーやGal登録、授業メモ追加などの重いI/Oを「裏」で完全に非同期実行するメソッド
+  Future<void> _performBackgroundSaveTasks(String tmpPath) async {
     try {
-      await Future.delayed(const Duration(milliseconds: 100));
-      final XFile rawImage = await _cameraController!.takePicture();
       final docDir = await getApplicationDocumentsDirectory();
       final memoImgDir = Directory('${docDir.path}/memo_images');
       if (!await memoImgDir.exists()) await memoImgDir.create(recursive: true);
 
       final String permanentPath = join(memoImgDir.path, 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await File(rawImage.path).copy(permanentPath);
-      await Gal.putImage(permanentPath); // スマホ本体へ自動エクスポート
+
+      // 🟢 ユーザーを待たせる原因だった重い処理群を、ここで安全にバックグラウンド並行処理
+      await File(tmpPath).copy(permanentPath);
+      await Gal.putImage(permanentPath);
+      await _addMemoToCourse('image', permanentPath);
+
+    } catch (e) {
+      debugPrint("Background save error: $e");
+    }
+  }
+
+  // 🟢 修正：保存完了を一切待たずに、シャッターの瞬間にアニメーションを最優先点火する爆速版
+  Future<void> _takeInlineCameraPhoto() async {
+    if (_cameraController == null || !_isCamInitialized || _isCamTakingPicture) return;
+    setState(() => _isCamTakingPicture = true);
+    try {
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // ① まずカメラのハードウェアシャッターだけを切り、撮れたてホヤホヤの一時ファイルを確保
+      final XFile rawImage = await _cameraController!.takePicture();
+
+      // ② 🟢 解決の鍵：重い保存処理の完了を一切「待たずに」、tmp領域のパスで即座に右下吸い込みアニメーションを点火！
+      // tmp画像はメモリやストレージの直近にキャッシュされているため、Image.fileの読み込みラグも極限まで消滅します
+      if (mounted) {
+        setState(() {
+          _capturedImagePathForAnim = rawImage.path;
+        });
+        _cameraCaptureAnimController.forward().then((_) {
+          if (mounted) {
+            setState(() {
+              _capturedImagePathForAnim = null;
+              _cameraCaptureAnimController.reset();
+            });
+          }
+        });
+      }
+
+      // ③ 🟢 解決の鍵：残りのフォルダ生成、Galエクスポート、授業詳細へのデータ流し込みは、
+      // 【awaitを付けずに】そのまま未来へ放り投げ、完全に「裏（バックグラウンド）」で静かに処理させます
+      _performBackgroundSaveTasks(rawImage.path);
 
     } catch (_) {
-    } finally { // 👈 🟢 修正：コンパイルエラーの原因だった 'finalPackages' を 正しい 'finally' に修正
+    } finally {
       setState(() => _isCamTakingPicture = false);
     }
+  }
+
+  // 🟢 追加：現在進行中、または直後の授業を正確に割り出すロジック
+  // 🟢 修正：戻り値の型を Map<String, String>? から Map<String, dynamic>? に変更
+  // これにより、Map の中に String と bool を混在させることが可能になり、エラー1が消滅します
+  Map<String, dynamic>? _getCurrentOrNextCourse() {
+    // 🟢 追加：手動で「対応なし」に置き換えられている場合は即座にnull（対応なし）を返す
+    if (_cameraCourseMode == 'none') return null;
+
+    // 🟢 追加：手動で特定の授業に置き換えられている場合は、自動計算をスキップしてその授業データを返す
+    if (_cameraCourseMode == 'manual' && _cameraManualCourseObj != null) {
+      return _cameraManualCourseObj;
+    }
+
+    // （これ以降の本来の自動判定ロジックは一切変更なし）
+    final now = DateTime.now();
+    final items = _getScheduleForDate(now);
+
+    int nowMins = now.hour * 60 + now.minute;
+    Map<String, dynamic>? targetItem;
+
+    for (var item in items) {
+      if (item['type'] != 'class' || item['status'] == 2) continue;
+
+      DateTime start = item['time'];
+      DateTime end = item['endTime'] ?? start.add(const Duration(hours: 1));
+      int startMins = start.hour * 60 + start.minute;
+      int endMins = end.hour * 60 + end.minute;
+
+      if (nowMins >= startMins && nowMins <= endMins) {
+        targetItem = item;
+        break;
+      }
+    }
+
+    if (targetItem == null) {
+      for (var item in items) {
+        if (item['type'] != 'class' || item['status'] == 2) continue;
+
+        DateTime start = item['time'];
+        int startMins = start.hour * 60 + start.minute;
+        if (startMins > nowMins) {
+          targetItem = item;
+          break;
+        }
+      }
+    }
+
+    if (targetItem != null) {
+      return {
+        'courseId': targetItem['courseId'].toString(),
+        'courseName': targetItem['rawName']?.toString() ?? targetItem['title']?.toString() ?? '',
+        'isCustom': targetItem['isCustom'] == true,
+      };
+    }
+    return null;
+  }
+
+  // 🟢 追加：カメラ画面のメモテキストタップ時に起動する、全授業メモ選択用の共通ボトムシート
+  // 🟢 修正：背景色スイッチ・タップ挙動分離・「対応なし」「自動判定」枠を内包した決定版カード
+  // 🟢 修正：赤字・アイコンの完全撤廃、文字の拡大、極細ヘッダーへのリファイン版
+  // 🟢 修正：選択中（アクティブ）の項目のみを濃く、それ以外を均一に薄くフェードさせるセレクトカード
+  void _showCourseSelectionBottomSheet(BuildContext context) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color sheetBgColor = isDark ? Colors.black : AppTheme.bg(context);
+    Color baseTextColor = AppTheme.textMain(context);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: sheetBgColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      builder: (ctx) {
+        int totalItemsCount = _displayCourses.length + 2;
+
+        return SafeArea(
+          bottom: true,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 24.0, top: 24.0, bottom: 12.0),
+                child: Text(
+                  "SELECT MEMO",
+                  style: TextStyle(
+                    color: baseTextColor.withOpacity(0.35),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w200,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: totalItemsCount,
+                  itemBuilder: (context, index) {
+
+                    // ─── ケース1：自動判定 ───
+                    if (index == 0) {
+                      // 🟢 現在のモードが 'auto' なら選択中（不透明度1.0）、それ以外は薄く（0.35）
+                      bool isSelected = _cameraCourseMode == 'auto';
+
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            _cameraCourseMode = 'auto';
+                            _cameraManualCourseObj = null;
+                          });
+                          Navigator.pop(ctx);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 18.0),
+                          child: Text(
+                            "時間割に合わせて自動で連動",
+                            style: TextStyle(
+                              color: baseTextColor.withOpacity(isSelected ? 1.0 : 0.35),
+                              fontSize: 17,
+                              fontWeight: isSelected ? FontWeight.w400 : FontWeight.w200,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    // ─── ケース2：対応なし ───
+                    if (index == 1) {
+                      // 🟢 現在のモードが 'none' なら選択中（不透明度1.0）、それ以外は薄く（0.35）
+                      bool isSelected = _cameraCourseMode == 'none';
+
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            _cameraCourseMode = 'none';
+                            _cameraManualCourseObj = null;
+                          });
+                          Navigator.pop(ctx);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 18.0),
+                          child: Text(
+                            "メモをとらない(画像は端末にのみ保存)",
+                            style: TextStyle(
+                              color: baseTextColor.withOpacity(isSelected ? 1.0 : 0.35),
+                              fontSize: 17,
+                              fontWeight: isSelected ? FontWeight.w400 : FontWeight.w200,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    // ─── ケース3：通常の授業リスト ───
+                    final course = _displayCourses[index - 2];
+                    final rawName = course['name'] ?? '';
+                    final cleanTitle = CourseTitleParser.getCleanTitle(rawName);
+
+                    // 🟢 手動選択モードであり、かつIDが完全一致している項目のみを選択中（1.0）と判定
+                    bool isSelected = _cameraCourseMode == 'manual' &&
+                        _cameraManualCourseObj?['courseId'] == course['id'].toString();
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _cameraCourseMode = 'manual';
+                                  _cameraManualCourseObj = {
+                                    'courseId': course['id'].toString(),
+                                    'courseName': rawName,
+                                    'isCustom': course['is_custom'] == true,
+                                  };
+                                });
+                                Navigator.pop(ctx);
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 18.0),
+                                child: Text(
+                                  cleanTitle,
+                                  style: TextStyle(
+                                    color: baseTextColor.withOpacity(isSelected ? 1.0 : 0.35),
+                                    fontSize: 17,
+                                    fontWeight: isSelected ? FontWeight.w400 : FontWeight.w200,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              Icons.arrow_outward_rounded,
+                              // 🟢 矢印の不透明度も、その授業が選択中かどうかに合わせて美しく明暗スイッチさせます
+                              color: baseTextColor.withOpacity(isSelected ? 1.0 : 0.35),
+                              size: 22,
+                            ),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _routeToCourse(
+                                course['id'].toString(),
+                                course['is_custom'] == true,
+                                0,
+                                null,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // 🟢 追加：割り出した授業の「今日のメモタブ」にテキストや画像をねじ込むロジック
+  Future<void> _addMemoToCourse(String type, String data) async {
+    final target = _getCurrentOrNextCourse();
+    if (target == null) {
+      // 🟢 修正：対応授業がない場合はスナックバーを出さず、そのまま静かに処理を完了します
+      // （※ カメラ画像自体はこれより前にスマホ本体のGalへ正常に保存されています）
+      return;
+    }
+
+    final String courseId = target['courseId']!;
+    final String courseName = target['courseName']!;
+    final prefs = await SharedPreferences.getInstance();
+
+    // 授業詳細画面と全く同じキーで SharedPreferences に直接アクセス
+    final String key = 'course_memos_v2_$courseId';
+    final String? memoData = prefs.getString(key);
+
+    List<Map<String, dynamic>> memos = [];
+    if (memoData != null) {
+      try {
+        final List<dynamic> decoded = jsonDecode(memoData);
+        memos = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+      } catch (_) {}
+    }
+
+    final now = DateTime.now();
+    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+
+    // 1日に1つまでというルールの通り、「今日の日付」で始まるタブを探す
+    int todayMemoIndex = memos.indexWhere((m) => m['title'] != null && m['title'].toString().startsWith(dateStr));
+
+    if (todayMemoIndex == -1) {
+      // まだ今日のタブがなければ新規作成（授業詳細の _createNewMemoTab と完全同一仕様）
+      final filteredName = CourseTitleParser.getCleanTitle(courseName);
+      final newTitle = filteredName.isNotEmpty ? '$dateStr $filteredName' : dateStr;
+      memos.add({
+        'id': now.millisecondsSinceEpoch.toString(),
+        'title': newTitle,
+        'items': <dynamic>[],
+      });
+      todayMemoIndex = memos.length - 1;
+    }
+
+    // アイテム（テキスト or 画像パス）を追加
+    final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+    List<dynamic> items = List<dynamic>.from(memos[todayMemoIndex]['items'] ?? []);
+    items.add({
+      'id': now.millisecondsSinceEpoch.toString(),
+      'type': type,
+      'data': data,
+      'time': timeStr
+    });
+    memos[todayMemoIndex]['items'] = items;
+
+    // 保存
+    await prefs.setString(key, jsonEncode(memos));
+
+
   }
 
 
@@ -782,6 +1111,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     _errorAnimController = AnimationController(duration: const Duration(milliseconds: 400), vsync: this);
     _spinAnimController = AnimationController(duration: const Duration(seconds: 1), vsync: this);
 
+    _cameraCaptureAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+
     // 🟢 修正：下限値を -1.0 に拡張して、左側へのカメラスワイプゾーンを確保
     _dragAnimController = AnimationController(duration: const Duration(milliseconds: 300), vsync: this, lowerBound: -1.0, upperBound: 1.0);
 
@@ -822,7 +1156,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   @override void dispose() {
-    _cameraController?.dispose(); // 🟢 追加：カメラの安全解放
+    _cameraCaptureAnimController.dispose(); // 🟢 追加：リソースの安全解放
+    _cameraController?.dispose();
     _colorAnimController.dispose();
     _errorAnimController.dispose();
     _spinAnimController.dispose();
@@ -2131,6 +2466,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       color: AppTheme.bg(context),
                       child: Column(
                         children: [
+                          // プレビュー表示エリアのダミー高さを担保（既存コード）
+                          // プレビュー表示エリアのダミー高さを担保（既存コード）
                           Builder(
                             builder: (context) {
                               double camMargin = 8.0;
@@ -2145,7 +2482,67 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                             },
                           ),
 
-                          // 🟢 変更：ここに記述されていたPadding(カプセルボタン)を完全に廃止・削除しました
+                          // 🟢 修正：テキストと斜め矢印をRowで並列化。判定を分離しボトムシートと直通リンクを紐づけます
+                          Builder(
+                              builder: (context) {
+                                final target = _getCurrentOrNextCourse();
+                                final now = DateTime.now();
+                                final dateStr = '${now.month}/${now.day}';
+
+                                String displayText = "対応メモなし";
+                                bool hasTarget = target != null;
+
+                                if (hasTarget) {
+                                  final cleanTitle = CourseTitleParser.getCleanTitle(target['courseName'] as String);
+                                  displayText = "$dateStr $cleanTitle";
+                                }
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 20.0, top: 12.0, right: 12.0),
+                                  child: Row(
+                                    children: [
+                                      // ① テキスト部分：タップすると下部からカードがせり上がり、他授業のメモを自由にセレクト可能
+                                      Expanded(
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () {
+                                            _showCourseSelectionBottomSheet(context);
+                                          },
+                                          child: Text(
+                                            displayText,
+                                            style: TextStyle(
+                                              color: AppTheme.textMain(context).withOpacity(hasTarget ? 1.0 : 0.25),
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w200,
+                                              letterSpacing: 0.5,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+
+                                      // ② 矢印アイコン部分：タップで現在の対応授業詳細の「MEMOタブ」へダイレクトジャンプ
+                                      IconButton(
+                                        icon: Icon(
+                                          Icons.arrow_outward_rounded,
+                                          color: AppTheme.textMain(context).withOpacity(hasTarget ? 0.7 : 0.1),
+                                          size: 22,
+                                        ),
+                                        onPressed: hasTarget ? () {
+                                          _routeToCourse(
+                                            target['courseId'] as String,
+                                            target['isCustom'] as bool,
+                                            0,
+                                            null,
+                                          );
+                                        } : null, // 対応メモがない時は無効化して不透明度をミュート
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                          ),
 
                           const Spacer(),
 
@@ -2161,15 +2558,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   return Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      // 🟢 変更：左側ボタンを「カメラ反転」から「テキストメモマーク」へチェンジ
-                                      IconButton(
-                                        icon: Icon(Icons.edit_note_rounded, color: camBtnColor, size: 32),
-                                        onPressed: () {
-                                          setState(() => _isMemoFieldOpen = true);
-                                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            _cameraMemoFocusNode.requestFocus();
-                                          });
-                                        },
+                                      // 🟢 修正：対応メモがない時はそもそもボタンを「半透明・タップ不可」にロック
+                                      Builder(
+                                          builder: (context) {
+                                            bool hasTarget = _getCurrentOrNextCourse() != null;
+                                            return IconButton(
+                                              icon: Icon(
+                                                Icons.edit_note_rounded,
+                                                color: hasTarget ? camBtnColor : camBtnColor.withOpacity(0.15), // 押せない時は薄く
+                                                size: 32,
+                                              ),
+                                              onPressed: hasTarget ? () {
+                                                setState(() => _isMemoFieldOpen = true);
+                                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                                  _cameraMemoFocusNode.requestFocus();
+                                                });
+                                              } : null, // 👈 null にすることで完全に押せなくなります
+                                            );
+                                          }
                                       ),
 
                                       // 中央：タップ時にキュッと小さくなるAnimated正円シャッター（そのまま維持）
@@ -2257,102 +2663,27 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         // 🟢 修正：カプセルボタン押下（キーボード展開時）の最前面オーバーレイ（完全リファイン版）
         // 最前面オーバーレイ（×ボタン円撤廃 ＆ テキスト量連動伸縮版）
         // 最前面オーバーレイ（4隅フィレット ＆ キーボード隙間確保版）
+        // 🟢 修正：最前面オーバーレイ（左上コース名、バリデーション警告、矢印保存仕様）
+        // 🟢 修正：最前面オーバーレイ（上端左詰め太字、背景0.95、未入力時の矢印ロック仕様）
+        // 🟢 修正：アニメーション＆バリデーション機能を内包した新メモコンソールユニットへ移行
         if (_isMemoFieldOpen && _dragPosition < -0.99)
-          Positioned.fill(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: () {
-                      _cameraMemoFocusNode.unfocus();
-                      setState(() => _isMemoFieldOpen = false);
-                    },
-                    child: Container(color: Colors.black.withOpacity(0.95)),
-                  ),
-                ),
-
-                // 🟢 修正：キーボードの直上（bottom: 16）に少し浮かせ、左右にも16pxの隙間をあけて独立させます
-                Positioned(
-                  bottom: 8, left: 0, right: 0,
-                  child: Builder(
-                      builder: (context) {
-                        bool isDark = Theme.of(context).brightness == Brightness.dark;
-                        Color circleBgColor = isDark ? Colors.white : Colors.black;
-                        Color circleIconColor = isDark ? Colors.black : Colors.white;
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // ×ボタン
-                            Padding(
-                              padding: const EdgeInsets.only(left: 12.0, bottom: 6.0),
-                              child: IconButton(
-                                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
-                                onPressed: () {
-                                  _cameraMemoFocusNode.unfocus();
-                                  setState(() => _isMemoFieldOpen = false);
-                                },
-                              ),
-                            ),
-
-                            Container(
-                              padding: const EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 20.0),
-                              // 🟢 修正：BorderRadius.only から circular(30) に変更し、4隅すべてを同一フィレットで均等に丸めます
-                              decoration: BoxDecoration(
-                                color: AppTheme.panel(context),
-                                borderRadius: BorderRadius.circular(30),
-                              ),
-                              child: Stack(
-                                alignment: Alignment.bottomRight,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 32.0),
-                                    child: TextField(
-                                      controller: _cameraMemoController,
-                                      focusNode: _cameraMemoFocusNode,
-                                      minLines: 3,
-                                      maxLines: null,
-                                      style: TextStyle(color: AppTheme.textMain(context), fontSize: 14),
-                                      decoration: InputDecoration(
-                                        hintText: "メモを入力...",
-                                        hintStyle: TextStyle(color: AppTheme.textSub(context).withOpacity(0.4), fontSize: 14),
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                      ),
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () {
-                                      _cameraMemoFocusNode.unfocus();
-                                      setState(() => _isMemoFieldOpen = false);
-                                    },
-                                    child: Container(
-                                      width: 40, height: 40,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: circleBgColor,
-                                      ),
-                                      child: Icon(
-                                        Icons.arrow_forward_rounded,
-                                        color: circleIconColor,
-                                        size: 22,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        );
-                      }
-                  ),
-                ),
-              ],
-            ),
+          _CameraMemoOverlay(
+            memoTitleText: () {
+              final target = _getCurrentOrNextCourse();
+              final now = DateTime.now();
+              final dateStr = '${now.month}/${now.day}';
+              if (target != null) {
+                final cleanTitle = CourseTitleParser.getCleanTitle(target['courseName'] as String);
+                return "$dateStr $cleanTitle";
+              }
+              return "対応メモなし";
+            }(),
+            controller: _cameraMemoController,
+            focusNode: _cameraMemoFocusNode,
+            onSave: (text) => _addMemoToCourse('text', text),
+            onClose: () => setState(() => _isMemoFieldOpen = false),
           ),
-      ],
+      ], // 既存の最外殻閉じタグ
     );
   }
 
@@ -2667,6 +2998,50 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                             ),
 
                             // 🟢 追加：タブレット（Pad）環境の場合のみ、ファインダー内部にボタンを綺麗に浮かせる（オーバーレイ）
+
+                            if (_capturedImagePathForAnim != null)
+                              Positioned.fill(
+                                child: AnimatedBuilder(
+                                  animation: _cameraCaptureAnimController,
+                                  builder: (context, child) {
+                                    double v = _cameraCaptureAnimController.value;
+
+                                    // ① 4回り小さく（1.0から一気に0.4サイズまでシュリンク）
+                                    double scale = ui.lerpDouble(1.0, 0.4, Curves.easeOutCubic.transform(v))!;
+
+                                    // ② 右下へ（プレビューの横幅(previewW)・縦幅(previewH)に1.2倍のベクトルをかけて完全に場外へ飛ばす）
+                                    double slideX = ui.lerpDouble(0.0, previewW * 1.2, Curves.easeInOutCubic.transform(v))!;
+                                    double slideY = ui.lerpDouble(0.0, previewH * 1.2, Curves.easeInOutCubic.transform(v))!;
+
+                                    // ③ フェードアウト（後半にかけて滑らかに消滅）
+                                    double opacity = ui.lerpDouble(1.0, 0.0, Curves.easeIn.transform(v))!;
+
+                                    return Transform.translate(
+                                      offset: Offset(slideX, slideY),
+                                      child: Transform.scale(
+                                        scale: scale,
+                                        alignment: Alignment.center,
+                                        child: Opacity(
+                                          opacity: opacity,
+                                          child: ClipRRect(
+                                            borderRadius: const BorderRadius.only(
+                                              topLeft: Radius.circular(32.0),
+                                              topRight: Radius.circular(32.0),
+                                              bottomLeft: Radius.circular(24.0),
+                                              bottomRight: Radius.circular(24.0),
+                                            ),
+                                            child: Image.file(
+                                              File(_capturedImagePathForAnim!),
+                                              fit: BoxFit.cover,
+                                              gaplessPlayback: true, // 読み込み時の瞬間的なチラつきを完全に無効化
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
 
                           ],
                         )
@@ -3020,6 +3395,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         if (index == 10000)
                           Builder(
                             builder: (context) {
+                              // 🟢 追加：予定が1つもない日はインジケータ線を描画する必要がないため、安全に早期リターンさせます
+                              if (allItems.isEmpty) return const SizedBox();
+
                               final now = DateTime.now();
                               int nowMins = now.hour * 60 + now.minute;
                               double? lineY;
@@ -4623,4 +5001,209 @@ class _SlidingDialTicksPainter extends CustomPainter {
     canvas.drawPath(tp, cp);
   }
   @override bool shouldRepaint(covariant _SlidingDialTicksPainter old) => old.progress != progress;
+}
+
+// 🟢 ファイル最末尾に追記：縮小・右スライドアウト物理モーションを制御する特化型コンソール
+class _CameraMemoOverlay extends StatefulWidget {
+  final String memoTitleText;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final Function(String) onSave;
+  final VoidCallback onClose;
+
+  const _CameraMemoOverlay({
+    required this.memoTitleText,
+    required this.controller,
+    required this.focusNode,
+    required this.onSave,
+    required this.onClose,
+  });
+
+  @override
+  State<_CameraMemoOverlay> createState() => _CameraMemoOverlayState();
+}
+
+// ─── ファイル最末尾の _CameraMemoOverlayState 内 ───
+class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with SingleTickerProviderStateMixin {
+  late AnimationController _animController;
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      // 🟢 修正：300ms ➔ 550ms に変更し、スライドアウトの余韻を「もう少しゆっくり」美しく魅せる速度に調整
+      duration: const Duration(milliseconds: 550),
+    );
+    _hasText = widget.controller.text.trim().isNotEmpty;
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    if (mounted) {
+      setState(() => _hasText = widget.controller.text.trim().isNotEmpty);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    _animController.dispose();
+    super.dispose();
+  }
+
+  void _handlePublish() {
+    if (!_hasText || _animController.isAnimating) return;
+    final text = widget.controller.text.trim();
+
+    // 🟢 解決の鍵：ボタンをタップした「まさにその瞬間」にキーボードの格納を即座にトリガー！
+    // これにより、キーボードが下へ沈む動きと、四角が小さくなって右へ流れるアニメーションが完全に並行して走ります
+    widget.focusNode.unfocus();
+
+    // 550ms の優雅なスライドアウトを開始
+    _animController.forward().then((_) {
+      widget.onSave(text);       // ① データを裏側で確定保存
+      widget.controller.clear(); // ② テキストをクリーンアップ
+      widget.onClose();          // ③ 流れきった後に安全にレイヤーを閉じてカメラ画面へ
+    });
+  }
+
+  // （これ以降の Widget build(BuildContext context) 内部は1字も触らずそのままでOKです）
+
+  @override
+  Widget build(BuildContext context) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color circleBgColor = isDark ? Colors.white : Colors.black;
+    Color circleIconColor = isDark ? Colors.black : Colors.white;
+    double screenWidth = MediaQuery.of(context).size.width;
+
+    return Stack(
+      children: [
+        // 95% ディープブラックアウト
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: () {
+              widget.focusNode.unfocus();
+              widget.onClose();
+            },
+            child: Container(color: Colors.black.withOpacity(0.95)),
+          ),
+        ),
+
+        // 画面上端左詰め：大きめ ➔ さらに極細字（w100）へ純化したメモ名
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 20,
+          left: 20, right: 20,
+          child: Text(
+            widget.memoTitleText,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 30,             // 🟢 修正：テキストサイズを拡大
+              fontWeight: FontWeight.w100, // 🟢 修正：極細のライトウェイトへ
+              letterSpacing: 0.5,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+
+        // アニメーション制御を受けるコンソール外殻
+        Positioned(
+          bottom: 8, left: 0, right: 0,
+          child: AnimatedBuilder(
+            animation: _animController,
+            builder: (context, child) {
+              // イージングカーブに沿って、サイズは「1.0 ➔ 0.75(2回り縮小)」、位置は「0 ➔ 右画面外」へシンクロ変形
+              double scale = ui.lerpDouble(1.0, 0.75, Curves.easeOutCubic.transform(_animController.value))!;
+              double slideX = ui.lerpDouble(0.0, screenWidth * 1.2, Curves.easeInOutCubic.transform(_animController.value))!;
+
+              return Transform.translate(
+                offset: Offset(slideX, 0),
+                child: Transform.scale(
+                  scale: scale,
+                  alignment: Alignment.center,
+                  child: child,
+                ),
+              );
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ×マーク（角丸四角のすぐ左上）
+                Padding(
+                  padding: const EdgeInsets.only(left: 12.0, bottom: 4.0),
+                  child: IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                    onPressed: () {
+                      widget.focusNode.unfocus();
+                      widget.onClose();
+                    },
+                  ),
+                ),
+
+                // メモ四角（R30フィレット）
+                Container(
+                  padding: const EdgeInsets.all(20.0),
+                  decoration: BoxDecoration(
+                    color: AppTheme.panel(context),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: Stack(
+                    alignment: Alignment.bottomRight,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 32.0),
+                        child: TextField(
+                          controller: widget.controller,
+                          focusNode: widget.focusNode,
+                          minLines: 3,
+                          maxLines: null,
+                          cursorColor: isDark ? Colors.white : Colors.black,
+
+                          // 🟢 修正：打ち込む文字サイズを 14 ➔ 18 へ大きく拡大
+                          style: TextStyle(color: AppTheme.textMain(context), fontSize: 18, height: 1.4),
+
+                          decoration: InputDecoration(
+                            hintText: "メモを追加",
+                            // 🟢 修正：ヒントテキストのサイズも 18 にシンクロさせてガタつきを防止
+                            hintStyle: TextStyle(color: AppTheme.textSub(context).withOpacity(0.4), fontSize: 18),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                      ),
+
+                      // 右下の矢印ボタン
+                      GestureDetector(
+                        onTap: _hasText ? _handlePublish : null,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 150),
+                          opacity: _hasText ? 1.0 : 0.15,
+                          child: Container(
+                            width: 40, height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: circleBgColor,
+                            ),
+                            child: Icon(
+                              Icons.arrow_forward_rounded,
+                              color: circleIconColor,
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
