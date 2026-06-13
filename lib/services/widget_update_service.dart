@@ -116,10 +116,10 @@ class WidgetUpdateService {
 
     // フェイルセーフ
     if (tasksWidgetData.isEmpty) {
-      tasksWidgetData.add({'title': "🎉 残っている課題はありません", 'sub': "All cleared"});
+      tasksWidgetData.add({'title': "未提出課題はありません", 'sub': "All cleared"});
     }
     if (todayWidgetData.isEmpty) {
-      todayWidgetData.add({'title': "☕ 本日の授業予定はありません", 'sub': "No classes today"});
+      todayWidgetData.add({'title': "本日の授業予定はありません", 'sub': "No classes today"});
     }
 
     // ネイティブへ射出

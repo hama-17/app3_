@@ -2089,6 +2089,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         Positioned.fill(
             child: GestureDetector(
               onHorizontalDragUpdate: (details) {
+                // 🟢 追加：カメラ画面（-1.0）に完全にいる時は、親のドラッグ処理をスキップして子（プレビュー）に権限を委譲
+                if (_dragPosition < -0.99) return;
+
                 setState(() {
                   _dragPosition -= details.delta.dx / screenWidth;
                   _dragPosition = _dragPosition.clamp(-1.0, 1.0);
@@ -2122,51 +2125,49 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       color: AppTheme.bg(context),
                       child: Builder(
                           builder: (context) {
-                            double camMargin = 8.0; // 👈 8.0px に完全追従
+                            // 🟢 判定を追加
+                            bool isPad = MediaQuery.of(context).size.shortestSide >= 600;
+                            double camMargin = 8.0;
                             double previewW = screenWidth - (camMargin * 2);
-                            double previewH = previewW * 16 / 9;
+                            // 🟢 タブレットなら4:3、スマホなら16:9に動的スイッチ
+                            double previewH = isPad ? (previewW * 4 / 3) : (previewW * 16 / 9);
                             double cameraHeaderBottomY = camMargin + previewH + camMargin;
 
                             return Column(
                               children: [
                                 SizedBox(height: cameraHeaderBottomY),
-                                // 拡大された16:9ファインダーの直下に、ボタンバーが綺麗に回り込みます
-                                Expanded(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                                    alignment: Alignment.center,
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        // 🟢 修正：インカメラ反転（再読み込みマーク）を「左側」へ配置換え
-                                        IconButton(
-                                          icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
-                                          onPressed: _switchCameraFacing,
-                                        ),
-
-                                        // 中央：シンプルな白い単一正円シャッター
-                                        GestureDetector(
-                                          onTap: _takeInlineCameraPhoto,
-                                          child: Container(
-                                            width: 72, height: 72,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: _isCamTakingPicture ? Colors.white.withOpacity(0.5) : Colors.white,
+                                if (!isPad) // 🟢 タブレット時は下部バーを表示しない（上に浮かせるため）
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                                      alignment: Alignment.center,
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
+                                            onPressed: _switchCameraFacing,
+                                          ),
+                                          GestureDetector(
+                                            onTap: _takeInlineCameraPhoto,
+                                            child: Container(
+                                              width: 72, height: 72,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: _isCamTakingPicture ? Colors.white.withOpacity(0.5) : Colors.white,
+                                              ),
                                             ),
                                           ),
-                                        ),
-
-                                        // 🟢 修正：戻るボタンを「右側」へ配置換えし、アイコンをスマートな右矢印マークに変更
-                                        IconButton(
-                                          icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 28),
-                                          onPressed: () {
-                                            _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
-                                          },
-                                        ),
-                                      ],
+                                          IconButton(
+                                            icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 28),
+                                            onPressed: () {
+                                              _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+                                            },
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             );
                           }
@@ -2229,9 +2230,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   Widget _buildDynamicHeaderWidget(double topPadding) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
-    const Color defaultTopGradient = Color(0xFF020403);
-    const Color defaultMiddleGradient = Color(0xff2c4f5f);
-    const Color defaultBottomGradient = Color(0xffa8ccdc);
+    const Color defaultTopGradient = Color(0xFF020304);
+    const Color defaultMiddleGradient = Color(0xff174a69);
+    const Color defaultBottomGradient = Color(0xff7ebbdc);
 
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
     List<Color> scheduleColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
@@ -2297,9 +2298,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     double effectiveScheduleHeight = _dragPosition < 0.5 ? dynamicScheduleHeight : scheduleHeight;
 
     // 🟢 修正：4方向の均一枠をさらに細く「8.0px」へ。プレビューサイズを最大化
+    // 🟢 修正：タブレット（Pad）環境かどうかのリアルタイム判定
+    bool isPad = screenWidth >= 600 || MediaQuery.of(context).size.shortestSide >= 600;
+
     double camMargin = 8.0;
     double previewW = screenWidth - (camMargin * 2);
-    double previewH = previewW * 16 / 9;
+    // 🟢 修正：タブレットなら標準の「4:3」、スマホなら「16:9」へとアスペクト比を動的にスイッチ
+    double previewH = isPad ? (previewW * 4 / 3) : (previewW * 16 / 9);
     double cameraTargetHeight = camMargin + previewH + camMargin;
 
     double currentHeight;
@@ -2357,6 +2362,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
+                        // 🟢 追加：上部時間割（カレンダー）領域での縦ドラッグを、下部のメインスクロールにダイレクトに流し込みます
+                        onVerticalDragUpdate: (details) {
+                          if (_mainScrollController.hasClients) {
+                            double maxScroll = _mainScrollController.position.maxScrollExtent;
+                            if (maxScroll > 0) {
+                              // ホーム（TASKS）側と100%同じ計算式で、スクロール量をリアルタイム同期
+                              double newOffset = (_mainScrollController.offset - details.primaryDelta!).clamp(0.0, maxScroll);
+                              _mainScrollController.jumpTo(newOffset);
+                            }
+                          }
+                        },
                         child: Container(
                           color: Colors.transparent,
                           child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount),
@@ -2391,33 +2407,30 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           children: [
                             Positioned.fill(
                               child: GestureDetector(
-                                behavior: HitTestBehavior.opaque, // 🟢 プレビュー全域で確実にタッチを拾う
+                                behavior: HitTestBehavior.opaque,
                                 onScaleStart: (details) {
                                   _camBaseZoom = _camCurrentZoom;
+                                  if (details.pointerCount == 2) {
+                                    setState(() => _camShowZoomText = true);
+                                  }
                                 },
                                 onScaleUpdate: (details) async {
-                                  // --------------------------------------------------------
-                                  // 🟢 ① 2本指の時：どこを触っても確実に作動する「超高感度ズーム」
-                                  // --------------------------------------------------------
+                                  // 🟢 ① 2本指のピンチ：ズーム
                                   if (details.pointerCount == 2) {
                                     if (_camMaxZoom <= _camMinZoom) return;
-                                    // 指数計算の感度を 1.5倍 に引き上げ、微細なピンチでも確実にズーム・ルーズが追従
                                     double nz = (_camBaseZoom * math.pow(details.scale, 1.5)).clamp(_camMinZoom, _camMaxZoom);
-                                    setState(() {
-                                      _camCurrentZoom = nz;
-                                      _camShowZoomText = true;
-                                    });
-                                    await _cameraController!.setZoomLevel(nz);
+                                    setState(() => _camCurrentZoom = nz);
+                                    await _cameraController!.setZoomLevel(_camCurrentZoom);
                                   }
-                                  // --------------------------------------------------------
-                                  // 🟢 ② 1本指の時：プレビュー内からの「リアルタイムスライド戻り」
-                                  // --------------------------------------------------------
+                                  // 🟢 ② 1本指のスライド：focalPointDelta.dx を使って正確に移動
                                   else if (details.pointerCount == 1) {
-                                    // 指の移動量（focalPointDelta）を画面幅で割ってリアルタイムにホームへ同期
+                                    if (_camShowZoomText) return;
+
+                                    // focalPointDelta.dx（JST時間軸の移動差分）を画面幅で割り、
+                                    // マイナス位置（-1.0）から中央のホーム（0.0）へ滑らかに加算同期させます
                                     double deltaX = details.focalPointDelta.dx / screenWidth;
                                     setState(() {
-                                      // カメラ画面（-1.0）から右スライド（プラス方向）で中央ホーム（0.0）へ向かう
-                                      _dragPosition = (_dragPosition + deltaX).clamp(-1.0, 0.0);
+                                      _dragPosition = (_dragPosition - deltaX).clamp(-1.0, 0.0);
                                     });
                                     _dragAnimController.value = _dragPosition;
                                   }
@@ -2425,9 +2438,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                 onScaleEnd: (details) {
                                   setState(() => _camShowZoomText = false);
 
-                                  // 🟢 1本指でのスライド戻りから指が離れた瞬間の「吸着アニメーション」
-                                  // 大元のスワイプ処理と完全に足並みを揃え、もともと見ていた日割りのページを壊さず復元
+                                  // 指が離れた瞬間の吸着判定
                                   if (_dragPosition < 0.0) {
+                                    // 閾値（-0.5）より右（0.0側）に引っ張っていればホームへ吸着
                                     if (_dragPosition > -0.5) {
                                       _dragPosition = 0.0;
                                     } else {
@@ -2461,10 +2474,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                 ),
                               ),
                             ),
-
-                            // ダイヤル目盛りバー（ここは従来通りの完璧な挙動を維持）
                             Positioned(
-                              bottom: 16, left: 0, right: 0,
+                              // 🟢 修正：Pad（タブレット）時はフローティングボタンと被らないように位置を上に逃がす
+                              bottom: isPad ? 116 : 16,
+                              left: 0, right: 0,
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -2492,7 +2505,39 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   ),
                                 ],
                               ),
-                            )
+                            ),
+
+                            // 🟢 追加：タブレット（Pad）環境の場合のみ、ファインダー内部にボタンを綺麗に浮かせる（オーバーレイ）
+                            if (isPad)
+                              Positioned(
+                                bottom: 24,
+                                left: 40, right: 40,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
+                                      onPressed: _switchCameraFacing,
+                                    ),
+                                    GestureDetector(
+                                      onTap: _takeInlineCameraPhoto,
+                                      child: Container(
+                                        width: 72, height: 72,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: _isCamTakingPicture ? Colors.white.withOpacity(0.5) : Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 28),
+                                      onPressed: () {
+                                        _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
                           ],
                         )
                             : const Center(child: CircularProgressIndicator(color: Colors.white)),

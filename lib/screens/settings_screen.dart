@@ -772,9 +772,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           colors: [
-                            Color(0xFF020403),
-                            Color(0xFF2c4f5f),
-                            Color(0xFFa8ccdc),
+                            Color(0xFF020304),
+                            Color(0xFF174a69),
+                            Color(0xFF7ebbdc),
                           ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
