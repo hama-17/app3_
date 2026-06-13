@@ -305,6 +305,7 @@ class DashboardPage extends StatefulWidget {
   final String currentTerm;
   final Function(int, String) onTermChanged;
 
+
   const DashboardPage({
     super.key,
     required this.courses,
@@ -325,6 +326,9 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> with TickerProviderStateMixin {
   String _scheduleMode = 'D';
+  // 🟢 追加：カメラ画面のカプセルボタン連動メモ用コンポーネント
+  final TextEditingController _cameraMemoController = TextEditingController();
+  final FocusNode _cameraMemoFocusNode = FocusNode();
   late PageController _coursesWidgetController;
   late PageController _schedulePageController;
   late PageController _taskPageController;
@@ -340,6 +344,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   double _camMaxZoom = 1.0;
   double _camBaseZoom = 1.0;
   bool _camShowZoomText = false;
+  // 🟢 追加：メモ入力欄が今開いているかどうかのフラグ
+  bool _isMemoFieldOpen = false;
 
   // 🟢 独自カメラのオンデマンドライフサイクル制御
   Future<void> _prepareAvailableCameras() async {
@@ -402,7 +408,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       await File(rawImage.path).copy(permanentPath);
       await Gal.putImage(permanentPath); // スマホ本体へ自動エクスポート
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('写真を撮影し、カメラロールに保存しました。')));
     } catch (_) {
     } finally { // 👈 🟢 修正：コンパイルエラーの原因だった 'finalPackages' を 正しい 'finally' に修正
       setState(() => _isCamTakingPicture = false);
@@ -2117,60 +2122,90 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 children: [
                   // ① 最左面：カメラ操作専用ベース画面
                   // 🟢 修正：ヘッダー側の camMargin = 8.0px への極細化と完全に座標計算を同期
+                  // ① 最左面：カメラ操作専用ベース画面
                   Transform.translate(
                     offset: Offset((-1.0 - _dragPosition) * screenWidth, 0),
                     child: Container(
                       width: screenWidth,
                       height: double.infinity,
                       color: AppTheme.bg(context),
-                      child: Builder(
-                          builder: (context) {
-                            // 🟢 判定を追加
-                            bool isPad = MediaQuery.of(context).size.shortestSide >= 600;
-                            double camMargin = 8.0;
-                            double previewW = screenWidth - (camMargin * 2);
-                            // 🟢 タブレットなら4:3、スマホなら16:9に動的スイッチ
-                            double previewH = isPad ? (previewW * 4 / 3) : (previewW * 16 / 9);
-                            double cameraHeaderBottomY = camMargin + previewH + camMargin;
+                      child: Column(
+                        children: [
+                          Builder(
+                            builder: (context) {
+                              double camMargin = 8.0;
+                              double previewW = screenWidth - (camMargin * 2);
+                              bool isPad = screenWidth >= 600 || MediaQuery.of(context).size.shortestSide >= 600;
+                              bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+                              double previewH = isPad
+                                  ? (isLandscape ? previewW * 3 / 4 : previewW * 4 / 3)
+                                  : (previewW * 16 / 9);
 
-                            return Column(
-                              children: [
-                                SizedBox(height: cameraHeaderBottomY),
-                                if (!isPad) // 🟢 タブレット時は下部バーを表示しない（上に浮かせるため）
-                                  Expanded(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                                      alignment: Alignment.center,
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          IconButton(
-                                            icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
-                                            onPressed: _switchCameraFacing,
-                                          ),
-                                          GestureDetector(
-                                            onTap: _takeInlineCameraPhoto,
-                                            child: Container(
-                                              width: 72, height: 72,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: _isCamTakingPicture ? Colors.white.withOpacity(0.5) : Colors.white,
-                                              ),
+                              return SizedBox(height: camMargin + previewH + camMargin);
+                            },
+                          ),
+
+                          // 🟢 変更：ここに記述されていたPadding(カプセルボタン)を完全に廃止・削除しました
+
+                          const Spacer(),
+
+                          Container(
+                            padding: EdgeInsets.fromLTRB(40.0, 0, 40.0, MediaQuery.of(context).padding.bottom + 24.0),
+                            height: 100,
+                            alignment: Alignment.center,
+                            child: Builder(
+                                builder: (context) {
+                                  bool isDark = Theme.of(context).brightness == Brightness.dark;
+                                  Color camBtnColor = isDark ? Colors.white : Colors.black;
+
+                                  return Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      // 🟢 変更：左側ボタンを「カメラ反転」から「テキストメモマーク」へチェンジ
+                                      IconButton(
+                                        icon: Icon(Icons.edit_note_rounded, color: camBtnColor, size: 32),
+                                        onPressed: () {
+                                          setState(() => _isMemoFieldOpen = true);
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            _cameraMemoFocusNode.requestFocus();
+                                          });
+                                        },
+                                      ),
+
+                                      // 中央：タップ時にキュッと小さくなるAnimated正円シャッター（そのまま維持）
+                                      GestureDetector(
+                                        onTap: _takeInlineCameraPhoto,
+                                        child: Container(
+                                          width: 76, height: 76,
+                                          alignment: Alignment.center,
+                                          child: AnimatedContainer(
+                                            duration: const Duration(milliseconds: 100),
+                                            curve: Curves.easeInOut,
+                                            width: _isCamTakingPicture ? 52 : 72,
+                                            height: _isCamTakingPicture ? 52 : 72,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: _isCamTakingPicture ? camBtnColor.withOpacity(0.5) : camBtnColor,
                                             ),
                                           ),
-                                          IconButton(
-                                            icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 28),
-                                            onPressed: () {
-                                              _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
-                                            },
-                                          ),
-                                        ],
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                              ],
-                            );
-                          }
+
+                                      // 右側：戻るボタン（そのまま維持）
+                                      IconButton(
+                                        icon: Icon(Icons.arrow_forward_rounded, color: camBtnColor, size: 28),
+                                        onPressed: () {
+                                          _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                }
+                            ),
+                          ),
+
+
+                        ],
                       ),
                     ),
                   ),
@@ -2215,8 +2250,108 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         Positioned(
           top: 0.0,
           left: 0, right: 0,
-          child: _buildDynamicHeaderWidget(topPadding), // 👈 🟢 修正：-24.0 を削除して元の正しい高さを渡します
+          child: _buildDynamicHeaderWidget(topPadding),
         ),
+
+        // 🟢 修正：条件式を新フラグ（_isMemoFieldOpen）基準に変更
+        // 🟢 修正：カプセルボタン押下（キーボード展開時）の最前面オーバーレイ（完全リファイン版）
+        // 最前面オーバーレイ（×ボタン円撤廃 ＆ テキスト量連動伸縮版）
+        // 最前面オーバーレイ（4隅フィレット ＆ キーボード隙間確保版）
+        if (_isMemoFieldOpen && _dragPosition < -0.99)
+          Positioned.fill(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: () {
+                      _cameraMemoFocusNode.unfocus();
+                      setState(() => _isMemoFieldOpen = false);
+                    },
+                    child: Container(color: Colors.black.withOpacity(0.95)),
+                  ),
+                ),
+
+                // 🟢 修正：キーボードの直上（bottom: 16）に少し浮かせ、左右にも16pxの隙間をあけて独立させます
+                Positioned(
+                  bottom: 8, left: 0, right: 0,
+                  child: Builder(
+                      builder: (context) {
+                        bool isDark = Theme.of(context).brightness == Brightness.dark;
+                        Color circleBgColor = isDark ? Colors.white : Colors.black;
+                        Color circleIconColor = isDark ? Colors.black : Colors.white;
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // ×ボタン
+                            Padding(
+                              padding: const EdgeInsets.only(left: 12.0, bottom: 6.0),
+                              child: IconButton(
+                                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                                onPressed: () {
+                                  _cameraMemoFocusNode.unfocus();
+                                  setState(() => _isMemoFieldOpen = false);
+                                },
+                              ),
+                            ),
+
+                            Container(
+                              padding: const EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 20.0),
+                              // 🟢 修正：BorderRadius.only から circular(30) に変更し、4隅すべてを同一フィレットで均等に丸めます
+                              decoration: BoxDecoration(
+                                color: AppTheme.panel(context),
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                              child: Stack(
+                                alignment: Alignment.bottomRight,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 32.0),
+                                    child: TextField(
+                                      controller: _cameraMemoController,
+                                      focusNode: _cameraMemoFocusNode,
+                                      minLines: 3,
+                                      maxLines: null,
+                                      style: TextStyle(color: AppTheme.textMain(context), fontSize: 14),
+                                      decoration: InputDecoration(
+                                        hintText: "メモを入力...",
+                                        hintStyle: TextStyle(color: AppTheme.textSub(context).withOpacity(0.4), fontSize: 14),
+                                        border: InputBorder.none,
+                                        isDense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () {
+                                      _cameraMemoFocusNode.unfocus();
+                                      setState(() => _isMemoFieldOpen = false);
+                                    },
+                                    child: Container(
+                                      width: 40, height: 40,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: circleBgColor,
+                                      ),
+                                      child: Icon(
+                                        Icons.arrow_forward_rounded,
+                                        color: circleIconColor,
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -2303,8 +2438,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
     double camMargin = 8.0;
     double previewW = screenWidth - (camMargin * 2);
-    // 🟢 修正：タブレットなら標準の「4:3」、スマホなら「16:9」へとアスペクト比を動的にスイッチ
-    double previewH = isPad ? (previewW * 4 / 3) : (previewW * 16 / 9);
+
+    // 🟢 修正：上部グラデーション領域の下降位置も、デバイスと縦横方向（Orientation）に完全連動させます
+
+    bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    double previewH = isPad
+        ? (isLandscape ? previewW * 3 / 4 : previewW * 4 / 3)
+        : (previewW * 16 / 9);
+
     double cameraTargetHeight = camMargin + previewH + camMargin;
 
     double currentHeight;
@@ -2318,9 +2460,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     String heroTag = 'top_widget_hero';
     Color tCol = Colors.white;
 
+    // 🟢 修正：横スワイプ中（isTransitioning）も完全に Duration.zero（遅延ゼロ）の対象にします
+    // これにより、指のドラッグ量とグラデーション領域の縮小がミリ単位で完全に一致し、吸い付くように滑らかに縮んでいきます
     bool isTransitioning = (_dragPosition > -1.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
     bool isVerticalScrolling = _courseScrollOffset > 0 || _tasksScrollOffset > 0;
-    Duration animDuration = isVerticalScrolling ? Duration.zero : const Duration(milliseconds: 300);
+    Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
 
     return Hero(
       tag: heroTag,
@@ -2405,7 +2549,35 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         child: _isCamInitialized && _cameraController != null
                             ? Stack(
                           children: [
+                            // 1. 【視覚ベース層】 純粋にカメラ映像を描画するだけのレイヤー（最背面）
                             Positioned.fill(
+                              child: ClipRRect(
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(32.0),
+                                  topRight: Radius.circular(32.0),
+                                  bottomLeft: Radius.circular(24.0),
+                                  bottomRight: Radius.circular(24.0),
+                                ),
+                                child: OverflowBox(
+                                  alignment: Alignment.center,
+                                  child: FittedBox(
+                                    fit: BoxFit.cover,
+                                    child: SizedBox(
+                                      width: _cameraController!.value.previewSize!.height,
+                                      height: _cameraController!.value.previewSize!.width,
+                                      child: CameraPreview(_cameraController!),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // 2. 【上部ジェスチャー専用層】 ズーム＆ホーム戻り（中間層）
+                            Positioned(
+                              top: 0,
+                              bottom: isPad ? 200 : 100,
+                              left: 0,
+                              right: 0,
                               child: GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onScaleStart: (details) {
@@ -2415,67 +2587,54 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   }
                                 },
                                 onScaleUpdate: (details) async {
-                                  // 🟢 ① 2本指のピンチ：ズーム
                                   if (details.pointerCount == 2) {
                                     if (_camMaxZoom <= _camMinZoom) return;
                                     double nz = (_camBaseZoom * math.pow(details.scale, 1.5)).clamp(_camMinZoom, _camMaxZoom);
                                     setState(() => _camCurrentZoom = nz);
                                     await _cameraController!.setZoomLevel(_camCurrentZoom);
                                   }
-                                  // 🟢 ② 1本指のスライド：focalPointDelta.dx を使って正確に移動
                                   else if (details.pointerCount == 1) {
                                     if (_camShowZoomText) return;
-
-                                    // focalPointDelta.dx（JST時間軸の移動差分）を画面幅で割り、
-                                    // マイナス位置（-1.0）から中央のホーム（0.0）へ滑らかに加算同期させます
                                     double deltaX = details.focalPointDelta.dx / screenWidth;
                                     setState(() {
-                                      _dragPosition = (_dragPosition - deltaX).clamp(-1.0, 0.0);
+                                      _dragPosition = (_dragPosition + deltaX).clamp(-1.0, 0.0);
                                     });
                                     _dragAnimController.value = _dragPosition;
                                   }
                                 },
                                 onScaleEnd: (details) {
                                   setState(() => _camShowZoomText = false);
-
-                                  // 指が離れた瞬間の吸着判定
                                   if (_dragPosition < 0.0) {
-                                    // 閾値（-0.5）より右（0.0側）に引っ張っていればホームへ吸着
-                                    if (_dragPosition > -0.5) {
+                                    double velocityX = details.velocity.pixelsPerSecond.dx;
+                                    if (velocityX < -400 || _dragPosition > -0.5) {
                                       _dragPosition = 0.0;
                                     } else {
                                       _dragPosition = -1.0;
                                     }
                                     _dragAnimController.animateTo(
                                         _dragPosition,
-                                        duration: const Duration(milliseconds: 300),
+                                        duration: const Duration(milliseconds: 250),
                                         curve: Curves.easeOutCubic
                                     );
                                   }
                                 },
-                                child: ClipRRect(
-                                  borderRadius: const BorderRadius.only(
-                                    topLeft: Radius.circular(32.0),
-                                    topRight: Radius.circular(32.0),
-                                    bottomLeft: Radius.circular(24.0),
-                                    bottomRight: Radius.circular(24.0),
-                                  ),
-                                  child: OverflowBox(
-                                    alignment: Alignment.center,
-                                    child: FittedBox(
-                                      fit: BoxFit.cover,
-                                      child: SizedBox(
-                                        width: _cameraController!.value.previewSize!.height,
-                                        height: _cameraController!.value.previewSize!.width,
-                                        child: CameraPreview(_cameraController!),
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                                child: const SizedBox.expand(),
                               ),
                             ),
+
+                            // 🟢 修正：上部ジェスチャー層の「下（前面）」に移動
+                            // これにより、タッチ判定が透明なエリアに吸われず、レンズ反転処理が100%確実に発動します
                             Positioned(
-                              // 🟢 修正：Pad（タブレット）時はフローティングボタンと被らないように位置を上に逃がす
+                              top: 12,
+                              left: 12,
+                              child: IconButton(
+                                icon: const Icon(Icons.sync_rounded, color: Colors.white, size: 28),
+                                onPressed: _switchCameraFacing,
+                              ),
+                            ),
+
+                            // ─── 💡 ここから下の Positioned(目盛りバー) は元のまま続けてください ───
+                            Positioned(
                               bottom: isPad ? 116 : 16,
                               left: 0, right: 0,
                               child: Column(
@@ -2508,36 +2667,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                             ),
 
                             // 🟢 追加：タブレット（Pad）環境の場合のみ、ファインダー内部にボタンを綺麗に浮かせる（オーバーレイ）
-                            if (isPad)
-                              Positioned(
-                                bottom: 24,
-                                left: 40, right: 40,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
-                                      onPressed: _switchCameraFacing,
-                                    ),
-                                    GestureDetector(
-                                      onTap: _takeInlineCameraPhoto,
-                                      child: Container(
-                                        width: 72, height: 72,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: _isCamTakingPicture ? Colors.white.withOpacity(0.5) : Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 28),
-                                      onPressed: () {
-                                        _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
+
                           ],
                         )
                             : const Center(child: CircularProgressIndicator(color: Colors.white)),
