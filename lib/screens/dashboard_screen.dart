@@ -2875,9 +2875,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     String heroTag = 'top_widget_hero';
     Color tCol = Colors.white;
 
-    // 🟢 修正：横スワイプ中（isTransitioning）も完全に Duration.zero（遅延ゼロ）の対象にします
-    // これにより、指のドラッグ量とグラデーション領域の縮小がミリ単位で完全に一致し、吸い付くように滑らかに縮んでいきます
-    bool isTransitioning = (_dragPosition > -1.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
+    // 🟢この4行は1日予定ウィジェットの滑らかな遷移部分なので、不用意に
+    // いじらないようにして。
+    bool isTransitioning = _dragAnimController.isAnimating || (_dragPosition != 0.0 && _dragPosition != 1.0 && _dragPosition != -1.0);
+
     bool isVerticalScrolling = _courseScrollOffset > 0 || _tasksScrollOffset > 0;
     Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
 
@@ -4114,86 +4115,88 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           // -------------------------------------------------------------------
                           // 🟢 修正：カプセル幅14 / 隙間2 の黄金比率 ＆ 非アクティブ文字の拡大
                           // -------------------------------------------------------------------
+                          // ─── _buildInnerCalendar 内、List.generate(maxPeriod + 1, ...) の Row 内部 ───
+
                           if (timeColumnWidth > 0)
                             Opacity(
                               opacity: textOpacity,
                               child: Builder(
                                 builder: (context) {
-
-                                  // 🟢 修正：今日の実際の曜日が、時間割の表示日数（5または6）に収まっているかジャッジ
-                                  // ※ now.weekday の戻り値：1=月、5=金、6=土、7=日
                                   final now = DateTime.now();
                                   bool isDisplayDayActive = now.weekday <= displayDaysCount;
 
                                   bool isCurrentPeriod = false;
                                   if (!_isCapturing && pData != null) {
                                     int nowMins = now.hour * 100 + now.minute;
-
-                                    // 🟢 解決の鍵：時間合致条件に「今日が有効な時間割曜日であるか」のフラグをAND結合
                                     if (isDisplayDayActive && nowMins >= pData['start']! && nowMins <= pData['end']!) {
                                       isCurrentPeriod = true;
                                     }
                                   }
 
-                                  // 🟢 修正：カプセル内（アクティブ）はスマートに少し小ぶり
                                   double activeFontSize = isPad ? 12.5 : 10.5;
-                                  // 🟢 修正：カプセル外（非アクティブ）はご要望通り「すこし大きく」調整
                                   double inactiveFontSize = isPad ? 14.0 : 12;
 
-                                  // 全体枠 16px を維持したまま、14px(本体) + 2px(隙間) に再配分
                                   return SizedBox(
-                                    width: timeColumnWidth, // 16px固定（マスの位置はずらさない）
+                                    width: timeColumnWidth, // 16px固定
                                     height: currentItemHeight,
                                     child: Row(
                                       mainAxisAlignment: MainAxisAlignment.start,
                                       children: [
 
-                                        // ① カプセル・時刻テキスト本体
+                                        // ① カプセル・時刻テキスト本体（アクティブ時）
                                         if (isCurrentPeriod)
                                           Container(
-                                            width: 14.0, // 🟢 修正：少し大きくして文字の収まりを綺麗に調整
+                                            width: 14.0,
                                             height: currentItemHeight,
                                             decoration: BoxDecoration(
                                               color: Colors.white.withOpacity(0.95),
                                               borderRadius: BorderRadius.circular(6),
                                             ),
-                                            child: Center(
-                                              child: RotatedBox(
-                                                quarterTurns: 1,
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Text(startStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
-                                                    Text("-", style: TextStyle(color: Colors.black.withOpacity(0.3), fontSize: activeFontSize - 1)),
-                                                    Text(endStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
-                                                  ],
+                                            // 🟢 修正：FittedBox を噛ませて、縦幅の縮小に合わせて文字を自動伸縮
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                              child: FittedBox(
+                                                fit: BoxFit.contain,
+                                                child: RotatedBox(
+                                                  quarterTurns: 1,
+                                                  child: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Text(startStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                      Text("-", style: TextStyle(color: Colors.black.withOpacity(0.3), fontSize: activeFontSize - 1)),
+                                                      Text(endStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                    ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
                                           )
                                         else
-                                        // カプセルに入っていない（非アクティブ）時刻
+                                        // ② 時刻テキスト本体（非アクティブ時）
                                           SizedBox(
-                                            width: 14.0, // カプセル時と幅を均一化
+                                            width: 14.0,
                                             height: currentItemHeight,
-                                            child: Center(
-                                              child: RotatedBox(
-                                                quarterTurns: 1,
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    // 🟢 修正：inactiveFontSize（スマホ11.0 / タブレット14.0）を適用してサイズアップ
-                                                    Text(startStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
-                                                    Text("-", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: inactiveFontSize - 1)),
-                                                    Text(endStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
-                                                  ],
+                                            // 🟢 修正：こちらも同様に FittedBox でマスの高さに100%追従させる
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                              child: FittedBox(
+                                                fit: BoxFit.contain,
+                                                child: RotatedBox(
+                                                  quarterTurns: 1,
+                                                  child: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Text(startStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                      Text("-", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: inactiveFontSize - 1)),
+                                                      Text(endStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                    ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
                                           ),
 
-                                        // ② 🟢 修正：カプセルとマスの隙間を確実に「2.0」へ
-                                        const SizedBox(width: 2.0),
+                                        const SizedBox(width: 2.0), // カプセルとマスの隙間
                                       ],
                                     ),
                                   );
