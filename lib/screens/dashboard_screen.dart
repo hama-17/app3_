@@ -2176,54 +2176,70 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               height: 110,
               child: Opacity(
                 opacity: opacity,
+                // ─── _buildSingleCourseCard メソッド内、SizedBox(height: 110) > Opacity > Padding 内部 ───
+
+                // ─── _buildSingleCourseCard 内、SizedBox(height: 110) > Opacity > Padding 内部 ───
+
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   child: Stack(
                     children: [
+
+                      // ① 左上：授業名 ＆ 末尾追従型の斜め矢印
+                      // 🟢 解決の鍵：Text.rich を採用することで、授業名が1行でも2行でも、その文字のすぐ後ろに矢印が100%追従します。
+                      // 右下のドデカ曜日（横幅）を綺麗に避けるため、右端（right）を100に制限して衝突を完全ガードしています。
                       Positioned(
-                        // ★ 修正：rightを120に広げて、右上の曜日と授業名が重ならないようにガード
-                        top: 0, left: 0, right: 120,
-                        child: Text(
-                            CourseTitleParser.getCleanTitle(rawName),
-                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w300, color: textColor, height: 1.1),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis
+                        top: 0, left: 0, right: 100,
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CourseTitleParser.getCleanTitle(rawName),
+                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w300, color: textColor, height: 1.1),
+                              ),
+
+                              // 🟢 矢印をインラインのスパンとして末尾にドッキング
+                              WidgetSpan(
+                                alignment: PlaceholderAlignment.middle,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 6.0), // 文字とのキープディスタンス
+                                  child: Icon(
+                                    Icons.arrow_outward,
+                                    color: textColor.withOpacity(0.5),
+                                    size: 20, // テキストの高さに合わせたジャストサイズ
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
 
+                      // ② 🟢 復元＆移動：右下詰め ＆ 元のドデカサイズ（24px）縦引き延ばし曜日
                       if (displayDayPeriod.isNotEmpty)
                         Positioned(
-                          top: 0, right: 0,
+                          bottom: 0, right: 0,
                           child: Transform(
-                              transform: Matrix4.diagonal3Values(0.8, 1.3, 1.0),
-                              alignment: Alignment.topRight,
-                              child: Text(
-                                  displayDayPeriod,
-                                  style: TextStyle(color: textColor.withOpacity(0.8), fontSize: 24, fontWeight: FontWeight.w100)
-                              )
+                            transform: Matrix4.diagonal3Values(0.8, 1.3, 1.0),
+                            alignment: Alignment.bottomRight, // 右下をアンカーにして綺麗に拡大
+                            child: Text(
+                              displayDayPeriod,
+                              style: TextStyle(
+                                color: textColor.withOpacity(0.65),
+                                fontSize: 24,                 // 🟢 元のドデカサイズに完全復元
+                                fontWeight: FontWeight.w100,  // ソリッドな極細ウェイト
+                              ),
+                            ),
                           ),
                         ),
 
-                      Positioned(
-                        bottom: 0, left: 0, right: 40,
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                  CourseScheduleParser.getRoomNumber(rawName),
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w300, color: textColor.withOpacity(0.8))
-                              )
-                            ]
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 0, right: 0,
-                        child: Icon(Icons.arrow_outward, color: textColor.withOpacity(0.5), size: 24),
-                      ),
                     ],
                   ),
                 ),
+
+
               ),
             ),
           ),
@@ -2342,7 +2358,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 },
                 child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    child: Row(children: [Expanded(flex: 4, child: Transform(transform: Matrix4.diagonal3Values(0.8, 1.3, 1.0), alignment: Alignment.centerLeft, child: FittedBox(fit: BoxFit.scaleDown, child: Text(dueStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 32, fontWeight: FontWeight.w100))))), const SizedBox(width: 12), Expanded(flex: 5, child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(task['name'] ?? 'Task', style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), Text(currentLMS.cleanTitle(task['context_name'] ?? ''), style: TextStyle(color: AppTheme.textSub(context), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis), if (subStr != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(subStr, style: TextStyle(color: AppTheme.textSub(context), fontSize: 10, fontWeight: FontWeight.bold)))]))])
+                    child: Row(children: [Expanded(flex: 4, child: Transform(transform: Matrix4.diagonal3Values(0.8, 1.2, 1.0), alignment: Alignment.centerLeft, child: FittedBox(fit: BoxFit.scaleDown, child: Text(dueStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 32, fontWeight: FontWeight.w100))))), const SizedBox(width: 12), Expanded(flex: 5, child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(task['name'] ?? 'Task', style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), Text(currentLMS.cleanTitle(task['context_name'] ?? ''), style: TextStyle(color: AppTheme.textSub(context), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis), if (subStr != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(subStr, style: TextStyle(color: AppTheme.textSub(context), fontSize: 10, fontWeight: FontWeight.bold)))]))])
                 )
             ),
           );
@@ -2383,7 +2399,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 onTap: () { if (isUnread) { setState(() { _dismissedMessageIds.add(msg['id'].toString()); }); _saveDismissedMessages(); } int cIdx = _courseIndexMap[msg['course_id']] ?? -1; if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 4, targetTaskId: msg['id'].toString()); },
                 child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [SizedBox(width: 40, child: Text(dateStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.bold))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.w300), maxLines: 2, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text(cName, style: TextStyle(color: AppTheme.textSub(context), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis)]))])
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [SizedBox(width: 40, child: Text(dateStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 18, fontWeight: FontWeight.w200 ,letterSpacing: -0.3,))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.w300), maxLines: 2, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text(cName, style: TextStyle(color: AppTheme.textSub(context), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis)]))])
                 )
             ),
           );
@@ -2546,6 +2562,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
                           const Spacer(),
 
+                          // ─── _buildHomeContent() メソッド内の下部操作バー周辺 ───
+
                           Container(
                             padding: EdgeInsets.fromLTRB(40.0, 0, 40.0, MediaQuery.of(context).padding.bottom + 24.0),
                             height: 100,
@@ -2558,27 +2576,28 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   return Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      // 🟢 修正：対応メモがない時はそもそもボタンを「半透明・タップ不可」にロック
+                                      // 対応メモがない時はボタンを半透明・タップ不可にロック
                                       Builder(
                                           builder: (context) {
                                             bool hasTarget = _getCurrentOrNextCourse() != null;
                                             return IconButton(
+                                              // 🟢 修正：edit_note_rounded から、より無機質でプレーンな鉛筆マークへ純化
                                               icon: Icon(
-                                                Icons.edit_note_rounded,
-                                                color: hasTarget ? camBtnColor : camBtnColor.withOpacity(0.15), // 押せない時は薄く
-                                                size: 32,
+                                                Icons.create_outlined,
+                                                color: hasTarget ? camBtnColor : camBtnColor.withOpacity(0.15),
+                                                size: 26, // 輪郭をシャープに魅せるためサイズを26に微調整
                                               ),
                                               onPressed: hasTarget ? () {
                                                 setState(() => _isMemoFieldOpen = true);
                                                 WidgetsBinding.instance.addPostFrameCallback((_) {
                                                   _cameraMemoFocusNode.requestFocus();
                                                 });
-                                              } : null, // 👈 null にすることで完全に押せなくなります
+                                              } : null,
                                             );
                                           }
                                       ),
 
-                                      // 中央：タップ時にキュッと小さくなるAnimated正円シャッター（そのまま維持）
+                                      // 中央：タップ時にキュッと小さくなるAnimated正円シャッター
                                       GestureDetector(
                                         onTap: _takeInlineCameraPhoto,
                                         child: Container(
@@ -2597,7 +2616,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                         ),
                                       ),
 
-                                      // 右側：戻るボタン（そのまま維持）
+                                      // 右側：戻るボタン
                                       IconButton(
                                         icon: Icon(Icons.arrow_forward_rounded, color: camBtnColor, size: 28),
                                         onPressed: () {
@@ -2617,6 +2636,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   ),
 
                   // ② 中央面：TASKS/MESSAGES
+                  // ─── _buildHomeContent メソッド内、中央面（ListView）の children の最下部 ───
+
                   Transform.translate(
                       offset: Offset(-_dragPosition * screenWidth, 0),
                       child: NotificationListener<ScrollNotification>(
@@ -2629,7 +2650,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         child: ListView(
                           key: const ValueKey('tasks_list'),
                           controller: _tasksScrollController,
-                          padding: const EdgeInsets.only(bottom: 120.0),
+                          // 🟢 調整：ナビゲーション文字が下部バーの裏に完全に隠れてしまわないよう、
+                          // ボトムパディングを 120.0 ➔ 160.0 へ僅かに拡張してスクロールの「遊び」を作ります。
+                          padding: const EdgeInsets.only(bottom: 160.0),
                           physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                           children: [
                             AnimatedContainer(
@@ -2638,6 +2661,47 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               height: scheduleHeight + 24.0,
                             ),
                             _buildTasksAndMessagesColumn(next7DaysTasks, unreadMessages),
+
+                            // -------------------------------------------------------------------
+                            // 🟢 追記：最下端のミニマルなカメラ誘導インジケータ
+                            // -------------------------------------------------------------------
+                            const SizedBox(height: 16),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                // 🟢 解決の鍵：タップ時に大元のコントローラーを左（-1.0）へ滑らかにアニメーション駆動。
+                                // これにより既存のスワイプ処理（カメラのオンデマンド起動ロジック）と100%安全に同期します。
+                                _dragAnimController.animateTo(
+                                    -1.0,
+                                    duration: const Duration(milliseconds: 350),
+                                    curve: Curves.easeOutCubic
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 24.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.arrow_back_rounded,
+                                      color: AppTheme.textMain(context).withOpacity(0.35),
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      "CAMERA MEMO",
+                                      style: TextStyle(
+                                        color: AppTheme.textMain(context).withOpacity(0.5), // ノイズにならない超極薄グレー
+                                        fontSize: 30,
+                                        fontWeight: FontWeight.w100, // スタイリッシュな極細字
+                                        letterSpacing: - 0.4,          // テック感を出す広めのカーニング
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+
                           ],
                         ),
                       )
@@ -2761,22 +2825,25 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     Color monoBg = isDark ? Colors.black : const Color(0xFFEEEEEE);
     Color monoTextColor = isDark ? Colors.white : Colors.black;
 
+    // ─── _buildDynamicHeaderWidget() メソッド内のカメラプレビューサイズ算出周辺 ───
+
     double effectiveScheduleHeight = _dragPosition < 0.5 ? dynamicScheduleHeight : scheduleHeight;
 
-    // 🟢 修正：4方向の均一枠をさらに細く「8.0px」へ。プレビューサイズを最大化
-    // 🟢 修正：タブレット（Pad）環境かどうかのリアルタイム判定
     bool isPad = screenWidth >= 600 || MediaQuery.of(context).size.shortestSide >= 600;
-
     double camMargin = 8.0;
     double previewW = screenWidth - (camMargin * 2);
 
-    // 🟢 修正：上部グラデーション領域の下降位置も、デバイスと縦横方向（Orientation）に完全連動させます
-
+    // 🟢 修正：横持ち(Landscape)か縦持ち(Portrait)かを検知し、タブレット時のプレビュー縦横比を完全に連動
     bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
-    double previewH = isPad
-        ? (isLandscape ? previewW * 3 / 4 : previewW * 4 / 3)
-        : (previewW * 16 / 9);
+    double previewH;
+    if (isPad) {
+      // 🟢 タブレット環境：デバイスの回転に合わせてプレビューの縦横アスペクト比を物理的に反転スイッチ
+      previewH = isLandscape ? (previewW * 3 / 4) : (previewW * 4 / 3);
+    } else {
+      // スマホ環境：従来のソリッドな16:9シネマサイズを維持
+      previewH = (previewW * 16 / 9);
+    }
 
     double cameraTargetHeight = camMargin + previewH + camMargin;
 
@@ -3935,6 +4002,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     // 時刻列のON/OFFを動的に反映
     double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
 
+    final bool isPad = MediaQuery.of(context).size.shortestSide >= 600;
+
     return Container(
         key: const ValueKey('calendar'),
         width: double.infinity,
@@ -4013,75 +4082,113 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       endStr = "${end ~/ 100}:${(end % 100).toString().padLeft(2, '0')}";
                     }
 
+                    // ─── _buildInnerCalendar メソッド内の List.generate(maxPeriod + 1, ...) 内部 ───
+
+                    // ─── _buildInnerCalendar メソッド内の List.generate(maxPeriod + 1, ...) 内部 ───
+
+                    // ─── _buildInnerCalendar メソッド内の List.generate(maxPeriod + 1, ...) 内部 ───
+
                     return Padding(
                       padding: EdgeInsets.only(bottom: periodIndex == maxPeriod ? 0 : currentSpacing),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.start,
                         children: [
-                          // 左端の時間インジケータ
+
+                          // -------------------------------------------------------------------
+                          // 🟢 修正：カプセル幅14 / 隙間2 の黄金比率 ＆ 非アクティブ文字の拡大
+                          // -------------------------------------------------------------------
                           if (timeColumnWidth > 0)
                             Opacity(
                               opacity: textOpacity,
                               child: Builder(
                                 builder: (context) {
+
+                                  // 🟢 修正：今日の実際の曜日が、時間割の表示日数（5または6）に収まっているかジャッジ
+                                  // ※ now.weekday の戻り値：1=月、5=金、6=土、7=日
+                                  final now = DateTime.now();
+                                  bool isDisplayDayActive = now.weekday <= displayDaysCount;
+
                                   bool isCurrentPeriod = false;
                                   if (!_isCapturing && pData != null) {
-                                    final now = DateTime.now();
                                     int nowMins = now.hour * 100 + now.minute;
-                                    if (nowMins >= pData['start']! && nowMins <= pData['end']!) {
+
+                                    // 🟢 解決の鍵：時間合致条件に「今日が有効な時間割曜日であるか」のフラグをAND結合
+                                    if (isDisplayDayActive && nowMins >= pData['start']! && nowMins <= pData['end']!) {
                                       isCurrentPeriod = true;
                                     }
                                   }
 
-                                  double dynamicFontSize = 8.5;
+                                  // 🟢 修正：カプセル内（アクティブ）はスマートに少し小ぶり
+                                  double activeFontSize = isPad ? 12.5 : 10.5;
+                                  // 🟢 修正：カプセル外（非アクティブ）はご要望通り「すこし大きく」調整
+                                  double inactiveFontSize = isPad ? 14.0 : 12;
 
-                                  if (isCurrentPeriod) {
-                                    return Container(
-                                      width: timeColumnWidth - 2.0,
-                                      height: currentItemHeight,
-                                      margin: const EdgeInsets.only(left: 1.0),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.95),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Container(
-                                        alignment: Alignment.centerRight,
-                                        padding: const EdgeInsets.only(right: 2.0),
-                                        child: RotatedBox(
-                                          quarterTurns: 1,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(startStr, style: TextStyle(color: Colors.black, fontSize: dynamicFontSize, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
-                                              Text(" - ", style: TextStyle(color: Colors.black.withOpacity(0.5), fontSize: dynamicFontSize - 1)),
-                                              Text(endStr, style: TextStyle(color: Colors.black, fontSize: dynamicFontSize, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }
-
-                                  return Container(
-                                    width: timeColumnWidth,
+                                  // 全体枠 16px を維持したまま、14px(本体) + 2px(隙間) に再配分
+                                  return SizedBox(
+                                    width: timeColumnWidth, // 16px固定（マスの位置はずらさない）
                                     height: currentItemHeight,
-                                    padding: const EdgeInsets.only(right: 2.0),
-                                    alignment: Alignment.centerRight,
-                                    child: RotatedBox(
-                                      quarterTurns: 1,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(startStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: dynamicFontSize, fontWeight: FontWeight.w400)),
-                                          Text(" - ", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: dynamicFontSize - 1)),
-                                          Text(endStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: dynamicFontSize, fontWeight: FontWeight.w400)),
-                                        ],
-                                      ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.start,
+                                      children: [
+
+                                        // ① カプセル・時刻テキスト本体
+                                        if (isCurrentPeriod)
+                                          Container(
+                                            width: 14.0, // 🟢 修正：少し大きくして文字の収まりを綺麗に調整
+                                            height: currentItemHeight,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.95),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Center(
+                                              child: RotatedBox(
+                                                quarterTurns: 1,
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Text(startStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                    Text("-", style: TextStyle(color: Colors.black.withOpacity(0.3), fontSize: activeFontSize - 1)),
+                                                    Text(endStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          )
+                                        else
+                                        // カプセルに入っていない（非アクティブ）時刻
+                                          SizedBox(
+                                            width: 14.0, // カプセル時と幅を均一化
+                                            height: currentItemHeight,
+                                            child: Center(
+                                              child: RotatedBox(
+                                                quarterTurns: 1,
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    // 🟢 修正：inactiveFontSize（スマホ11.0 / タブレット14.0）を適用してサイズアップ
+                                                    Text(startStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                    Text("-", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: inactiveFontSize - 1)),
+                                                    Text(endStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+
+                                        // ② 🟢 修正：カプセルとマスの隙間を確実に「2.0」へ
+                                        const SizedBox(width: 2.0),
+                                      ],
                                     ),
                                   );
                                 },
                               ),
                             ),
+
+                          // 💡 右隣の授業マス（...List.generate(displayDaysCount, ...）へと続きます
+
+                          // 💡 右隣の授業マス（...List.generate(displayDaysCount, ...）へと美しく続きます
+
+                          // 💡 この右隣に並ぶ「授業マス目自動等分生成ロジック（...List.generate(displayDaysCount, ...）」へとそのまま続きます
 
                           // 授業マス目自動等分生成ロジック
                           ...List.generate(displayDaysCount, (dayIndex) {
@@ -4570,15 +4677,19 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
 
+  // 🟢 修正：カメラ側のマイナス値（-1.0〜0.0）を安全に遮断し、左はみ出しを防止する決定版
   Widget _buildBottomNavigation() {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    int leftFlex = (80 - _dragPosition * 60).toInt();
-    int rightFlex = (20 + _dragPosition * 60).toInt();
+    // 🟢 解決の鍵：下部バーの内部レイアウト計算用に、0.0〜1.0の範囲に美しくクランプした安全な位置変数を定義します
+    // これにより、カメラ画面にどれだけ深くスワイプしても、トグル自体は「TASKS」の左端位置でピタッと綺麗に静止します
+    final double safePos = _dragPosition.clamp(0.0, 1.0);
 
-    // ★ 修正：ベースの背景色とトグルの色をモードに合わせてカスタム
-    Color baseBgColor = isDark ? const Color(0xFF333333) : const Color(0xFFE0E0E0); // ダーク:少し薄い灰色 / ライト:少し濃い灰色
-    Color toggleColor = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F5); // ダーク:濃い灰色 / ライト:薄い明るい灰色
+    int leftFlex = (80 - safePos * 60).toInt();
+    int rightFlex = (20 + safePos * 60).toInt();
+
+    Color baseBgColor = isDark ? const Color(0xFF333333) : const Color(0xFFE0E0E0);
+    Color toggleColor = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F5);
     Color textColor = AppTheme.textMain(context);
 
     return Padding(
@@ -4590,27 +4701,23 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               builder: (context, child) {
                 Color bg;
                 IconData iconData;
-
                 bool isLoading = _isLoadingAssignments || _isLoadingMessages;
-
                 Color appBgColor = AppTheme.bg(context);
 
                 if (!widget.isAuthenticated || _hasApiError) {
                   bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
                   iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
                 } else if (isLoading) {
-                  // 🟢 元の白黒パルスをベースに、アニメーション開始前の「値が0.0」の瞬間だけbaseBgColorで隠す
                   bg = _colorAnimController.value == 0.0
                       ? baseBgColor
                       : (Color.lerp(Colors.black, Colors.white, _colorAnimController.value) ?? Colors.black);
                   iconData = Icons.sync;
                 } else {
-                  bg = baseBgColor; // ★ 修正：カスタム色を適用
+                  bg = baseBgColor;
                   iconData = Icons.sync;
                 }
 
                 Widget iconWidget = Icon(iconData, color: textColor);
-
                 if (isLoading) {
                   iconWidget = Transform.rotate(
                     angle: _spinAnimController.value * 2.0 * math.pi,
@@ -4660,20 +4767,21 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     },
                     child: Container(
                       height: 60,
-                      decoration: BoxDecoration(color: baseBgColor, borderRadius: BorderRadius.circular(30)), // ★ 修正
+                      decoration: BoxDecoration(color: baseBgColor, borderRadius: BorderRadius.circular(30)),
                       padding: const EdgeInsets.all(4.0),
                       child: Stack(
                         children: [
                           AnimatedAlign(
                             duration: const Duration(milliseconds: 150),
                             curve: Curves.easeOutCubic,
-                            alignment: Alignment(_dragPosition * 2 - 1, 0),
+                            // 🟢 修正：_dragPosition の代わりに safePos を適用して左突き抜けを完全ブロック
+                            alignment: Alignment(safePos * 2 - 1, 0),
                             child: FractionallySizedBox(
                               widthFactor: 0.8,
                               heightFactor: 1.0,
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: toggleColor, // ★ 修正
+                                  color: toggleColor,
                                   borderRadius: BorderRadius.circular(26),
                                 ),
                               ),
@@ -4693,11 +4801,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                         child: Row(
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
-                                              // ★ 修正：長方形が縦に重なったマーク
                                               Icon(Icons.view_agenda_rounded, color: textColor, size: 20),
-                                              if (_dragPosition < 0.5) ...[
+                                              // 🟢 修正：文字の消失フェード条件も safePos にバインド
+                                              if (safePos < 0.5) ...[
                                                 const SizedBox(width: 6),
-                                                // ★ 修正：細字(w300)に変更
                                                 Flexible(child: Text("TASKS", style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w300, letterSpacing: 1.2), overflow: TextOverflow.clip))
                                               ]
                                             ]
@@ -4717,11 +4824,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                         child: Row(
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
-                                              // ★ 修正：点が9個正方形に並んだマーク
                                               Icon(Icons.apps_rounded, color: textColor, size: 20),
-                                              if (_dragPosition >= 0.5) ...[
+                                              // 🟢 修正：文字の出現フェード条件も safePos にバインド
+                                              if (safePos >= 0.5) ...[
                                                 const SizedBox(width: 6),
-                                                // ★ 修正：細字(w300)に変更
                                                 Flexible(child: Text("COURSES", style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w300, letterSpacing: 1.2), overflow: TextOverflow.clip))
                                               ]
                                             ]
@@ -4742,7 +4848,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
           Container(
             width: 60, height: 60,
-            decoration: BoxDecoration(color: baseBgColor, shape: BoxShape.circle), // ★ 修正
+            decoration: BoxDecoration(color: baseBgColor, shape: BoxShape.circle),
             child: IconButton(
               icon: Icon(Icons.settings, color: textColor),
               onPressed: widget.onSettings,
