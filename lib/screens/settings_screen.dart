@@ -179,6 +179,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  // ─── _SettingsScreenState 内の _loadSyncSettings メソッド ───
+
   Future<void> _loadSyncSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -188,11 +190,17 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       _syncSchedulesEnabled = prefs.getBool('sync_schedules_enabled') ?? false;
       _importEventsEnabled = prefs.getBool('sync_import_enabled') ?? false;
 
-      // 🟢 通知設定の読み込み（未設定時はデフォルトでONにする）
-      _isLiveNotifyEnabled = prefs.getBool('live_notify_enabled') ?? true;
-      _liveNotifyClasses = prefs.getBool('live_notify_classes') ?? true;
-      _liveNotifyTasks = prefs.getBool('live_notify_tasks') ?? true;
+      // 🟢 修正：アプリ内からは一切オフにできないよう、値を true（常時有効）に強制ロック
+      _isLiveNotifyEnabled = true;
+      _liveNotifyClasses = true;
+      _liveNotifyTasks = true;
     });
+
+    // 🟢 追記：裏側のバックグラウンドサービスが常にONとして動くよう、Prefs 側も true で上書き固定
+    await prefs.setBool('live_notify_enabled', true);
+    await prefs.setBool('live_notify_classes', true);
+    await prefs.setBool('live_notify_tasks', true);
+
     if (_isSyncEnabled) {
       await _fetchCalendars();
     }
@@ -547,60 +555,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     ),
                     const SizedBox(height: 32),
 
-                    // 🟢 新設：完全に独立した「ライブカウントダウン通知」カード
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                      child: Container(
-                        decoration: BoxDecoration(color: AppTheme.panel(context), borderRadius: BorderRadius.circular(30)),
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text("ライブカウントダウン通知", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
-                                  SizedBox(
-                                    height: 20,
-                                    child: Transform.scale(
-                                      scale: 0.75,
-                                      child: Switch(
-                                        value: _isLiveNotifyEnabled,
-                                        onChanged: _toggleLiveNotify,
-                                        activeColor: AppTheme.textMain(context),
-                                        activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
-                                        inactiveThumbColor: AppTheme.textSub(context),
-                                        inactiveTrackColor: Colors.transparent,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            AnimatedSize(
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeOutCubic,
-                              child: _isLiveNotifyEnabled
-                                  ? Column(
-                                children: [
-                                  Divider(height: 1, color: AppTheme.bg(context)),
-                                  _buildSyncSubToggle("授業開始15分前の常駐通知", _liveNotifyClasses, _toggleLiveNotifyClasses),
-                                  Divider(height: 1, color: AppTheme.bg(context)),
-                                  _buildSyncSubToggle("未提出課題1時間前の常駐通知", _liveNotifyTasks, _toggleLiveNotifyTasks),
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 20.0, right: 20.0, bottom: 20.0, top: 12.0),
-                                    child: Text("通知をタップすると、対象の教室や課題内容へ直接アクセスできます", style: TextStyle(color: AppTheme.textSub(context).withOpacity(0.5), fontSize: 10, height: 1.4)),
-                                  )
-                                ],
-                              ) : const SizedBox(width: double.infinity, height: 0),
-                            )
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 32),
+
 
                     // ガイド / バージョン / キャッシュクリア
                     Padding(
@@ -638,7 +593,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                 }),
                                 Divider(height: 1, color: AppTheme.bg(context)),
                                 _buildCustomListItem("Open Source Libraries", onTap: () {
-                                  showLicensePage(context: context, applicationVersion: '1.0.2', applicationLegalese: '© 2026 Developer');
+                                  showLicensePage(context: context, applicationVersion: '1.0.1', applicationLegalese: '© 2026 .HK');
                                 }),
                               ]
                           )

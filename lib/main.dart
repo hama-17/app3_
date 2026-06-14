@@ -4,13 +4,22 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'core/app_theme.dart';
+//main.dart
 
 bool globalDisableAutoCacheClear = false;
+// ─── main.dart の最上部周辺 ───
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🟢 修正：眠っていたAndroidのアラームシステムをここで叩き起こします。
+  // これにより、LiveNotificationService からの予約チケットがOSに正しく受理されるようになります。
+  await AndroidAlarmManager.initialize();
+
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
@@ -19,6 +28,7 @@ void main() async {
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   final prefs = await SharedPreferences.getInstance();
+// ─── 以下、既存のテーマ読み込みや runApp() 処理へそのまま完全無傷で繋がります ───
   final savedTheme = prefs.getString('app_theme_mode');
   if (savedTheme == 'light') {
     appThemeNotifier.value = ThemeMode.light;

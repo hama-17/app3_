@@ -30,6 +30,7 @@ import '../services/widget_update_service.dart';
 import 'package:camera/camera.dart';
 import 'package:path/path.dart' show join;
 import 'package:gal/gal.dart';
+import '../services/live_notification_service.dart';
 //lib/screens/dashboard_screen.dartの中身です。
 
 
@@ -1295,6 +1296,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   // ★ 修正：RefreshIndicatorで待機できるよう Future を返す非同期関数に変更
+  // ─── _DashboardPageState 内の _fetchDataParallel メソッド ───
+
+  // ★ 修正：RefreshIndicatorで待機できるよう Future を返す非同期関数に変更
   Future<void> _fetchDataParallel() async {
     if (mounted) {
       setState(() { _hasApiError = false; _isLoadingAssignments = true; _isLoadingMessages = true; });
@@ -1305,6 +1309,19 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _fetchAssignments(),
       _fetchMessages()
     ]);
+
+    // -------------------------------------------------------------------
+    // 🟢 追記：LMS通信（＆キャッシュ展開）が完全完了した瞬間にアラームを全一斉更新
+    // -------------------------------------------------------------------
+    try {
+      await LiveNotificationService.reScheduleLiveNotifications(
+        currentCourses: _displayCourses,     // 確定済みのスケジュール順授業リスト
+        currentAssignments: _assignments,   // 確定済みのソート済タスクリスト
+      );
+      debugPrint("ライブカウントダウン通知のアラームを正常に再予約しました");
+    } catch (e) {
+      debugPrint("ライブ通知の予約中にエラーが発生しました: $e");
+    }
   }
 
 
@@ -2269,7 +2286,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                        "TASKS",
+                        "Task",
                         style: TextStyle(
                             color: dynamicTextColor,
                             fontSize: 24, // ★ 修正：20 -> 24 にサイズアップ
@@ -2300,7 +2317,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                        "MESSAGES",
+                        "Message",
                         style: TextStyle(
                             color: dynamicTextColor,
                             fontSize: 24, // ★ 修正：サイズアップ
@@ -2336,7 +2353,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           final due = DateTime.tryParse(task['due_at'] ?? '')?.toLocal() ?? DateTime.now();
           String dueStr = isOverdue ? "${due.year}/${due.month}/${due.day}  ${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}" : "${due.month}/${due.day}  ${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}";
           String? subStr;
-          if (isCompletedList && task['submission'] != null && task['submission']['submitted_at'] != null) { final sub = DateTime.tryParse(task['submission']['submitted_at'])?.toLocal(); if (sub != null) { subStr = "Submitted: ${sub.month}/${sub.day} ${sub.hour.toString().padLeft(2,'0')}:${sub.minute.toString().padLeft(2,'0')}"; } }
+          if (isCompletedList && task['submission'] != null && task['submission']['submitted_at'] != null) { final sub = DateTime.tryParse(task['submission']['submitted_at'])?.toLocal(); if (sub != null) { subStr = "提出: ${sub.month}/${sub.day} ${sub.hour.toString().padLeft(2,'0')}:${sub.minute.toString().padLeft(2,'0')}"; } }
 
           Widget rowContent = Container(
             color: AppTheme.panel(context),
@@ -3130,9 +3147,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           builder: (context) {
                             String term = widget.currentTerm.toUpperCase();
                             String line1 = term; String line2 = "";
-                            if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) { line1 = "SPRING"; line2 = "SEMESTER"; }
-                            else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) { line1 = "FALL"; line2 = "SEMESTER"; }
-                            else if (term.startsWith('Q')) { line1 = "QUARTER"; String n = term.replaceAll(RegExp(r'[^0-9]'), ''); line2 = n == '1' ? "ONE" : n == '2' ? "TWO" : n == '3' ? "THREE" : n == '4' ? "FOUR" : n; }
+                            if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) { line1 = "Spring"; line2 = "Semester"; }
+                            else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) { line1 = "Fall"; line2 = "Semester"; }
+                            else if (term.startsWith('Q')) { line1 = "Quarter"; String n = term.replaceAll(RegExp(r'[^0-9]'), ''); line2 = n == '1' ? "One" : n == '2' ? "Two" : n == '3' ? "Three" : n == '4' ? "Four" : n; }
                             return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -4379,17 +4396,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   physics: const BouncingScrollPhysics(),
                   children: [
                     if (next7DaysTasks.isNotEmpty) ...[
-                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("NEXT 7 DAYS", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
+                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("next 7 days", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
                       _buildGroupedTasks(next7DaysTasks, isCompletedList: false),
                       const SizedBox(height: 24),
                     ],
                     if (overdueTasks.isNotEmpty) ...[
-                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("OVERDUE", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
+                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("overdue", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
                       _buildGroupedTasks(overdueTasks, isOverdue: true, isCompletedList: false),
                       const SizedBox(height: 24),
                     ],
                     if (futureTasks.isNotEmpty) ...[
-                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("FUTURE TASKS", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
+                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("future tasks", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
                       _buildGroupedTasks(futureTasks, isCompletedList: false),
                     ],
                   ],
@@ -4459,7 +4476,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         children: [
                           Icon(Icons.arrow_back_ios, color: AppTheme.textMain(context), size: 20),
                           const SizedBox(width: 8),
-                          Text("TASKS", style: TextStyle(color: AppTheme.textMain(context), fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 2.0)),
+                          Text("Tasks", style: TextStyle(color: AppTheme.textMain(context), fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 0)),
                         ]
                     ),
                   ),
@@ -4527,12 +4544,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                 },
                                 child: Center(
                                     child: Text(
-                                        "PENDING",
+                                        "Pending",
                                         style: TextStyle(
                                             color: pendingTxtColor,
                                             fontSize: 18,
                                             fontWeight: FontWeight.w300,
-                                            letterSpacing: 1.0
+                                            letterSpacing: 0
                                         )
                                     )
                                 ),
@@ -4546,12 +4563,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                 },
                                 child: Center(
                                     child: Text(
-                                        "COMPLETED",
+                                        "Completes",
                                         style: TextStyle(
                                             color: completedTxtColor,
                                             fontSize: 18,
                                             fontWeight: FontWeight.w300,
-                                            letterSpacing: 1.0
+                                            letterSpacing: 0
                                         )
                                     )
                                 ),
@@ -4599,12 +4616,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
               children: [
                 if (unreadMessages.isNotEmpty) ...[
-                  Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("UNREAD", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
+                  Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("unread", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
                   _buildGroupedMessages(unreadMessages, isUnread: true),
                   const SizedBox(height: 24),
                 ],
                 if (readMessages.isNotEmpty) ...[
-                  Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("READ", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
+                  Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("read", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
                   Opacity(
                       opacity: 0.5,
                       child: _buildGroupedMessages(readMessages, isUnread: false)
@@ -4657,12 +4674,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     Icon(Icons.arrow_back_ios, color: AppTheme.textMain(context), size: 20),
                     const SizedBox(width: 8),
                     Text(
-                        "ALL MESSAGES",
+                        "All Messages",
                         style: TextStyle(
                             color: AppTheme.textMain(context),
                             fontSize: 24,
                             fontWeight: FontWeight.w300,
-                            letterSpacing: 2.0
+                            letterSpacing: 0
                         )
                     ),
                   ]
@@ -4805,7 +4822,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                               // 🟢 修正：文字の消失フェード条件も safePos にバインド
                                               if (safePos < 0.5) ...[
                                                 const SizedBox(width: 6),
-                                                Flexible(child: Text("TASKS", style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w300, letterSpacing: 1.2), overflow: TextOverflow.clip))
+                                                Flexible(child: Text("TO DO", style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w300, letterSpacing: 0.5), overflow: TextOverflow.clip))
                                               ]
                                             ]
                                         )
@@ -4828,7 +4845,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                               // 🟢 修正：文字の出現フェード条件も safePos にバインド
                                               if (safePos >= 0.5) ...[
                                                 const SizedBox(width: 6),
-                                                Flexible(child: Text("COURSES", style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w300, letterSpacing: 1.2), overflow: TextOverflow.clip))
+                                                Flexible(child: Text("COURSES", style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w300, letterSpacing: 0.5), overflow: TextOverflow.clip))
                                               ]
                                             ]
                                         )
