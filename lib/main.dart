@@ -13,12 +13,17 @@ import 'core/app_theme.dart';
 bool globalDisableAutoCacheClear = false;
 // ─── main.dart の最上部周辺 ───
 
+// ─── lib/main.dart ───
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 🟢 修正：眠っていたAndroidのアラームシステムをここで叩き起こします。
-  // これにより、LiveNotificationService からの予約チケットがOSに正しく受理されるようになります。
-  await AndroidAlarmManager.initialize();
+  // 🟢 解決の鍵：iOS環境での暴走を物理的に完全ブロック！
+  // Androidの時はしっかりと叩き起こし、iOSの時は何事もなかったかのようにスルーさせます。
+  // これにより、起動0秒目にMissingPluginExceptionでアプリが即死するルートを永久に封殺します。
+  if (Platform.isAndroid) {
+    await AndroidAlarmManager.initialize();
+  }
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -28,7 +33,7 @@ void main() async {
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   final prefs = await SharedPreferences.getInstance();
-// ─── 以下、既存のテーマ読み込みや runApp() 処理へそのまま完全無傷で繋がります ───
+
   final savedTheme = prefs.getString('app_theme_mode');
   if (savedTheme == 'light') {
     appThemeNotifier.value = ThemeMode.light;
