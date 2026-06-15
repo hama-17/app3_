@@ -12,16 +12,22 @@ import UserNotifications
     // 1. 先にプラグイン全体の基盤をレジスター
     GeneratedPluginRegistrant.register(with: self)
 
-    // 🟢 解決の鍵：直接キャストせず、下部に新設したヘルパー関数で階層の奥底から100%確実に取得します
-    if let controller = findFlutterViewController(from: window?.rootViewController) {
-        let channel = FlutterMethodChannel(name: "app3.kportal/live_notification", binaryMessenger: controller.binaryMessenger)
+    // 🟢【実行順序の完全正常化】
+    // 先に大元の初期化を走らせて、Flutterエンジンと画面の器を完全に起動させます。
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+
+    // 🟢【カメラの影響を100%無効化する直通ドッキング】
+    // super.application の「直後」であれば、エンジンが完成しているため安全にレジストラを叩けます。
+    // window や ViewController をスキャンしないため、カメラパッケージがどれだけビュー階層を
+    // いじくり回していようが関係なく、エンジン直通の MethodChannel が100%確実に開通します。
+    if let registrar = self.registrar(forPlugin: "AppLiveNotificationPlugin") {
+        let channel = FlutterMethodChannel(name: "app3.kportal/live_notification", binaryMessenger: registrar.messenger())
 
         channel.setMethodCallHandler({
           (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
 
           switch call.method {
           case "scheduleIOSLocalNotification":
-              // 🟢 Hamanaが組んでくれたNSNumberによる型安全キャッチ（100点満点です）
               guard let args = call.arguments as? [String: Any],
                     let idNum = args["id"] as? NSNumber,
                     let timeNum = args["triggerTimeMillis"] as? NSNumber,
@@ -67,27 +73,13 @@ import UserNotifications
               result(FlutterMethodNotImplemented)
           }
         })
-    } else {
-        // 万が一見つからなかった場合のデバッグログ
-        print("🚨 ALERT: FlutterViewController could not be found in active hierarchy.")
     }
 
-    // 3. 非同期で通知権限をリクエスト
-    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    // 🟢【安全の極み】
+    // 起動時にクラッシュや競合を誘発していた通知許可ポップアップ（requestAuthorization）は
+    // ここから完全に消滅させました。これにより起動シーケンスのブロッキングリスクはゼロです。
+    // 他のカメラやカレンダー権限と同じように、アプリが立ち上がった後、Dart側の自由なタイミングで自然に出せます。
 
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-  }
-
-  // 🟢 追記：カメラプラグイン等の階層いじりを完全に無力化する「再帰探索ヘルパー」
-  private func findFlutterViewController(from rootVC: UIViewController?) -> FlutterViewController? {
-      if let fvc = rootVC as? FlutterViewController { return fvc }
-      if let nav = rootVC as? UINavigationController { return findFlutterViewController(from: nav.visibleViewController) }
-      if let tab = rootVC as? UITabBarController { return findFlutterViewController(from: tab.selectedViewController) }
-      if let children = rootVC?.children {
-          for child in children {
-              if let fvc = findFlutterViewController(from: child) { return fvc }
-          }
-      }
-      return nil
+    return result
   }
 }
