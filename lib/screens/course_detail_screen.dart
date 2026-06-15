@@ -460,6 +460,7 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                           final c = widget.courses[i]; final name = c['name'] ?? '';
                           bool isThisCustom = c['is_custom'] == true;
                           Color pageColor = _getColorForIndex(i);
+                          final double padTop = MediaQuery.of(context).padding.top;
 
                           // --- 曜日・時限パース処理 ---
                           String rawDayStr = "";
@@ -538,13 +539,13 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                     AnimatedPositioned(
                                         duration: const Duration(milliseconds: 300),
                                         curve: Curves.easeOutCubic,
-                                        top: _isCollapsed ? 10 : 18,  // 👈 縮小時にテキストの目線に合わせて少し下に（SafeAreaから46pxの位置へ）下げる
-                                        left: _isCollapsed ? 16 : 16,
+                                        bottom: _isCollapsed ? 5 : (206 - padTop), // 260px(全高) - 18px(上余白) - 36px(ボタン高) = 206px
+                                        left: 16,
                                         child: GestureDetector(
                                           behavior: HitTestBehavior.opaque,
                                           onTap: () => Navigator.pop(context),
                                           child: Container(
-                                            padding: const EdgeInsets.all(8),
+                                            padding: const EdgeInsets.all(8), // 横幅は 20 + 8*2 = 36px
                                             child: Icon(
                                               Icons.arrow_back_ios_new,
                                               color: AppTheme.getTextColorForBackground(pageColor),
@@ -590,9 +591,9 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                     AnimatedPositioned(
                                         duration: const Duration(milliseconds: 300),
                                         curve: Curves.easeOutCubic,
-                                        bottom: _isCollapsed ? 8 : 18,
-                                        left: _isCollapsed ? 60 : 24, // 👈 縮小時は矢印の右隣（60）から綺麗にテキストを開始させる
-                                        right: _isCollapsed ? 24 : 90,
+                                        bottom: _isCollapsed ? 12 : 18,
+                                        left: _isCollapsed ? 52 : 24, // 👈 縮小時は戻るボタンの真右から1ミリの狂いもなく開始
+                                        right: _isCollapsed ? 80 : 90, // 右側の左右矢印コントローラーを綺麗に避ける幅
                                         child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             mainAxisSize: MainAxisSize.min,
@@ -628,27 +629,64 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                         )
                                     ),
 
+                                    // 🟢 変更：5点ドットを廃止し、次の授業へスライドするミニマルな右矢印を配置
+                                    // 🟢 変更：5点ドットを廃止し、左右の「矢印型」ソリッドボタンでページ送り・戻りを可能に
                                     Positioned(
-                                        bottom: 24, right: 24,
+                                        bottom: 12, // 2つのボタンが並ぶため、下端の目線を整えるよう16➔12へ微調整
+                                        right: 16,
                                         child: AnimatedOpacity(
                                             duration: const Duration(milliseconds: 200),
                                             opacity: _isCollapsed ? 0.0 : 1.0,
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: List.generate(dotCount, (dotIndex) {
-                                                bool isActive = dotIndex == activeDot;
-                                                return Container(
-                                                  margin: const EdgeInsets.only(left: 6.0),
-                                                  width: 6.0,
-                                                  height: 6.0,
-                                                  decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    color: isActive
-                                                        ? AppTheme.getTextColorForBackground(pageColor)
-                                                        : AppTheme.getTextColorForBackground(pageColor).withOpacity(0.2),
+                                            child: IgnorePointer(
+                                              ignoring: _isCollapsed,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+
+                                                  // ◀️ 左向き矢印（前の授業へ）
+                                                  GestureDetector(
+                                                    behavior: HitTestBehavior.opaque,
+                                                    onTap: i > 0 ? () {
+                                                      _topPageController.previousPage(
+                                                        duration: const Duration(milliseconds: 300),
+                                                        curve: Curves.easeOutCubic,
+                                                      );
+                                                    } : null, // 最初のページではタップを完全遮断
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.all(8.0), // タップ判定の拡張
+                                                      child: Icon(
+                                                        Icons.arrow_back,
+                                                        color: AppTheme.getTextColorForBackground(pageColor)
+                                                            .withOpacity(i > 0 ? 1.0 : 0.0), // 押せない時は不透明度を下げて無機質に固定
+                                                        size: 20,
+                                                      ),
+                                                    ),
                                                   ),
-                                                );
-                                              }),
+
+                                                  const SizedBox(width: 4), // 矢印ボタン同士のミニマルな間隔
+
+                                                  // ▶️ 右向き矢印（次の授業へ）
+                                                  GestureDetector(
+                                                    behavior: HitTestBehavior.opaque,
+                                                    onTap: i < widget.courses.length - 1 ? () {
+                                                      _topPageController.nextPage(
+                                                        duration: const Duration(milliseconds: 300),
+                                                        curve: Curves.easeOutCubic,
+                                                      );
+                                                    } : null, // 最後のページではタップを完全遮断
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.all(8.0),
+                                                      child: Icon(
+                                                        Icons.arrow_forward,
+                                                        color: AppTheme.getTextColorForBackground(pageColor)
+                                                            .withOpacity(i < widget.courses.length - 1 ? 1.0 : 0),
+                                                        size: 20,
+                                                      ),
+                                                    ),
+                                                  ),
+
+                                                ],
+                                              ),
                                             )
                                         )
                                     )
@@ -670,16 +708,16 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
 
                 if (isCurrentCustom) {
                   pageCount = 2;
-                  pageTitlesLong = ["MEMO", "SYLLABUS"];
-                  pageTitlesShort = ["MEMO", "SYLLABUS"];
+                  pageTitlesLong = ["MEMO", "TASKS"];
+                  pageTitlesShort = ["MEMO", "TASKS"];
                 } else if (widget.isAuthenticated) {
                   pageCount = 5;
-                  pageTitlesLong = ["MEMO", "MODULES", "TASKS", "GRADES", "INFORMATION"];
-                  pageTitlesShort = ["MEMO", "MODS", "TASKS", "GRADE", "INFO"];
+                  pageTitlesLong = ["MEMO", "MODULES", "TASKS", "GRADES", "ANNOUNCE"];
+                  pageTitlesShort = ["MEMO", "MODS", "TASKS", "GRADE", "ANN"];
                 } else {
                   pageCount = 2;
-                  pageTitlesLong = ["MEMO", "CANVAS"];
-                  pageTitlesShort = ["MEMO", "CANVAS"];
+                  pageTitlesLong = ["MEMO", "LOGIN"];
+                  pageTitlesShort = ["MEMO", "LOGIN"];
                 }
 
                 int safeBottomIndex = _currentBottomIndex;
@@ -866,12 +904,7 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                         child: Column(
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
-                                              Icon(Icons.lock_outline, size: 48, color: textCol.withOpacity(0.5)),
-                                              const SizedBox(height: 16),
-                                              Text("LOGIN REQUIRED", style: TextStyle(color: textCol, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-                                              const SizedBox(height: 8),
-                                              Text("PLEASE LOGIN TO VIEW DETAILS", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 10, letterSpacing: 1.0)),
-                                              const SizedBox(height: 32),
+
                                               GestureDetector(
                                                 onTap: () {
                                                   Navigator.pop(context);
@@ -1268,11 +1301,9 @@ class _CourseMemoWidget extends StatefulWidget {
 class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive => true;
 
-
   List<Map<String, dynamic>> _memos = [];
   String? _activeMemoId;
   final ImagePicker _picker = ImagePicker();
-
 
   @override
   void initState() {
@@ -1280,39 +1311,87 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     _loadMemos();
   }
 
-
   @override
   void didUpdateWidget(covariant _CourseMemoWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.courseId != widget.courseId) {
+      // 左右スワイプで授業が切り替わる直前、古い授業から空の仮メモを除外して確定保存
+      _saveMemosForId(oldWidget.courseId, _memos);
+
       setState(() {
         _activeMemoId = null;
         _memos = [];
       });
-      // ★ 修正：ここで親のsetStateを呼ぶと描画中にエラー（赤い画面）になるため削除
       _loadMemos();
     }
   }
 
-
+  // 🟢 起動時・授業切り替え時に今日のメモを自動展開するコア
   Future<void> _loadMemos() async {
     final prefs = await SharedPreferences.getInstance();
     final String? data = prefs.getString('course_memos_v2_${widget.courseId}');
+
+    List<Map<String, dynamic>> loadedMemos = [];
     if (data != null) {
       try {
         final List<dynamic> decoded = jsonDecode(data);
-        if (mounted) setState(() => _memos = decoded.map((e) => Map<String, dynamic>.from(e)).toList());
+        loadedMemos = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
       } catch(e) {}
+    }
+
+    final now = DateTime.now();
+    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+
+    // すでに今日の日付のメモが存在するかスキャン
+    int todayIdx = loadedMemos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
+
+    if (todayIdx == -1) {
+      // なければ「中身が空の今日の仮メモ」を配列に仕込む
+      final filteredName = _getFilteredCourseName(widget.courseName);
+      final newTitle = filteredName.isNotEmpty ? '$dateStr $filteredName' : dateStr;
+
+      final Map<String, dynamic> newMemo = {
+        'id': now.millisecondsSinceEpoch.toString(),
+        'title': newTitle,
+        'items': <dynamic>[],
+      };
+      loadedMemos.add(newMemo);
+      todayIdx = loadedMemos.length - 1;
+    }
+
+    if (mounted) {
+      setState(() {
+        _memos = loadedMemos;
+        // 起動・切り替えの瞬間、100%確実に今日のメモ（詳細ビュー）へダイレクトジャンプ
+        _activeMemoId = _memos[todayIdx]['id']?.toString();
+      });
+      widget.onMemoStateChanged?.call(true);
     }
   }
 
-
-  Future<void> _saveMemos() async {
+  // 🟢 特定の授業IDに対して、空メモを除外してクリーン保存する防波堤
+  Future<void> _saveMemosForId(dynamic cId, List<Map<String, dynamic>> memoList) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('course_memos_v2_${widget.courseId}', jsonEncode(_memos));
+    final realMemos = memoList.where((m) => (m['items'] as List? ?? []).isNotEmpty).toList();
+    await prefs.setString('course_memos_v2_$cId', jsonEncode(realMemos));
   }
 
-  // ★ 追加1：一時キャッシュの画像をアプリの安全な領域（Documents）にコピーして永続化する
+  // 🟢 現在の授業のローカル保存
+  Future<void> _saveMemos() async {
+    await _saveMemosForId(widget.courseId, _memos);
+  }
+
+  // 🟢 一覧へ視点を戻す（メモリ上では空でも今日の項目を仮維持）
+  void _closeMemo() {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _activeMemoId = null;
+    });
+    widget.onMemoStateChanged?.call(false);
+    _saveMemos();
+  }
+
+  // 🟢 一時キャッシュの画像を安全な領域（Documents）にコピーして永続化する
   Future<String> _saveImageToLocal(String tempPath) async {
     final directory = await getApplicationDocumentsDirectory();
     final memoDirPath = '${directory.path}/memo_images';
@@ -1325,7 +1404,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     return savedImage.path;
   }
 
-  // ★ 追加2：Undoを考慮した画像の「遅延」削除機能（6秒後にまだ消えていれば実体ファイルを消去）
+  // 🟢 Undoを考慮した画像の遅延削除
   void _scheduleFileDeletion(String path) {
     Future.delayed(const Duration(seconds: 6), () {
       bool isStillInUse = false;
@@ -1333,7 +1412,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
         final items = memo['items'] as List<dynamic>? ?? [];
         for (var item in items) {
           if (item['type'] == 'image' && item['data'] == path) {
-            isStillInUse = true; // Undoされて復活していれば削除をキャンセル
+            isStillInUse = true;
             break;
           }
         }
@@ -1341,47 +1420,19 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
       if (!isStillInUse) {
         try {
           final file = File(path);
-          if (file.existsSync()) file.deleteSync(); // ストレージから完全に消去
+          if (file.existsSync()) file.deleteSync();
         } catch (_) {}
       }
     });
   }
 
-
+  // 🟢 教科名のクリーンフィルター
   String _getFilteredCourseName(String name) {
     if (name.isEmpty) return '';
     return CourseTitleParser.getCleanTitle(name);
   }
 
-
-  void _createNewMemoTab() {
-    final now = DateTime.now();
-    final filteredName = _getFilteredCourseName(widget.courseName);
-    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
-    final newTitle = filteredName.isNotEmpty ? '$dateStr $filteredName' : dateStr;
-
-
-    final Map<String, dynamic> newMemo = {
-      'id': now.millisecondsSinceEpoch.toString(),
-      'title': newTitle,
-      'items': <dynamic>[],
-    };
-    setState(() {
-      _memos.add(newMemo);
-      _activeMemoId = newMemo['id']?.toString();
-    });
-    widget.onMemoStateChanged?.call(true);
-    _saveMemos();
-  }
-
-
-  void _closeMemo() {
-    FocusScope.of(context).unfocus();
-    setState(() => _activeMemoId = null);
-    widget.onMemoStateChanged?.call(false);
-  }
-
-
+  // 🟢 メモへアイテム（テキスト・画像）をドッキング
   void _addItemToMemo(String type, String data) {
     if (_activeMemoId == null) return;
     final index = _memos.indexWhere((m) => m['id']?.toString() == _activeMemoId);
@@ -1397,12 +1448,11 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
   }
 
-
+  // 🟢 メモ内アイテムの削除（Undoスナックバー連動）
   void _deleteItem(int memoIndex, int itemIndex) {
     final deletedItem = _memos[memoIndex]['items'][itemIndex];
     final currentCourseId = widget.courseId;
     final currentMemoId = _memos[memoIndex]['id'];
-
 
     setState(() {
       List<dynamic> items = List<dynamic>.from(_memos[memoIndex]['items'] ?? []);
@@ -1411,8 +1461,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     });
     _saveMemos();
 
-
-    // ★ ここから下をAppSnackBarに置き換え
     AppSnackBar.showUndo(context, "メモを削除しました", () {
       if (widget.courseId != currentCourseId) return;
       setState(() {
@@ -1431,11 +1479,10 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
   }
 
-
+  // 🟢 過去ログから特定のメモシートを削除（Undoスナックバー連動）
   void _deleteMemoTab(int index) {
     final deletedMemo = _memos[index];
     final currentCourseId = widget.courseId;
-
 
     setState(() {
       _memos.removeAt(index);
@@ -1446,8 +1493,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     });
     _saveMemos();
 
-
-    // ★ ここから下をAppSnackBarに置き換え
     AppSnackBar.showUndo(context, "メモタブを削除しました", () {
       if (widget.courseId != currentCourseId) return;
       setState(() {
@@ -1464,7 +1509,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
   }
 
-
+  // 🟢 タブ名（タイトル）編集モーダル
   void _editTitleDialog(String currentTitle, int index) {
     String newTitle = currentTitle;
     showDialog(
@@ -1486,42 +1531,31 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     );
   }
 
-
-  // 🟢 修正：image_picker 経由の OS 標準カメラを廃止し、内製カスタムカメラへルーティングする
+  // 🟢 内製カスタムカメラルーティング（インターロック完備）
   Future<void> _takePhoto() async {
     try {
-      // 1. カメラ画面を開くため、一時ファイルのお掃除ストップを宣言
       globalDisableAutoCacheClear = true;
-
-      // 2. 🟢 内製カスタムカメラ画面（CustomCameraScreen）を起動し、戻り値として写真のパスを待つ
       final String? savedPath = await Navigator.push<String>(
         context,
         MaterialPageRoute(builder: (_) => const CustomCameraScreen()),
       );
-
-      // 3. 🟢 写真のパスが正常に返ってきたら（撮影が成功したら）、メモにアイテムを追加
-      // ※ CustomCameraScreen 側で既に永続化ディレクトリへの保存が完了しているため、
-      // ここでの _saveImageToLocal ロジックは不要（パスをそのまま渡すだけ）になります
       if (savedPath != null && savedPath.isNotEmpty) {
         _addItemToMemo('image', savedPath);
       }
     } catch (e) {
       debugPrint("Take Photo via Custom Camera Error: $e");
     } finally {
-      // 4. アプリにお掃除の再開を許可する
       globalDisableAutoCacheClear = false;
     }
   }
 
+  // 🟢 ギャラリーから複数画像インポート（インターロック完備）
   Future<void> _pickFile() async {
     try {
-      // ★ 追加：これからギャラリーを開くので、お掃除ストップを宣言！
       globalDisableAutoCacheClear = true;
-
       final List<XFile> files = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 2400);
       if (files.isNotEmpty) {
         for (var file in files) {
-          // 一時パスから安全な領域へコピーして保存
           final savedPath = await _saveImageToLocal(file.path);
           _addItemToMemo('image', savedPath);
         }
@@ -1529,17 +1563,15 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     } catch (e) {
       debugPrint("Pick File Error: $e");
     } finally {
-      // ★ 追加：ギャラリーから戻ってきたので、お掃除を再開OKにする
       globalDisableAutoCacheClear = false;
     }
   }
 
-
+  // 🟢 タイポグラフィテキスト入力オーバーレイ起動
   void _openTextInput() {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
     Color inputBg = isDark ? const Color(0xFF222222) : const Color(0xFFEEEEEE);
     Color inputCol = isDark ? Colors.white : Colors.black;
-
 
     Navigator.push(context, PageRouteBuilder(
         opaque: false, barrierColor: Colors.black.withOpacity(0.95), barrierDismissible: true,
@@ -1553,13 +1585,12 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     ));
   }
 
-
+  // 🟢 フルスクリーンイメージギャラリー（InteractiveViewer搭載）
   void _showFullScreenImage(int memoIndex, String initialPath) {
     final memo = _memos[memoIndex];
     final items = memo['items'] as List<dynamic>? ?? [];
     final imageItems = items.where((item) => item['type'] == 'image').toList();
     final initialIndex = imageItems.indexWhere((item) => item['data']?.toString() == initialPath);
-
 
     Navigator.push(context, PageRouteBuilder(
         opaque: false, barrierColor: Colors.black,
@@ -1567,17 +1598,15 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     ));
   }
 
-
+  // 🟢 PDFジェネレータ用日時整形ラッパー
   Map<String, String> _generateDateTimeStrings(List<dynamic> items) {
     final now = DateTime.now();
     final months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-
     final monthDate = "${months[now.month - 1]} ${now.day}";
     final year = "${now.year}";
     final weekday = weekdays[now.weekday - 1];
-
 
     String timeRange = "";
     if (items.isNotEmpty) {
@@ -1588,7 +1617,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
       timeRange = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
     }
 
-
     return {
       "monthDate": monthDate,
       "year": year,
@@ -1597,7 +1625,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     };
   }
 
-
+  // 🟢 サニタイズ（PDF制御コード・絵文字クラッシュ防止ガード）
   String _sanitizeTextForPdf(String text) {
     if (text.isEmpty) return text;
     return text.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]'), '')
@@ -1608,12 +1636,9 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
         .replaceAll(RegExp(r'[\u{2700}-\u{27BF}]', unicode: true), '□');
   }
 
-
-  // lib/screens/course_detail_screen.dart 内の _CourseMemoWidgetState クラスにある _shareMemo メソッド
-
+  // 🟢 共有ダイアログ（iPadOS位置追従ポップオーバー完備）
   Future<void> _shareMemo(int memoIndex) async {
     BuildContext? sheetContext;
-
     showModalBottomSheet(
         context: context,
         backgroundColor: widget.bgColor,
@@ -1626,9 +1651,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
             padding: const EdgeInsets.symmetric(vertical: 48.0),
             child: SizedBox(
               height: 64,
-              child: Center(
-                child: CircularProgressIndicator(color: widget.textColor),
-              ),
+              child: Center(child: CircularProgressIndicator(color: widget.textColor)),
             ),
           );
         }
@@ -1642,18 +1665,14 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
 
     if (pdfResult != null && !pdfResult.startsWith("ERROR:")) {
-
-      // 🛡️ ★ 修正：iPadOS（iPad）でのポップオーバー表示時に発生するクラッシュを完全ガード
       final box = context.findRenderObject() as RenderBox?;
       final rect = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
 
-      // 共有ダイアログを呼び出す
       await Share.shareXFiles(
         [XFile(pdfResult)],
         text: _memos[memoIndex]['title'],
-        sharePositionOrigin: rect, // 👈 ★ 追加：これでiPad環境でも安全にシートが開きます
+        sharePositionOrigin: rect,
       );
-
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('PDFエラー: ${pdfResult?.replaceFirst("ERROR:", "") ?? "不明なエラー"}'))
@@ -1661,7 +1680,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
   }
 
-
+  // 🟢 日本語マルチページ対応PDFコンパイルエンジン
   Future<String?> _generatePdf(int memoIndex) async {
     try {
       final memo = _memos[memoIndex];
@@ -1669,19 +1688,15 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
       final List<dynamic> items = memo['items'] ?? [];
       final dateTimeInfo = _generateDateTimeStrings(items);
 
-
       final fontData = await rootBundle.load('assets/fonts/ZenKakuGothicNew-Regular.ttf');
       final jpFont = pw.Font.ttf(fontData);
-
 
       String rawTitle = memo['title']?.toString() ?? 'Untitled';
       String documentDisplayTitle = rawTitle;
       String fileSaveTitle = rawTitle;
 
-
       final defaultDatePattern = RegExp(r'^(\d{2})/(\d{2})\s+(.+)$');
       final match = defaultDatePattern.firstMatch(rawTitle);
-
 
       if (match != null) {
         documentDisplayTitle = match.group(3)!.trim();
@@ -1695,9 +1710,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
         }
       }
 
-
       final safeDisplayTitle = _sanitizeTextForPdf(documentDisplayTitle);
-
 
       pdf.addPage(
         pw.MultiPage(
@@ -1726,8 +1739,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                 ]
             ),
             pw.SizedBox(height: 64),
-
-
             ...items.map((item) {
               final bool isText = item['type'] == 'text';
               final safeData = _sanitizeTextForPdf(item['data']?.toString() ?? '');
@@ -1740,11 +1751,13 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                         flex: 1,
                         child: pw.Text(item['time']?.toString() ?? '', style: pw.TextStyle(font: jpFont, fontSize: 14, color: PdfColors.black))
                     ),
+                    // ─── 修正箇所（1760行目付近） ───
                     pw.Expanded(
                       flex: 2,
                       child: isText
                           ? pw.Text(safeData, style: pw.TextStyle(font: jpFont, fontSize: 14, lineSpacing: 1.5, color: PdfColors.black))
                           : pw.ConstrainedBox(
+                        // 🟢 修正：BoxConstraints の前に「pw.」を追記
                         constraints: const pw.BoxConstraints(maxHeight: 340),
                         child: pw.ClipRRect(
                           horizontalRadius: 8,
@@ -1764,7 +1777,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
         ),
       );
 
-
       final output = await getTemporaryDirectory();
       final fileSafeName = fileSaveTitle.replaceAll(RegExp(r'[\\/:*?"<>|\r\n]'), '_');
       final fileName = fileSafeName.trim().isEmpty ? "Memo_${memo['id']}" : fileSafeName;
@@ -1777,28 +1789,26 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     }
   }
 
-
+  // 🟢 メモ一覧（インデックスシートビュー）
+  // 🟢 メモ一覧（インデックスシートビュー）
   @override
   Widget _buildListView() {
-    // ★ 追加：OSのフッター余白を取得
     double bottomPadding = MediaQuery.of(context).padding.bottom;
 
+    // 🟢 今日の日付文字列を生成 (例: "06/15")
+    final now = DateTime.now();
+    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+
     return ListView.builder(
-      // ★ 修正：bottom に bottomPadding を足す
         padding: EdgeInsets.only(top: 8, left: 16, right: 16, bottom: 24 + bottomPadding),
-        itemCount: _memos.length + 1,
+        itemCount: _memos.length,
         itemBuilder: (context, i) {
-          if (i == _memos.length) {
-            return GestureDetector(
-              onTap: _createNewMemoTab,
-              child: Container(
-                height: 48, margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(color: widget.textColor.withOpacity(0.05), borderRadius: BorderRadius.circular(16)),
-                child: Center(child: Icon(Icons.add, color: widget.textColor.withOpacity(0.7))),
-              ),
-            );
-          }
           final memo = _memos[i];
+          final String title = memo['title']?.toString() ?? 'Untitled';
+
+          // 🟢 今日のメモ（タイトルが今日の日付から始まっているか）を動的に識別
+          final bool isToday = title.startsWith(dateStr);
+
           return GestureDetector(
             onTap: () { setState(() => _activeMemoId = memo['id']?.toString()); widget.onMemoStateChanged?.call(true); },
             child: Container(
@@ -1808,8 +1818,18 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                     children: [
                       const SizedBox(width: 16), Icon(Icons.edit_document, color: widget.textColor.withOpacity(0.5), size: 20),
                       const SizedBox(width: 12),
-                      Expanded(child: Text(memo['title']?.toString() ?? 'Untitled', style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                      IconButton(icon: Icon(Icons.delete, size: 18, color: widget.textColor.withOpacity(0.3)), onPressed: () => _deleteMemoTab(i)),
+                      Expanded(child: Text(title, style: TextStyle(color: widget.textColor, fontSize: 14, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+
+                      // 🟢 インターロック条件：今日ではない過去ログのみゴミ箱ボタンを表示して削除を許可
+                      if (!isToday)
+                        IconButton(
+                            icon: Icon(Icons.delete, size: 18, color: widget.textColor.withOpacity(0.3)),
+                            onPressed: () => _deleteMemoTab(i)
+                        )
+                      else
+                      // 🟢 今日のメモの場合は、ゴミ箱の代わりに同じ幅の透明スペースを配置。
+                      // これにより、教科名テキスト（Expanded）の右端の折り返しラインがガタつかずに美しく揃います。
+                        const SizedBox(width: 48),
                     ]
                 )
             ),
@@ -1818,7 +1838,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     );
   }
 
-
+  // 🟢 メモ詳細（エディタ・撮影・キャンバスビュー）
   @override
   Widget _buildDetailView() {
     final memoIndex = _memos.indexWhere((m) => m['id']?.toString() == _activeMemoId);
@@ -1826,13 +1846,9 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     final memo = _memos[memoIndex];
     final List<dynamic> items = memo['items'] ?? [];
 
-
     Color solidBtnBg = widget.textColor;
     Color solidIconCol = AppTheme.getTextColorForBackground(solidBtnBg);
-
-    // OSのフッター余白を取得
     double bottomPadding = MediaQuery.of(context).padding.bottom;
-
 
     return Stack(
       children: [
@@ -1858,20 +1874,15 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
               ),
             ),
 
-
             Expanded(
               child: Padding(
-                // ★ 修正：メモ領域全体（グレーの背景図形）の下端にも bottomPadding を足して上に持ち上げる
                 padding: EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0 + bottomPadding),
                 child: ClipPath(
                   clipper: _MemoAreaClipper(),
                   child: Container(
                     width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: widget.textColor.withOpacity(0.05),
-                    ),
+                    decoration: BoxDecoration(color: widget.textColor.withOpacity(0.05)),
                     child: ListView.builder(
-                      // ★ 修正：外枠ごと持ち上がったので、ここの inner padding は元の 180 に戻す
                         padding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 180),
                         physics: const BouncingScrollPhysics(),
                         itemCount: items.length,
@@ -1901,8 +1912,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
           ],
         ),
 
-
-        // ボタン類の位置も、同じ 16 + bottomPadding なので下端がぴったり揃います
         Positioned(
           bottom: 16 + bottomPadding, right: 16,
           child: _buildRoundBtn(Icons.photo_library, solidBtnBg, solidIconCol, _pickFile),
@@ -1919,19 +1928,17 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     );
   }
 
-
+  @override
   Widget _buildRoundBtn(IconData icon, Color bg, Color iconCol, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: 56, height: 56,
-        // ★ 修正：boxShadow（影）の記述を削除しました
         decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
         child: Icon(icon, color: iconCol, size: 24),
       ),
     );
   }
-
 
   @override
   Widget build(BuildContext context) {

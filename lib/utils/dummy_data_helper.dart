@@ -8,56 +8,56 @@ class DummyDataHelper {
     return [
       {
         'id': 991,
-        'name': '[月1月2]佐藤 教授 材料力学第1[14棟201]',
+        'name': '[月1] 材料力学第1[14棟201]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 1, 'name': '佐藤 教授'}]
       },
       {
         'id': 992,
-        'name': '[月3月4]田中 准教授 制御工学概論[11棟312]',
+        'name': '[月3月4] 制御工学概論[11棟312]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 2, 'name': '田中 准教授'}]
       },
       {
         'id': 993,
-        'name': '[火3火4]鈴木 教授 熱力学基礎[12棟102]',
+        'name': '[火4木4] 熱力学基礎[12棟102]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 3, 'name': '鈴木 教授'}]
       },
       {
         'id': 994,
-        'name': '[水1水2]高橋 教授 電磁気学[14棟101]',
+        'name': '[水2金2] 電磁気学[14棟101]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 4, 'name': '高橋 教授'}]
       },
       {
         'id': 995,
-        'name': '[水5水6]渡辺 准教授 流体力学[14棟203]',
+        'name': '[水5] 流体力学[14棟203]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 5, 'name': '渡辺 准教授'}]
       },
       {
         'id': 996,
-        'name': '[木1木2]伊藤 教授 解析力学[14棟202]',
+        'name': '[木1木2] 解析力学[14棟202]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 6, 'name': '伊藤 教授'}]
       },
       {
         'id': 997,
-        'name': '[金3金4]山本 教授 数理統計学[10棟201]',
+        'name': '[水4金4] 数理統計学[10棟201]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 7, 'name': '山本 教授'}]
       },
       {
         'id': 998,
-        'name': '[金5]中村 准教授 システムデザイン論[11棟205]',
+        'name': '[金5] システムデザイン論[11棟205]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 8, 'name': '中村 准教授'}]

@@ -2317,7 +2317,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                        "Message",
+                        "Announce",
                         style: TextStyle(
                             color: dynamicTextColor,
                             fontSize: 24, // ★ 修正：サイズアップ
@@ -4677,7 +4677,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     Icon(Icons.arrow_back_ios, color: AppTheme.textMain(context), size: 20),
                     const SizedBox(width: 8),
                     Text(
-                        "All Messages",
+                        "All Announcements",
                         style: TextStyle(
                             color: AppTheme.textMain(context),
                             fontSize: 24,

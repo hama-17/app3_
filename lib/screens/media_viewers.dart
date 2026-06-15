@@ -24,14 +24,17 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   InAppWebViewController? _webViewController;
 
   // 🟢 Web内で遭遇するあらゆる形式のPDFURL（拡張子、Canvas、リダイレクト等）を判定するロジック
+  // 🟢 Web内で遭遇するあらゆる形式のPDFURL（拡張子、Canvas、リダイレクト等）を判定するロジック
   bool _checkIsPdf(String urlStr) {
     final urlLower = urlStr.toLowerCase();
     if (urlLower.contains('.pdf') || urlStr.contains('download_frd=1') || urlLower.contains('response-content-type=application/pdf')) {
       return true;
     }
-    if (urlStr.contains('/files/') && !urlStr.contains('download')) {
+    // ⚠️ 修正：Canvasのファイルタイトルタップ時（/files/）のインラインプレビューページを確実に捕捉
+    if (urlStr.contains('/files/')) {
       bool isVideo = urlLower.contains('isvideo=1') || urlLower.contains('.mp4') || urlLower.contains('.mov') || urlLower.contains('.webm');
-      if (!isVideo) return true;
+      bool isAudio = urlLower.contains('.mp3') || urlLower.contains('.wav') || urlLower.contains('.m4a'); // 👈 音声ファイルも弾いて安全化
+      if (!isVideo && !isAudio) return true;
     }
     return false;
   }
@@ -39,12 +42,25 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   // 🟢 Web内からPDFビューアへ完全に画面をすり替える処理（戻り先をアプリに固定する要）
   void _replaceWithPdfViewer(String urlStr) {
     String downloadUrl = urlStr;
-    if (urlStr.contains('/files/') && !urlStr.contains('download')) {
-      downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
+
+    // ⚠️ 修正：RegExpを使ってCanvasのファイルID（/files/の直後の数字）を1ミリの狂いもなく抽出
+    final match = RegExp(r'/files/(\d+)').firstMatch(urlStr);
+    if (match != null) {
+      final fileId = match.group(1);
+      try {
+        final uri = Uri.parse(urlStr);
+        // どんな複雑なコース階層に埋まっていても、Canvas公式の「クリーンな直ダウンロードURL」に強制組み換え
+        downloadUrl = "${uri.origin}/files/$fileId/download?download_frd=1";
+      } catch (_) {
+        // 万が一のUriパース失敗時は、安全のため元の分割ロジックをフォールバック
+        if (!urlStr.contains('download')) {
+          downloadUrl = "${urlStr.split('?').first}/download?download_frd=1";
+        }
+      }
     }
+
     if (context.mounted) {
-      // ⚠️ pushReplacement にすることで、現在のWebView画面（ブラウザ）を履歴ごとスタックから完全に消滅させます。
-      // これにより、PDFViewer側で戻るボタンを押した時、Webを挟まずに直接「アプリの元の画面」へ一発で戻れます。
+      // pushReplacement によりWebView画面を履歴スタックから消滅させ、PDF側で戻った時は直接アプリへ直帰させます
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie)),
@@ -86,7 +102,24 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                       left: 0,
                       right: 0,
                       child: InAppWebView(
-                          onWebViewCreated: (controller) => _webViewController = controller,
+                          onWebViewCreated: (controller) {
+                            _webViewController = controller;
+
+                            // 🟢 追記：JavaScriptからのダイレクト着信を受けるレーダーを登録
+                            controller.addJavaScriptHandler(
+                              handlerName: 'onCanvasFileTapped',
+                              callback: (args) {
+                                final String urlStr = args[0];
+                                // Flutter側でPDF判定を行い、合致すれば爆速ネイティブビューアへ強制連行
+                                if (_checkIsPdf(urlStr)) {
+                                  _replaceWithPdfViewer(urlStr);
+                                } else {
+                                  // PDF以外（動画やOffice系等）だった場合は、ブラウザ内で通常ロードさせる
+                                  controller.loadUrl(urlRequest: URLRequest(url: WebUri(urlStr)));
+                                }
+                              },
+                            );
+                          },
                           initialUrlRequest: URLRequest(
                             url: WebUri(widget.url),
                             headers: {'Cookie': widget.cookie},
@@ -99,40 +132,68 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                             useShouldOverrideUrlLoading: true,
                             mediaPlaybackRequiresUserGesture: true,
                             allowsInlineMediaPlayback: true,
-                            useOnDownloadStart: true, // 👈 iOS用のPDFストリームを確実に横取りするためのトリガー
+                            useOnDownloadStart: true,
+                            javaScriptCanOpenWindowsAutomatically: true,
+                            supportMultipleWindows: true,
                           ),
+
+                          // 🟢 修正：ページ読み込み完了時に、最優先クリック泥棒JSをインジェクト
+                          onLoadStop: (controller, url) async {
+                            await controller.evaluateJavascript(source: """
+                          window.addEventListener('click', function(e) {
+                            // クリックされた要素の最寄りのAタグ（リンク）を探索
+                            const a = e.target.closest('a');
+                            if (a && a.href) {
+                              const href = a.href;
+                              
+                              // Canvasのファイルエンドポイント、またはPDFの拡張子を検知
+                              if (href.includes('/files/') || href.toLowerCase().includes('.pdf') || href.includes('download_frd=1')) {
+                                
+                                // 🛑 超重要: PreventDefault & StopPropagation
+                                // 第3引数を「true(キャプチャフェーズ)」にすることで、
+                                // Canvas(React)の内部JSがクリックを検知するより前に、イベントの息の根を止めて横取りします。
+                                e.preventDefault();
+                                e.stopPropagation();
+                                
+                                // FlutterのハンドラーへURLを直接投げつける
+                                window.flutter_inappwebview.callHandler('onCanvasFileTapped', href);
+                              }
+                            }
+                          }, true); // 👈 この『true』がキャプチャフェーズ（最優先割り込み）の魔法です
+                        """);
+                          },
+
                           onScrollChanged: (c, x, y) {
                             if (y <= 0 && !_isTop) setState(() => _isTop = true);
                             else if (y > 5 && _isTop) setState(() => _isTop = false);
                           },
 
-                          // 🔥 iOS対策：WebViewがロード処理を開始した瞬間を監視。画面に白・黒のノイズが出る前に即座にフリーズさせて引き剥がす
+                          // ⚠️ 保険：通常のロード開始（ダウンロードボタン用など）
                           onLoadStart: (controller, url) async {
                             if (url != null) {
                               final urlStr = url.toString();
                               if (_checkIsPdf(urlStr)) {
-                                await controller.stopLoading(); // 👈 即座にWebViewの読み込み・描画を停止させてゾンビ画面の発生を防ぐ
+                                await controller.stopLoading();
                                 _replaceWithPdfViewer(urlStr);
                               }
                             }
                           },
 
-                          // 🔥 Android / 通常リンクタップ時の横取り
+                          // ⚠️ 保険：通常のリンク型遷移の横取り
                           shouldOverrideUrlLoading: (c, nav) async {
                             final uri = nav.request.url;
                             if (uri != null) {
                               final urlStr = uri.toString();
                               if (_checkIsPdf(urlStr)) {
-                                // 描画処理が走る前に裏側でストップ
                                 await c.stopLoading();
                                 Future.microtask(() => _replaceWithPdfViewer(urlStr));
-                                return NavigationActionPolicy.CANCEL; // WebView内でのリダイレクト遷移を完全に遮断
+                                return NavigationActionPolicy.CANCEL;
                               }
                             }
                             return NavigationActionPolicy.ALLOW;
                           },
 
-                          // 🔥 iOSのバックグラウンドストリーム処理用の包囲網
+                          // ⚠️ 保険：iOSのバックグラウンドストリーム処理用の包囲網
                           onDownloadStartRequest: (c, req) async {
                             final urlStr = req.url.toString();
                             if (_checkIsPdf(urlStr)) {
@@ -193,6 +254,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   void initState() {
     super.initState();
     _resolvePdfUrl(); // 👈 起動時にURLの転送先を安全に解析する
+    pruneExpiredPdfCache();
   }
 
   // 🟢 追加：AWS S3へのCookie流出を徹底的にブロックするプリフライト処理
@@ -443,3 +505,36 @@ Future<void> openSmartUrl(BuildContext context, String url, String cookie, {Stri
     }
   } catch (e) {}
 }
+
+// 🟢 24時間以上経過した古いPDFファイルだけをバックグラウンドで自動抹殺するヘルパー
+Future<void> pruneExpiredPdfCache() async {
+  try {
+    final tempDir = await getTemporaryDirectory();
+    final dir = Directory(tempDir.path);
+
+    if (await dir.exists()) {
+      // 一時フォルダ内のファイルを全スキャン
+      final List<FileSystemEntity> files = dir.listSync();
+      final now = DateTime.now();
+
+      for (var file in files) {
+        // PDFファイル（キャッシュや前回生成した共有用PDF）を対象にする
+        if (file is File && file.path.toLowerCase().endsWith('.pdf')) {
+          final lastModified = await file.lastModified();
+
+          // 🟢 最終更新から24時間（1日）以上が経過しているか判定
+          if (now.difference(lastModified).inHours >= 24) {
+            await file.delete();
+            debugPrint("🗑️ 24時間が経過した古いキャッシュをパージしました: ${file.path}");
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint("PDFパージエラー: $e");
+  }
+}
+
+
+
+
