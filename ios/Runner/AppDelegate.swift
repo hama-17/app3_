@@ -12,12 +12,29 @@ import UserNotifications
     // 1. 先にプラグイン全体の基盤をレジスター
     GeneratedPluginRegistrant.register(with: self)
 
-    // 🟢 解決の鍵：大元の初期化（super.application）を先に走らせて、
-    // iOS側の画面の土台（window と rootViewController）を100%確実にこの世に生成させます。
+    // 2. 大元の初期化（super.application）を先に走らせて、iOS側の画面の土台を確定生成
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
 
-    // 2. 土台が完全に完成した「直後」だからこそ、安全に ViewController を取得して窓口をドッキングできる
-    if let controller = window?.rootViewController as? FlutterViewController {
+    // 🟢 解決の鍵：カメラ等の影響で変化した階層構造を全自動で走査し、
+    // 隠れた FlutterViewController を100%確実に捕捉するディープスキャンをキックします。
+    var flutterViewController: FlutterViewController? = nil
+
+    if let rootVC = window?.rootViewController {
+        if let fvc = rootVC as? FlutterViewController {
+            flutterViewController = fvc
+        } else {
+            // root直下にいない場合、子ビューコントローラーの階層（コンテナ）の中を徹底捜索
+            for child in rootVC.children {
+                if let fvc = child as? FlutterViewController {
+                    flutterViewController = fvc
+                    break
+                }
+            }
+        }
+    }
+
+    // 3. 確実に捕捉したスレッドに対してのみMethodChannelを開通
+    if let controller = flutterViewController {
         let channel = FlutterMethodChannel(name: "app3.kportal/live_notification", binaryMessenger: controller.binaryMessenger)
 
         channel.setMethodCallHandler({
@@ -50,7 +67,7 @@ import UserNotifications
 
                   UNUserNotificationCenter.current().add(request) { error in
                       if let error = error {
-                          print("iOS Notification Schedule Error: \(error)")
+                          print("iOS Notification Schedule Error: $error")
                       }
                   }
               }
@@ -67,9 +84,12 @@ import UserNotifications
               result(FlutterMethodNotImplemented)
           }
         })
+    } else {
+        // 万が一見つからなかった場合の非常用デバッグシグナル
+        print("🚨 ALERT: FlutterViewController could not be found in active hierarchy.")
     }
 
-    // 3. 非同期で通知権限をリクエスト（メインスレッドのUI描画を絶対に邪魔しない安全な位置へ配置）
+    // 4. 非同期で通知権限をリクエスト（描画スレッドを絶対に邪魔しない）
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
     return result
