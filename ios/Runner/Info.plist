@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+        <key>NSPhotoLibraryAddUsageDescription</key>
+            <string>撮影したメモ画像を端末に保存するために写真ライブラリを使用します。</string>
 	    <key>ITSAppUsesNonExemptEncryption</key>
         <false/>
 	    <key>NSCameraUsageDescription</key>
@@ -12,6 +14,8 @@
         <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
         <key>NSCalendarsFullAccessUsageDescription</key>
         <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
+        <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+            <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
