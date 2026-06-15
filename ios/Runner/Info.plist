@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+	    <key>NSMicrophoneUsageDescription</key>
+            <string>カメラの初期化および動画撮影のためにマイクを使用します。</string>
         <key>NSPhotoLibraryAddUsageDescription</key>
             <string>撮影したメモ画像を端末に保存するために写真ライブラリを使用します。</string>
 	    <key>ITSAppUsesNonExemptEncryption</key>
