@@ -1118,7 +1118,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     );
 
     // 🟢 修正：下限値を -1.0 に拡張して、左側へのカメラスワイプゾーンを確保
-    _dragAnimController = AnimationController(duration: const Duration(milliseconds: 300), vsync: this, lowerBound: -1.0, upperBound: 1.0);
+    _dragAnimController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+      lowerBound: -1.0,
+      upperBound: 1.0,
+      value: 0.0, // 👈 この1行を確実に追加
+    );
 
     // 🟢 修正：スワイプ位置と連動して、カメラの自動初期化 / 破棄、およびステータスバーを滑らかに隠す
     // 🟢 修正：指の移動中に、起動条件を満たしている最初の1回「だけ」安全に命令を通すようにロジックを最適化
@@ -2452,8 +2458,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     double topPadding = MediaQuery.of(context).padding.top + 24.0;
     double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
 
-    bool isTransitioning = (_dragPosition > -1.0 && _dragPosition < 1.0) || _dragAnimController.isAnimating;
-    Duration animDuration = isTransitioning ? Duration.zero : const Duration(milliseconds: 300);
+    bool isVerticalScrolling = _courseScrollOffset > 4.0 || _tasksScrollOffset > 4.0;
+    bool isTransitioning = _dragAnimController.isAnimating || (_dragPosition != 0.0 && _dragPosition != 1.0 && _dragPosition != -1.0);
+    Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
 
     double screenWidth = MediaQuery.of(context).size.width;
 
@@ -2580,8 +2587,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           const Spacer(),
 
                           // ─── _buildHomeContent() メソッド内の下部操作バー周辺 ───
-
-                          Container(
+                          // 🟢 修正：条件式を MediaQuery から _isMemoFieldOpen に変更。
+                          // メモ入力欄が開いている間、およびフェードアウト中の250msの間、操作バーを完全に消滅（shrink）させて領域を最大確保します。
+                          _isMemoFieldOpen
+                              ? const SizedBox.shrink()
+                              : Container(
                             padding: EdgeInsets.fromLTRB(40.0, 0, 40.0, MediaQuery.of(context).padding.bottom + 24.0),
                             height: 100,
                             alignment: Alignment.center,
@@ -2878,8 +2888,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     // 🟢この4行は1日予定ウィジェットの滑らかな遷移部分なので、不用意に
     // いじらないようにして。
     bool isTransitioning = _dragAnimController.isAnimating || (_dragPosition != 0.0 && _dragPosition != 1.0 && _dragPosition != -1.0);
-
-    bool isVerticalScrolling = _courseScrollOffset > 0 || _tasksScrollOffset > 0;
+    bool isVerticalScrolling = _courseScrollOffset > 4.0 || _tasksScrollOffset > 4.0;
     Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
 
     return Hero(
@@ -4133,8 +4142,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                     }
                                   }
 
-                                  double activeFontSize = isPad ? 12.5 : 10.5;
-                                  double inactiveFontSize = isPad ? 14.0 : 12;
+                                  // 🟢 修正：iPad（Pad環境）の文字サイズをさらに1〜2段階大きくスケールアップ
+                                  double activeFontSize = isPad ? 14.5 : 10.5;
+                                  double inactiveFontSize = isPad ? 16.5 : 12.0;
+
+
 
                                   return SizedBox(
                                     width: timeColumnWidth, // 16px固定
@@ -4152,44 +4164,51 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                               color: Colors.white.withOpacity(0.95),
                                               borderRadius: BorderRadius.circular(6),
                                             ),
-                                            // 🟢 修正：FittedBox を噛ませて、縦幅の縮小に合わせて文字を自動伸縮
                                             child: Padding(
                                               padding: const EdgeInsets.symmetric(vertical: 2.0),
                                               child: FittedBox(
                                                 fit: BoxFit.contain,
                                                 child: RotatedBox(
                                                   quarterTurns: 1,
-                                                  child: Row(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      Text(startStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
-                                                      Text("-", style: TextStyle(color: Colors.black.withOpacity(0.3), fontSize: activeFontSize - 1)),
-                                                      Text(endStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
-                                                    ],
+                                                  child: SizedBox(
+                                                    width: currentItemHeight, // 🟢 決定打：物理的な縦幅をマスの高さに完全ロック
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.max,
+                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // 🟢 マスの中で限界まで等間隔に引き伸ばす
+                                                      children: [
+                                                        Text(startStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                        Text("-", style: TextStyle(color: Colors.black.withOpacity(0.4), fontSize: activeFontSize - 1)),
+                                                        Text(endStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),
                                             ),
                                           )
                                         else
-                                        // ② 時刻テキスト本体（非アクティブ時）
+                                        // ② 時刻テキスト本体（通常時 / 非アクティブ時）
                                           SizedBox(
                                             width: 14.0,
                                             height: currentItemHeight,
-                                            // 🟢 修正：こちらも同様に FittedBox でマスの高さに100%追従させる
                                             child: Padding(
                                               padding: const EdgeInsets.symmetric(vertical: 2.0),
                                               child: FittedBox(
                                                 fit: BoxFit.contain,
                                                 child: RotatedBox(
                                                   quarterTurns: 1,
-                                                  child: Row(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      Text(startStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
-                                                      Text("-", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: inactiveFontSize - 1)),
-                                                      Text(endStr, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
-                                                    ],
+                                                  child: SizedBox(
+                                                    width: currentItemHeight, // 🟢 決定打：物理的な縦幅をマスの高さに完全ロック
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.max,
+                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // 🟢 マスの中で限界まで等間隔に引き伸ばす
+                                                      children: [
+                                                        // 🟢 修正：通常時の文字＆ハイフンを一切の透過のない「純度100%の不透明白（Colors.white）」へ純化
+                                                        Text(startStr, style: TextStyle(color: Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                        Text("-", style: TextStyle(color: Colors.white, fontSize: inactiveFontSize)),
+                                                        Text(endStr, style: TextStyle(color: Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),
@@ -5150,20 +5169,29 @@ class _CameraMemoOverlay extends StatefulWidget {
 }
 
 // ─── ファイル最末尾の _CameraMemoOverlayState 内 ───
-class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with SingleTickerProviderStateMixin {
-  late AnimationController _animController;
+// ─── ファイル最末尾の _CameraMemoOverlayState 内を丸ごと上書き ───
+class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with TickerProviderStateMixin { // 🟢 修正：2つのコントローラーを扱うため TickerProviderStateMixin へ変更
+  late AnimationController _animController; // 物理スライドアウト用 (550ms)
+  late AnimationController _fadeController; // 🟢 追加：じんわりフェードイン/アウト用 (250ms)
   bool _hasText = false;
+  bool _isSaving = false; // 🟢 追加：矢印保存ボタンが押されたかを識別するフラグ
 
   @override
   void initState() {
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      // 🟢 修正：300ms ➔ 550ms に変更し、スライドアウトの余韻を「もう少しゆっくり」美しく魅せる速度に調整
       duration: const Duration(milliseconds: 550),
+    );
+    _fadeController = AnimationController( // 🟢 追加：ユーザー指定の250msでフェードを制御
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
     );
     _hasText = widget.controller.text.trim().isNotEmpty;
     widget.controller.addListener(_onTextChanged);
+
+    // 🟢 起動の瞬間に、背景もテキスト四角もまとめて一斉にじんわりフェードイン点火
+    _fadeController.forward();
   }
 
   void _onTextChanged() {
@@ -5176,26 +5204,39 @@ class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with SingleTicke
   void dispose() {
     widget.controller.removeListener(_onTextChanged);
     _animController.dispose();
+    _fadeController.dispose(); // 🟢 追加
     super.dispose();
+  }
+
+  // 🟢 追加：キャンセル（背景タップ・×ボタン）時のじんわりフェードアウト共通ロジック
+  // 🟢 キャンセル（背景タップ・×ボタン）時のじんわりフェードアウト共通ロジック
+  Future<void> _closeWithFade() async {
+    widget.focusNode.unfocus();      // ① キーボードを閉じ始める（ここから250msのカウント開始）
+    await _fadeController.reverse(); // ② 250ms かけて背景とタイトルを滑らかにフェードアウト
+
+    // 🟢 決定打：OS側のキーボード格納アニメーションが完全に終了するまでのわずかなタイムラグ（約50ms）を確実に吸収します。
+    // これにより、閉じ始めてから「ジャスト300ms後」の完璧にフラットになった画面へシャッターボタン群を安全に呼び戻します。
+    await Future.delayed(const Duration(milliseconds: 50));
+
+    widget.onClose(); // ③ 親のフラグを false に戻し、満を持して操作バーを無傷で復活させます
   }
 
   void _handlePublish() {
     if (!_hasText || _animController.isAnimating) return;
     final text = widget.controller.text.trim();
-
-    // 🟢 解決の鍵：ボタンをタップした「まさにその瞬間」にキーボードの格納を即座にトリガー！
-    // これにより、キーボードが下へ沈む動きと、四角が小さくなって右へ流れるアニメーションが完全に並行して走ります
     widget.focusNode.unfocus();
 
-    // 550ms の優雅なスライドアウトを開始
+    setState(() => _isSaving = true); // 🟢 追加：保存演出が始まった瞬間にフラグをロック
+
+    // 保存時は、四角が右へ掃けていく動き(550ms)と並行して、背景グラデーションも550msかけてじんわり消去します
+    _fadeController.animateTo(0.0, duration: const Duration(milliseconds: 550));
+
     _animController.forward().then((_) {
-      widget.onSave(text);       // ① データを裏側で確定保存
-      widget.controller.clear(); // ② テキストをクリーンアップ
-      widget.onClose();          // ③ 流れきった後に安全にレイヤーを閉じてカメラ画面へ
+      widget.onSave(text);
+      widget.controller.clear();
+      widget.onClose();
     });
   }
-
-  // （これ以降の Widget build(BuildContext context) 内部は1字も触らずそのままでOKです）
 
   @override
   Widget build(BuildContext context) {
@@ -5206,50 +5247,74 @@ class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with SingleTicke
 
     return Stack(
       children: [
-        // 95% ディープブラックアウト
+        // 🟢 ① 背景グラデーションだけを 250ms のじんわりフェードに個別バインド
         Positioned.fill(
-          child: GestureDetector(
-            onTap: () {
-              widget.focusNode.unfocus();
-              widget.onClose();
-            },
-            child: Container(color: Colors.black.withOpacity(0.95)),
+          child: FadeTransition(
+            opacity: _fadeController,
+            child: GestureDetector(
+              onTap: _closeWithFade,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(1),
+                      const Color(0xFF020304).withOpacity(1),
+                      const Color(0xff174a69).withOpacity(1),
+                      const Color(0xff7ebbdc).withOpacity(1),
+                    ],
+                    stops: const [0.0, 0.33, 0.66, 1.0],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
 
-        // 画面上端左詰め：大きめ ➔ さらに極細字（w100）へ純化したメモ名
+        // 🟢 ② 左上の大きめタイトルも 250ms のじんわりフェードに個別バインド
         Positioned(
           top: MediaQuery.of(context).padding.top + 20,
           left: 20, right: 20,
-          child: Text(
-            widget.memoTitleText,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 30,             // 🟢 修正：テキストサイズを拡大
-              fontWeight: FontWeight.w100, // 🟢 修正：極細のライトウェイトへ
-              letterSpacing: 0.5,
+          child: FadeTransition(
+            opacity: _fadeController,
+            child: Text(
+              widget.memoTitleText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 30,
+                fontWeight: FontWeight.w300,
+                letterSpacing: -0.5,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ),
 
-        // アニメーション制御を受けるコンソール外殻
+        // 🟢 ③ メモの四角（コンソール外殻）はフェードから完全に解放！
+        // 起動時はフェードせずパッと存在感を放ち、戻る時はキーボードが沈むのを待ってサッとカメラ画面へ引き継ぎます。
+        // 🟢 ③ メモの四角（コンソール外殻）
         Positioned(
-          bottom: 8, left: 0, right: 0,
+          bottom: 8, left: 8, right: 8,
           child: AnimatedBuilder(
-            animation: _animController,
+            animation: Listenable.merge([_animController, _fadeController]), // 🟢 変更：フェードの進捗も同時に監視
             builder: (context, child) {
-              // イージングカーブに沿って、サイズは「1.0 ➔ 0.75(2回り縮小)」、位置は「0 ➔ 右画面外」へシンクロ変形
               double scale = ui.lerpDouble(1.0, 0.75, Curves.easeOutCubic.transform(_animController.value))!;
-              double slideX = ui.lerpDouble(0.0, screenWidth * 1.2, Curves.easeInOutCubic.transform(_animController.value))!;
+              double slideX = ui.lerpDouble(0.0, screenWidth * 1.3, Curves.easeInOutCubic.transform(_animController.value))!;
+
+              // 🟢 修正：起動時・キャンセル時は滑らかにフェードし、矢印保存時のみフェードアウトを1.0で完全ロック
+              double boxOpacity = _isSaving ? 1.0 : _fadeController.value;
 
               return Transform.translate(
                 offset: Offset(slideX, 0),
                 child: Transform.scale(
                   scale: scale,
                   alignment: Alignment.center,
-                  child: child,
+                  child: Opacity(
+                    opacity: boxOpacity, // 🟢 独自の透明度を四角にのみインプラント
+                    child: child,
+                  ),
                 ),
               );
             },
@@ -5262,10 +5327,7 @@ class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with SingleTicke
                   padding: const EdgeInsets.only(left: 12.0, bottom: 4.0),
                   child: IconButton(
                     icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
-                    onPressed: () {
-                      widget.focusNode.unfocus();
-                      widget.onClose();
-                    },
+                    onPressed: _closeWithFade,
                   ),
                 ),
 
@@ -5287,13 +5349,9 @@ class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with SingleTicke
                           minLines: 3,
                           maxLines: null,
                           cursorColor: isDark ? Colors.white : Colors.black,
-
-                          // 🟢 修正：打ち込む文字サイズを 14 ➔ 18 へ大きく拡大
                           style: TextStyle(color: AppTheme.textMain(context), fontSize: 18, height: 1.4),
-
                           decoration: InputDecoration(
                             hintText: "メモを追加",
-                            // 🟢 修正：ヒントテキストのサイズも 18 にシンクロさせてガタつきを防止
                             hintStyle: TextStyle(color: AppTheme.textSub(context).withOpacity(0.4), fontSize: 18),
                             border: InputBorder.none,
                             isDense: true,
