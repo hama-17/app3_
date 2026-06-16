@@ -262,6 +262,9 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
             // -------------------------------------------------------------------
             // 2. 下部操作バー（戻る - シンプル白正円シャッター - カメラ反転）
             // -------------------------------------------------------------------
+            // -------------------------------------------------------------------
+            // 2. 下部操作バー（カメラ反転[左] - シャッター[中央] - 戻る×[右]）
+            // -------------------------------------------------------------------
             Container(
               height: 100,
               color: Colors.black,
@@ -269,10 +272,15 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                    onPressed: () => Navigator.pop(context),
-                  ),
+                  // 🔄 左側：カメラ反転（矢印2つが滑らかに循環するソリッドな意匠へ変更）
+                  _cameras.length > 1
+                      ? IconButton(
+                    icon: const Icon(Icons.sync_rounded, color: Colors.white, size: 28),
+                    onPressed: _switchCamera,
+                  )
+                      : const SizedBox(width: 48), // カメラが1つの場合のスペーサー
+
+                  // ⚪ 中央：シンプル白正円シャッター
                   GestureDetector(
                     onTap: _takePicture,
                     child: AnimatedContainer(
@@ -285,12 +293,12 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
                       ),
                     ),
                   ),
-                  _cameras.length > 1
-                      ? IconButton(
-                    icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
-                    onPressed: _switchCamera,
-                  )
-                      : const SizedBox(width: 48),
+
+                  // ✖ 右側：閉じるボタン（他のパーツと親和性を高めるため、端の丸い close_rounded へ微調整）
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                    onPressed: () => Navigator.pop(context),
+                  ),
                 ],
               ),
             ),
@@ -301,16 +309,18 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
   }
 }
 
+// ─── ファイル下部にある _SlidingDialTicksPainter を丸ごと上書き ───
 class _SlidingDialTicksPainter extends CustomPainter {
   final double progress;
-
   _SlidingDialTicksPainter({required this.progress});
 
   @override
   void paint(Canvas canvas, Size size) {
     final double centerX = size.width / 2;
-    const int totalTicks = 80;
-    const double tickSpacing = 14.0;
+
+    // 🟢 密度の調教：トータルの目盛り数を160本に倍増させ、隙間を 14.0 ➔ 7.0px へハーフ化して高密度に並べます
+    const int totalTicks = 160;
+    const double tickSpacing = 7.0;
 
     final Paint paint = Paint()
       ..style = PaintingStyle.stroke
@@ -321,36 +331,40 @@ class _SlidingDialTicksPainter extends CustomPainter {
     for (int i = 0; i <= totalTicks; i++) {
       double x = centerX + (i * tickSpacing) - activeOffset;
 
+      // 画面外の見えない目盛りは計算をスキップ
       if (x < 0 || x > size.width) continue;
 
-      double distanceFromCenter = (x - centerX).abs();
-      double opacity = (1.0 - (distanceFromCenter / centerX)).clamp(0.0, 1.0);
-      opacity = math.pow(opacity, 2.5).toDouble();
+      // 画面中央（現在のズーム位置）からの物理的な距離を測定
+      double dist = (x - centerX).abs();
 
+      // 左右にフェードアウトしていくお馴染みの超極細透過エフェクト
+      double opacity = (1.0 - (dist / centerX)).clamp(0.0, 1.0);
+      opacity = math.pow(opacity, 2.5).toDouble();
       if (opacity <= 0.02) continue;
 
       paint.color = Colors.white.withOpacity(opacity);
 
-      double tickHeight = size.height * (i % 5 == 0 ? 0.8 : 0.4);
-      double topY = (size.height - tickHeight) / 2;
+      // 🟢 形状の調教：基本の長さはすべて均一（高さの30%）に整列
+      double th = size.height * 0.3;
 
-      canvas.drawLine(Offset(x, topY), Offset(x, topY + tickHeight), paint);
+      // 🎯 選択中央イージング：中央から「前後3.5本分」の狭いエリアだけ、中央に近づくほど段階的に膨らませます
+      double maxInfluenceDist = tickSpacing * 3.5;
+      if (dist < maxInfluenceDist) {
+        // 中央ジャストで1.0、離れると0.0になる減衰係数
+        double factor = (1.0 - (dist / maxInfluenceDist)).clamp(0.0, 1.0);
+
+        // 中央に向かって最大で高さの50%分、段階的に「じんわり」と縦線を引き伸ばします
+        th += size.height * 0.5 * factor;
+      }
+
+      // 縦線が常にコンテナの上下中央（センターライン）を基準に上下に等しく伸びるように描画
+      double topY = (size.height - th) / 2;
+      canvas.drawLine(Offset(x, topY), Offset(x, topY + th), paint);
     }
 
-    final Paint centerIndicatorPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-
-    Path trianglePath = Path();
-    trianglePath.moveTo(centerX - 4, size.height);
-    trianglePath.lineTo(centerX + 4, size.height);
-    trianglePath.lineTo(centerX, size.height - 6);
-    trianglePath.close();
-    canvas.drawPath(trianglePath, centerIndicatorPaint);
+    // 🟢 物理パージ：不要になった「三角の指示器」の描画ロジック（Path）は跡形もなく完全抹消しました
   }
 
   @override
-  bool shouldRepaint(covariant _SlidingDialTicksPainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
+  bool shouldRepaint(covariant _SlidingDialTicksPainter old) => old.progress != progress;
 }
