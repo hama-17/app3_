@@ -1,4 +1,4 @@
-// 👇 元々書いてあった package の行はそのまま残してください！
+// ─── 🟢 修正版: android/app/src/main/kotlin/com/hk_app3_k/portal/MainActivity.kt ───
 package com.hk_app3_k.portal
 
 import io.flutter.embedding.android.FlutterActivity
@@ -6,27 +6,24 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.webkit.CookieManager
 
-// 🟢 ライブ通知の実装に必要なネイティブライブラリをインポート
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.AlarmManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 
 class MainActivity: FlutterActivity() {
-    // 既存のCookie用チャンネル名
     private val COOKIE_CHANNEL = "com.example.app/cookie"
-    // 🟢 Dart側のLiveNotificationServiceと足並みを揃えた通知用チャンネル名
     private val NOTIFICATION_CHANNEL = "app3.kportal/live_notification"
-    // Androidシステム内部で識別するための通知チャンネルID
     private val SYSTEM_CHANNEL_ID = "live_countdown_channel"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // 1. 既存のCookie取得処理（そのまま維持）
+        // ① 既存のCookie取得処理
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COOKIE_CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "getCookies") {
                 val url = call.argument<String>("url")
@@ -37,64 +34,67 @@ class MainActivity: FlutterActivity() {
             }
         }
 
-        // 2. 🟢 新設：15分前アラームから叩かれるライブ通知起動処理
+        // ② Dartから「1週間分の予約スタンプ」をまとめて引き受ける高剛性ハブ
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, NOTIFICATION_CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "startLiveNotification") {
-                val title = call.argument<String>("title") ?: "予定"
-                val subtitle = call.argument<String>("subtitle") ?: ""
-                val endTimeMillis = call.argument<Long>("endTimeMillis") ?: 0L
-                val type = call.argument<String>("type") ?: "class"
-                val targetId = call.argument<String>("targetId") ?: ""
+            when (call.method) {
+                "scheduleAndroidLiveNotification" -> {
+                    val id = call.argument<Int>("id") ?: 0
+                    val triggerTimeMillis = call.argument<Long>("triggerTimeMillis") ?: 0L
+                    val title = call.argument<String>("title") ?: "予定"
+                    val subtitle = call.argument<String>("subtitle") ?: ""
+                    val endTimeMillis = call.argument<Long>("endTimeMillis") ?: 0L
+                    val type = call.argument<String>("type") ?: "class"
+                    val targetId = call.argument<String>("targetId") ?: ""
 
-                // 進行中（Ongoing）通知を画面にぶち込む
-                showOngoingNotification(title, subtitle, endTimeMillis, type, targetId)
-                result.success(null)
-            } else {
-                result.notImplemented()
+                    scheduleNativeAlarm(id, triggerTimeMillis, title, subtitle, endTimeMillis, type, targetId)
+                    result.success(null)
+                }
+                "cancelAndroidLiveNotification" -> {
+                    val id = call.argument<Int>("id") ?: 0
+                    cancelNativeAlarm(id)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
             }
         }
 
-        // 3. 🟢 Android 8.0以上向けに通知枠をあらかじめシステムに登録
+        // ③ 通知枠のシステム事前登録
         createNotificationChannel()
     }
 
-    // 🟢 カウントダウンタイマー付きの常駐通知を表示するコアロジック
-    private fun showOngoingNotification(title: String, subtitle: String, endTimeMillis: Long, type: String, targetId: String) {
-        val context = applicationContext
-
-        // 通知をタップしたときにアプリを安全に起動し、ディープリンク情報をFlutterへ引き渡すインテント
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+    private fun scheduleNativeAlarm(id: Int, triggerTimeMillis: Long, title: String, subtitle: String, endTimeMillis: Long, type: String, targetId: String) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, LiveNotificationReceiver::class.java).apply {
+            putExtra("id", id)
+            putExtra("title", title)
+            putExtra("subtitle", subtitle)
+            putExtra("endTimeMillis", endTimeMillis)
             putExtra("type", type)
             putExtra("targetId", targetId)
         }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // 通知のビルド（OS標準のChronometerをフル駆動させる設定）
-        val notification = NotificationCompat.Builder(context, SYSTEM_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm) // システム標準のアラームアイコン（後でIcon_o.png等に変更可能）
-            .setContentTitle(title)
-            .setContentText(subtitle)
-            .setOngoing(true)                      // 👈 絶対条件：ユーザーがスワイプしても消えない常駐属性
-            .setUsesChronometer(true)              // 👈 絶対条件：タイマーモードを有効化
-            .setChronometerCountDown(true)         // 👈 絶対条件：カウントダウン（引き算）モードに設定
-            .setWhen(endTimeMillis)                // 👈 絶対条件：目標時刻（授業開始や締切）のミリ秒をセット
-            .setContentIntent(pendingIntent)       // タップ時の挙動
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // ロック画面でも表示を許可
-            .build()
-
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(9999, notification) // 固定のIDで通知を1つだけスマートに常駐させる
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTimeMillis, pendingIntent)
+        } else {
+            alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTimeMillis, pendingIntent)
+        }
     }
 
-    // 🟢 通知チャンネルの作成（これがないとAndroid 8.0以降で通知が完全にサイレント化します）
+    private fun cancelNativeAlarm(id: Int) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, LiveNotificationReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, id, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "ライブカウントダウン通知"
@@ -102,7 +102,7 @@ class MainActivity: FlutterActivity() {
             val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel(SYSTEM_CHANNEL_ID, name, importance).apply {
                 description = descriptionText
-                setShowBadge(false) // アプリのアイコンバッジは汚さないようにOFF
+                setShowBadge(false)
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)

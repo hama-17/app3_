@@ -3456,8 +3456,19 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
 
     // 日本時間で綺麗に整列し直した外部イベントを授業データとマージ
+    // 日本時間で綺麗に整列し直した外部イベントを授業データとマージ
     List<Map<String, dynamic>> allItems = List.from(pageItems)..addAll(correctedExternal);
-    allItems.sort((a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime));
+
+    // ─── 🟢 修正①：同時刻の場合のみ、課題（task）を最優先で上にする高剛性ソート ───
+    allItems.sort((a, b) {
+      int cmp = (a['time'] as DateTime).compareTo(b['time'] as DateTime);
+      if (cmp != 0) return cmp; // 時間が違うなら時系列順
+
+      // 同時刻の場合、aがtaskなら上(-1)、bがtaskなら下(1)へスライド
+      if (a['type'] == 'task' && b['type'] != 'task') return -1;
+      if (a['type'] != 'task' && b['type'] == 'task') return 1;
+      return 0;
+    });
 
     final daysEn = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
     String dayStr = daysEn[pageDate.weekday - 1];
@@ -3542,7 +3553,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                         if (index == 10000)
                           Builder(
                             builder: (context) {
-                              // 🟢 追加：予定が1つもない日はインジケータ線を描画する必要がないため、安全に早期リターンさせます
                               if (allItems.isEmpty) return const SizedBox();
 
                               final now = DateTime.now();
@@ -3554,13 +3564,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               DateTime lastEnd = allItems.last['endTime'] ?? allItems.last['time'].add(const Duration(hours: 1));
                               int lastEndMins = lastEnd.hour * 60 + lastEnd.minute;
 
+                              // 最初の予定より前：タイムラインの上部にホールド
                               if (nowMins < firstStartMins) {
                                 lineY = 12.0;
                               }
+                              // すべての予定が終わった後：最終アイテムの時刻の間にホールド
                               else if (nowMins > lastEndMins) {
                                 int i = allItems.length - 1;
-                                lineY = i * 56.0 + 43.0 + 6.0;
+                                lineY = i * 56.0 + 37.5;
                               }
+                              // 進行中の時間帯
                               else {
                                 for (int i = 0; i < allItems.length; i++) {
                                   final item = allItems[i];
@@ -3569,18 +3582,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   int startMins = start.hour * 60 + start.minute;
                                   int endMins = end.hour * 60 + end.minute;
 
+                                  // 🟢 修正：現在進行中のアイテム内部。開始時刻と終了時刻（または空枠）のジャスト中間に線を引く
                                   if (nowMins >= startMins && nowMins <= endMins) {
-                                    lineY = i * 56.0 + 31.0;
+                                    lineY = i * 56.0 + 37.5;
                                     break;
                                   }
 
+                                  // 🟢 修正：アイテムとアイテムの間の隙間（コマ間）にいる時
                                   if (i < allItems.length - 1) {
                                     final nextItem = allItems[i + 1];
                                     DateTime nextStart = nextItem['time'];
                                     int nextStartMins = nextStart.hour * 60 + nextStart.minute;
 
                                     if (nowMins > endMins && nowMins < nextStartMins) {
-                                      lineY = i * 56.0 + 57.5;
+                                      lineY = i * 56.0 + 64.0;
                                       break;
                                     }
                                   }
@@ -3692,61 +3707,65 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                             if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
                                           }
                                         },
-                                        child: Row(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              SizedBox(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisAlignment: MainAxisAlignment.center, // 56pxの枠内で全体を美しく縦中央寄せ
+                                          children: [
+                                            // ─── 🟢 1行目：開始時刻、アイコン、タイトル文字を同じRowに並べる ───
+                                            Row(
+                                              crossAxisAlignment: CrossAxisAlignment.center, // ✨ これで手動パディングなしで「文字の目線」が全自動で100%揃います！
+                                              children: [
+                                                SizedBox(
                                                   width: 45,
-                                                  child: Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Text(startTimeStr, style: TextStyle(color: tCol, fontSize: 14, fontWeight: FontWeight.w300, height: 1.0)),
-                                                      const SizedBox(height: 2),
-                                                      Text(endTimeStr, style: TextStyle(color: tCol.withOpacity(0.6), fontSize: 11, fontWeight: FontWeight.w300, height: 1.0)),
-                                                    ],
-                                                  )
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
-                                                      children: [
-                                                        if (isTask) ...[Icon(Icons.assignment_late, size: 20, color: tCol), const SizedBox(width: 4)],
-                                                        // 🟢 変更③：カレンダー同期アイコンのカラーを不透明な「純白(tCol)」へマウント
-                                                        if (isExternal) ...[Icon(Icons.event, size: 16, color: tCol), const SizedBox(width: 4)],
+                                                  child: Text(startTimeStr, style: TextStyle(color: tCol, fontSize: 14, fontWeight: FontWeight.w400, height: 1.0)),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                if (isTask) ...[Icon(Icons.assignment_late, size: 20, color: tCol), const SizedBox(width: 4)],
+                                                if (isExternal) ...[Icon(Icons.event, size: 16, color: tCol), const SizedBox(width: 4)],
 
-                                                        // ─── 🟢 変更④：Text.rich によるインライン分離レンダリング ───
-                                                        Expanded(
-                                                          child: Text.rich(
-                                                            TextSpan(
-                                                              // 🟢 カレンダー同期も教科も同じトーン（tCol / 透過なし）で完全に同調
-                                                              style: TextStyle(color: tCol, fontSize: 14, height: 1.0),
-                                                              children: [
-                                                                if (periodStr.isNotEmpty)
-                                                                  TextSpan(
-                                                                    text: periodStr,
-                                                                    style: const TextStyle(fontWeight: FontWeight.w900), // [1限] の文字だけ少し太く
-                                                                  ),
-                                                                TextSpan(
-                                                                  text: item['title'],
-                                                                  style: TextStyle(fontWeight: titleWeight), // 講義/外部予定は通常、演習/課題は太字
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            maxLines: 1,
-                                                            overflow: TextOverflow.ellipsis,
+                                                Expanded(
+                                                  child: Text.rich(
+                                                    TextSpan(
+                                                      style: TextStyle(color: tCol, fontSize: 14, height: 1.0),
+                                                      children: [
+                                                        if (periodStr.isNotEmpty)
+                                                          TextSpan(
+                                                            text: periodStr,
+                                                            style: const TextStyle(fontWeight: FontWeight.w900),
                                                           ),
+                                                        TextSpan(
+                                                          text: item['title'],
+                                                          style: TextStyle(fontWeight: titleWeight),
                                                         ),
                                                       ],
                                                     ),
-                                                    const SizedBox(height: 2),
-                                                    Text(subText, style: TextStyle(color: subTextColor, fontSize: 10, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                                  ],
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
                                                 ),
-                                              ),
-                                            ]
+                                              ],
+                                            ),
+
+                                            const SizedBox(height: 2), // 1行目と2行目の等間隔キープディスタンス
+
+                                            // ─── 🟢 2行目：終了時刻（授業のみ）とサブテキストのラインを揃える ───
+                                            Row(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                SizedBox(
+                                                  width: 45,
+                                                  // 💡 課題（Task）の時は終了時刻が消え、空の45px幅だけが残るため、右のsubTextの開始位置が上のタイトルと綺麗に揃います
+                                                  child: !isTask
+                                                      ? Text(endTimeStr, style: TextStyle(color: tCol.withOpacity(0.75), fontSize: 11, fontWeight: FontWeight.w300, height: 1.0))
+                                                      : const SizedBox(),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Text(subText, style: TextStyle(color: subTextColor, fontSize: 10, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
                                         ),
                                       )
                                   ),

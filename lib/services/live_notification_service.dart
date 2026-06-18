@@ -10,6 +10,8 @@ import '../utils/lms_adapter.dart';
 class LiveNotificationService {
   static const MethodChannel _platform = MethodChannel('app3.kportal/live_notification');
 
+  static bool _isAlarmManagerInitialized = false;
+
   // iOSネイティブ層の準備不足による Dart側の即死フリーズを100%物理封殺する安全装置
   static Future<T?> _invokeSafe<T>(String method, [dynamic arguments]) async {
     try {
@@ -53,6 +55,12 @@ class LiveNotificationService {
     required List<dynamic> currentAssignments,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+
+    // ─── 🟢 修正：LMSデータが更新された最初のタイミングで、Androidアラームエンジンを強制起爆 ───
+    if (Platform.isAndroid && !_isAlarmManagerInitialized) {
+      _isAlarmManagerInitialized = await AndroidAlarmManager.initialize();
+      debugPrint("🤖 AndroidAlarmManager の初期化に成功しました: $_isAlarmManagerInitialized");
+    }
 
     // 古い予約を一度すべてクリーンアップ
     await _clearAllScheduledAlarms(prefs);
@@ -131,23 +139,25 @@ class LiveNotificationService {
   }
 
   // OSのアラーム機構へチケットを登録する共通処理
+  // OSのアラーム機構へチケットを登録する共通処理
   static Future<void> _registerOSAlarm(int id, DateTime triggerTime, Map<String, dynamic> params) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('live_alarm_data_$id', jsonEncode(params));
 
-    // 🟢 修正：iOS環境での実行を物理的にブロック！これでMissingPluginExceptionを永久追放します
+    // 🟢 修正：AndroidAlarmManager を廃止し、直接Kotlinの物理予約システムをキック
     if (Platform.isAndroid) {
-      await AndroidAlarmManager.oneShotAt(
-        triggerTime,
-        id,
-        alarmTriggerCallback,
-        exact: true,
-        wakeup: true,
-        alarmClock: true,
-      );
+      await _platform.invokeMethod('scheduleAndroidLiveNotification', {
+        'id': id,
+        'triggerTimeMillis': triggerTime.millisecondsSinceEpoch,
+        'title': params['title'],
+        'subtitle': params['subtitle'],
+        'endTimeMillis': params['endTimeMillis'],
+        'type': params['type'],
+        'targetId': params['targetId'],
+      });
     }
 
-    // iOS用のネイティブ通知予約（安全装置経由）
+    // iOS用のネイティブ通知予約
     await _invokeSafe('scheduleIOSLocalNotification', {
       'id': id,
       'triggerTimeMillis': triggerTime.millisecondsSinceEpoch,
@@ -161,14 +171,15 @@ class LiveNotificationService {
     for (var idStr in oldIds) {
       int id = int.parse(idStr);
 
-      // 🟢 修正：こちらもiOS環境では絶対に走らせないようガード
+      // 🟢 修正：こちらもKotlin側へキャンセル命令を1発飛ばすだけ
       if (Platform.isAndroid) {
-        await AndroidAlarmManager.cancel(id);
+        await _platform.invokeMethod('cancelAndroidLiveNotification', {'id': id});
       }
       await prefs.remove('live_alarm_data_$id');
     }
     await _invokeSafe('cancelAllIOSLocalNotifications');
   }
+
 
   // アプリ起動時に通知がタップされた際、ここから該当画面へディープリンクでジャンプ
   static void setupMethodCallHandler(Function(String type, String targetId) onDeepLinkReceived) {
