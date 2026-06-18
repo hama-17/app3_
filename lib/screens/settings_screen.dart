@@ -150,6 +150,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _syncSchedulesEnabled = false;
   bool _importEventsEnabled = false;
 
+  bool _isSilentCameraEnabled = true;
+
   // 🟢 ライブ通知（カウントダウン）用のステート変数
   bool _isLiveNotifyEnabled = true;
   bool _liveNotifyClasses = true;
@@ -194,6 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       _isLiveNotifyEnabled = true;
       _liveNotifyClasses = true;
       _liveNotifyTasks = true;
+      _isSilentCameraEnabled = prefs.getBool('ios_silent_camera_v10') ?? true;
     });
 
     // 🟢 追記：裏側のバックグラウンドサービスが常にONとして動くよう、Prefs 側も true で上書き固定
@@ -214,6 +217,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
         _targetCalendarId = null;
       }
     });
+  }
+
+  // 🟢 新設：無音カメラのオンオフをストレージへ即時永続化する関数
+  Future<void> _toggleSilentCamera(bool value) async {
+    setState(() => _isSilentCameraEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ios_silent_camera_v10', value);
   }
 
   Future<void> _toggleSyncTasks(bool value) async {
@@ -554,6 +564,41 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                       ),
                     ),
                     const SizedBox(height: 32),
+
+                    // 🟢 追記：iOS専用 無音カメラ切り替えパネル
+                    if (Platform.isIOS) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: Container(
+                          decoration: BoxDecoration(color: AppTheme.panel(context), borderRadius: BorderRadius.circular(30)),
+                          clipBehavior: Clip.antiAlias,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text("無音カメラ", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
+                                SizedBox(
+                                  height: 20,
+                                  child: Transform.scale(
+                                    scale: 0.75,
+                                    child: Switch(
+                                      value: _isSilentCameraEnabled,
+                                      onChanged: _toggleSilentCamera,
+                                      activeColor: AppTheme.textMain(context),
+                                      activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
+                                      inactiveThumbColor: AppTheme.textSub(context),
+                                      inactiveTrackColor: Colors.transparent,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 32), // 下の「ガイド/バージョン」ウィジェットとの防衛線余白
+                    ],
 
 
 

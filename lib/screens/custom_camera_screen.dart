@@ -6,6 +6,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' show join;
 import 'package:gal/gal.dart'; // 🟢 スマホ本体への保存パッケージ
 import '../core/app_theme.dart';
+import 'dart:ui' as ui;           // 🟢 追記
+import 'package:flutter/rendering.dart'; // 🟢 追記
+import 'package:shared_preferences/shared_preferences.dart'; // 🟢 追記（これで1つ目のエラー消滅）
 
 class CustomCameraScreen extends StatefulWidget {
   const CustomCameraScreen({super.key});
@@ -18,6 +21,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
   CameraController? _controller;
   List<CameraDescription> _cameras = [];
   int _selectedCameraIndex = 0;
+
+  final GlobalKey _previewContainerKey = GlobalKey();
 
   bool _isInitialized = false;
   bool _isTakingPicture = false;
@@ -87,8 +92,41 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
 
     try {
       await Future.delayed(const Duration(milliseconds: 100));
-      final XFile rawImage = await _controller!.takePicture();
+      XFile? rawImage;
 
+      // ─── 🟢 iOS専用：設定による動的ルート分岐セクター ───
+      if (Platform.isIOS) {
+        final prefs = await SharedPreferences.getInstance();
+        final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
+
+        if (isSilentMode) {
+          // 🔇 【ルートA】完全無音モード（プレビュー・レンダリングキャプチャ）
+          // シャッター回路を通さないため100%無音。pixelRatioを3.0に引き上げることで、画面表示そのままのキレ味で保存します。
+          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+          final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+          if (byteData == null) throw Exception("Render capture failed");
+
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File('${tempDir.path}/IMG_TEMP_SILENT.png');
+          await tempFile.writeAsBytes(byteData.buffer.asUint8List());
+
+          rawImage = XFile(tempFile.path);
+          debugPrint("iOS: RepaintBoundary方式による完全無音キャプチャに成功");
+        } else {
+          // 📸 【ルートB】音あり最高物理画質モード
+          // 本物の静止画用最高画質シャッターを点火（カシャッと鳴りますが画質は最大）
+          rawImage = await _controller!.takePicture();
+          debugPrint("iOS: 本物のカメラシャッターによる最高画質撮影を実行");
+        }
+      } else {
+        // ─── 🟢 Android専用：常に無傷の最高物理画質静止画ルート ───
+        rawImage = await _controller!.takePicture();
+      }
+
+      if (rawImage == null) throw Exception("Image capture failed");
+
+      // ─── 以下、保存＆ギャラリー連携（元コードのまま維持） ───
       final docDir = await getApplicationDocumentsDirectory();
       final memoImgDir = Directory('${docDir.path}/memo_images');
       if (!await memoImgDir.exists()) {
@@ -98,15 +136,12 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
       final String fileName = 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final String permanentPath = join(memoImgDir.path, fileName);
 
-      // 1. アプリ専用領域に保存（メモ用）
       await File(rawImage.path).copy(permanentPath);
 
-      // 2. 🟢 スマホ本体のギャラリー（カメラロール）にも非同期で自動保存
       try {
         await Gal.putImage(permanentPath);
       } catch (galleryError) {
         debugPrint("スマホ本体への保存に失敗しました: $galleryError");
-        // 💡 失敗時（初回権限拒否など）はアプリ内通知等でフォローできるようログを残します
       }
 
       if (mounted) {
@@ -170,9 +205,14 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
                           },
                           // ピンチズーム終了
                           onScaleEnd: (details) {
-                            setState(() => _showZoomText = false); // 🟢 テキスト非表示
+                            setState(() => _showZoomText = false);
                           },
-                          child: CameraPreview(_controller!),
+                          // ❌ 修正前: child: CameraPreview(_controller!),
+                          // 🟢 修正後：グラフィックをそのままコピーできるように防衛線を張る
+                          child: RepaintBoundary(
+                            key: _previewContainerKey,
+                            child: CameraPreview(_controller!),
+                          ),
                         ),
                       ),
 

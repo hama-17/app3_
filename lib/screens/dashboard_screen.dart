@@ -333,6 +333,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   // 🟢 追加：カメラ画面のカプセルボタン連動メモ用コンポーネント
   final TextEditingController _cameraMemoController = TextEditingController();
   final FocusNode _cameraMemoFocusNode = FocusNode();
+
+  final GlobalKey _previewContainerKey = GlobalKey();
+
   late PageController _coursesWidgetController;
   late PageController _schedulePageController;
   late PageController _taskPageController;
@@ -434,20 +437,53 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   // 🟢 修正：保存完了を一切待たずに、シャッターの瞬間にアニメーションを最優先点火する爆速版
+  // 🟢 修正：設定フラグに完全連動するハイブリッド無音インラインシャッター
   Future<void> _takeInlineCameraPhoto() async {
     if (_cameraController == null || !_isCamInitialized || _isCamTakingPicture) return;
     setState(() => _isCamTakingPicture = true);
     try {
       await Future.delayed(const Duration(milliseconds: 100));
 
-      // ① まずカメラのハードウェアシャッターだけを切り、撮れたてホヤホヤの一時ファイルを確保
-      final XFile rawImage = await _cameraController!.takePicture();
+      String? imagePath;
 
-      // ② 🟢 解決の鍵：重い保存処理の完了を一切「待たずに」、tmp領域のパスで即座に右下吸い込みアニメーションを点火！
-      // tmp画像はメモリやストレージの直近にキャッシュされているため、Image.fileの読み込みラグも極限まで消滅します
+      // ─── 🟢 iOS専用：設定による動的ルート分岐セクター ───
+      if (Platform.isIOS) {
+        final prefs = await SharedPreferences.getInstance();
+        final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
+
+        if (isSilentMode) {
+          // 🔇 【ルートA】完全無音モード（プレビュー・レンダリングキャプチャ）
+          // シャッター回路を通さないため100%無音。画面表示そのままのキレ味(pixelRatio: 3.0)でPNGバッファを生成。
+          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+          final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+          if (byteData == null) throw Exception("Render capture failed");
+
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File('${tempDir.path}/IMG_INLINE_TEMP_SILENT.png');
+          await tempFile.writeAsBytes(byteData.buffer.asUint8List());
+
+          imagePath = tempFile.path;
+          debugPrint("iOS Inline: RepaintBoundary方式による完全無音キャプチャに成功");
+        } else {
+          // 📸 【ルートB】音あり最高物理画質モード
+          // 純正の静止画用最高画質シャッターを点火（カシャッと鳴りますが画質は最大）
+          final XFile rawImage = await _cameraController!.takePicture();
+          imagePath = rawImage.path;
+          debugPrint("iOS Inline: 本物のカメラシャッターによる最高画質撮影を実行");
+        }
+      } else {
+        // ─── 🟢 Android専用：常に無傷の最高物理画質静止画ルート ───
+        final XFile rawImage = await _cameraController!.takePicture();
+        imagePath = rawImage.path;
+      }
+
+      if (imagePath == null) throw Exception("Image capture failed");
+
+      // ② 🟢 解決の鍵：一時ファイルの確保ができた時点で、即座に右下吸い込みアニメーションを最優先点火！
       if (mounted) {
         setState(() {
-          _capturedImagePathForAnim = rawImage.path;
+          _capturedImagePathForAnim = imagePath;
         });
         _cameraCaptureAnimController.forward().then((_) {
           if (mounted) {
@@ -459,13 +495,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         });
       }
 
-      // ③ 🟢 解決の鍵：残りのフォルダ生成、Galエクスポート、授業詳細へのデータ流し込みは、
-      // 【awaitを付けずに】そのまま未来へ放り投げ、完全に「裏（バックグラウンド）」で静かに処理させます
-      _performBackgroundSaveTasks(rawImage.path);
+      // ③ 🟢 残りの重い永続化コピーやGalエクスポートなどのI/Oは「裏」で完全に非同期実行
+      _performBackgroundSaveTasks(imagePath);
 
-    } catch (_) {
+    } catch (e) {
+      debugPrint("Take Inline Camera Photo Error: $e");
     } finally {
-      setState(() => _isCamTakingPicture = false);
+      if (mounted) {
+        setState(() => _isCamTakingPicture = false);
+      }
     }
   }
 
@@ -3424,7 +3462,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   bottomLeft: Radius.circular(24.0),
                                   bottomRight: Radius.circular(24.0),
                                 ),
-                                child: CameraPreview(_cameraController!),
+                                child: RepaintBoundary(
+                                  key: _previewContainerKey,
+                                  child: CameraPreview(_cameraController!),
+                                ),
                               ),
                             ),
 
