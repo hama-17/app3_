@@ -48,9 +48,18 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
 
   Future<void> _clearWebViewCache() async {
     try {
-      await CookieManager.instance().deleteAllCookies();
+      // 全消去ではなく、Canvasのドメインに紐づく古いセッションだけをピンポイントで消し去る
+      final cookieManager = CookieManager.instance();
+      final url = WebUri(canvasBaseUrl);
+
+      final cookies = await cookieManager.getCookies(url: url);
+      for (var cookie in cookies) {
+        if (cookie.name == 'canvas_session' || cookie.name == '_csrf_token') {
+          await cookieManager.deleteCookie(url: url, name: cookie.name);
+        }
+      }
     } catch (e) {
-      debugPrint("Cookie clear error: $e");
+      debugPrint("Targeted cookie clear error: $e");
     }
   }
 

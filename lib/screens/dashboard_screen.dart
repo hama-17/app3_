@@ -23,6 +23,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/app_snackbar.dart';
 
+import 'dart:async';
+
 import '../utils/term_helper.dart';
 import 'package:flutter/services.dart';
 import '../services/widget_update_service.dart';
@@ -326,7 +328,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 
-class _DashboardPageState extends State<DashboardPage> with TickerProviderStateMixin {
+class _DashboardPageState extends State<DashboardPage> with TickerProviderStateMixin, WidgetsBindingObserver {
   String _scheduleMode = 'D';
   // 🟢 追加：カメラ画面のカプセルボタン連動メモ用コンポーネント
   final TextEditingController _cameraMemoController = TextEditingController();
@@ -357,6 +359,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   late AnimationController _cameraCaptureAnimController;
   String? _capturedImagePathForAnim;
+
+  Timer? _autoRefreshTimer;
 
   // 🟢 独自カメラのオンデマンドライフサイクル制御
   Future<void> _prepareAvailableCameras() async {
@@ -1101,6 +1105,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   @override void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _mainScrollController = ScrollController();
     _mainScrollController.addListener(_onMainScroll);
@@ -1158,6 +1163,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     _loadDismissedIds(); _loadCustomData(); _buildCourseIndexMap(); _fetchDataParallel();
     _prepareAvailableCameras(); // 🟢 カメラハードウェアの事前ロード
 
+    _startAutoRefreshTimer();
+
     _updateAlertAnimation();
 
     int initialPage = _findBestCourseIndex();
@@ -1166,6 +1173,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   @override void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🟢 解除：メモリリークを100%完全遮断
+    _autoRefreshTimer?.cancel();                  // 🟢 停止：裏タイマーを安全に消滅させる
     _cameraCaptureAnimController.dispose(); // 🟢 追加：リソースの安全解放
     _cameraController?.dispose();
     _colorAnimController.dispose();
@@ -3027,7 +3036,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   }
                                 },
                                 // ─── 🟢 修正：onScaleUpdate 内のズーム処理 ───
-                                onScaleUpdate: (details) async {
+                                onScaleUpdate: (details) {
                                   if (_isCameraPinching) {
                                     if (_camMaxZoom <= _camMinZoom) return;
                                     double nz = (_camBaseZoom * details.scale).clamp(_camMinZoom, _camMaxZoom);
@@ -3520,12 +3529,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       children: [
                         // ① 極細の縦直線
                         Positioned(
-                          top: 16.0,
+                          top: 12.0,
                           bottom: 0,
                           left: 51.0,
                           child: Container(
                             width: 0.5,
-                            color: tCol.withOpacity(0.25),
+                            color: tCol.withOpacity(0.95),
                           ),
                         ),
 
@@ -3586,7 +3595,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                 width: 51.0,
                                 child: Container(
                                   height: 0.5,
-                                  color: tCol.withOpacity(0.4),
+                                  color: tCol.withOpacity(1),
                                 ),
                               );
                             },
@@ -4993,6 +5002,38 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         ],
       ),
     );
+  }
+
+  // ─── 🟢 追加：ライフサイクルチェンジャー ───
+  // ─── 🟢 修正：バックグラウンド暴発を100%封殺するライフサイクルチェンジャー ───
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 📱 アプリが「完全な最前面（フォアグラウンド）」にいて、ユーザーが凝視している状態
+    if (state == AppLifecycleState.resumed) {
+      _fetchDataParallel();      // 戻ってきた瞬間の最速同期
+      _startAutoRefreshTimer();  // 🟢 解決の鍵①：ここから「連続フォアグラウンド30分」のカウントを新規スタート！
+    }
+    // 💤 ホームに戻った(paused)、通知を下げた(inactive)、画面を切ったなど、最前面以外のすべて
+    else {
+      // 🎯 決定打：resumed 以外の状態に1ミリでも移行した瞬間、タイマーを跡形もなく即座に完全抹殺（cancel）！
+      // これにより、裏画面で通信が暴発する可能性が「構造上0%」になります。
+      _autoRefreshTimer?.cancel();
+      _autoRefreshTimer = null; // 完全にメモリ上からパージ
+    }
+  }
+
+  // ─── 🟢 追加：サイレント・オートリフレッシュ機構 ───
+  void _startAutoRefreshTimer() {
+    _autoRefreshTimer?.cancel(); // 二重起動を防ぐため一度クリーンにクリア
+
+    // 🧭 30分（1800秒）に一回、裏で粛々とLMSから最新タスクをサルベージする周期レール
+    _autoRefreshTimer = Timer.periodic(const Duration(minutes: 30), (timer) {
+      if (mounted && widget.isAuthenticated) {
+        // 既存の予定カードやUIを画面に1ミリも崩さず維持したまま、
+        // 完全にバックグラウンドスレッド経由でデータを吸い上げてサイレントに同期します
+        _fetchDataParallel();
+      }
+    });
   }
 
 
