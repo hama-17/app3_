@@ -359,8 +359,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   late AnimationController _cameraCaptureAnimController;
   String? _capturedImagePathForAnim;
+  Map<String, String> _taskDueOverrides = {};
 
   Timer? _autoRefreshTimer;
+// 🟢 追加：最後にLMS同期（_fetchDataParallel）に成功した時刻を保持する変数
+  DateTime? _lastFetchTime;
+
+
 
   // 🟢 独自カメラのオンデマンドライフサイクル制御
   Future<void> _prepareAvailableCameras() async {
@@ -1230,9 +1235,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
 
     // 👇 変数名を termDataStr2 に変更 👇
-    final termDataStr2 = prefs.getString('course_term_overrides_v10');
-    if (termDataStr2 != null) {
-      _courseTermOverrides = Map<String, String>.from(jsonDecode(termDataStr2));
+    final taskOverStr = prefs.getString('task_due_overrides_v10');
+    if (taskOverStr != null) {
+      _taskDueOverrides = Map<String, String>.from(jsonDecode(taskOverStr));
     }
     // 👆 追加ここまで 👆
 
@@ -1318,10 +1323,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   // ★ 修正：RefreshIndicatorで待機できるよう Future を返す非同期関数に変更
   Future<void> _fetchDataParallel() async {
+    _lastFetchTime = DateTime.now(); // ⏱️ 🟢 追記：同期の瞬間の時刻をガチッと記録
+
     if (mounted) {
       setState(() { _hasApiError = false; _isLoadingAssignments = true; _isLoadingMessages = true; });
-      _updateAlertAnimation(); // ★ 読み込み開始で白黒点滅スタート
+      _updateAlertAnimation();
     }
+    // ...（以降の既存の通信処理はそのまま維持）
     // 両方の通信が終わるまで待機する
     await Future.wait([
       _fetchAssignments(),
@@ -1423,6 +1431,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   Future<void> _fetchAssignments() async {
+
     try {
       // キャッシュキーを新しくし、クリーンな状態で全取得させる
       final cached = await CacheManager.load('cached_assignments_v14_all_year');
@@ -1460,12 +1469,21 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
         if (res.statusCode == 200) {
           for (var task in jsonDecode(res.body)) {
-            final dueAtStr = task['due_at'];
-            if (dueAtStr != null && dueAtStr.toString().isNotEmpty) {
-              task['context_name'] = course['name'];
-              task['course_id'] = course['id'];
-              tasks.add(task);
+
+            // ❌ 修正前: if (dueAtStr != null && dueAtStr.toString().isNotEmpty) {
+            // 🟢 修正後: 条件を撤廃し、期日未定の課題もすべてサルベージします
+            task['context_name'] = course['name'];
+            task['course_id'] = course['id'];
+
+            // 純正の期日をバックアップ
+            task['original_due_at'] = task['due_at'];
+
+            // 過去の上書き履歴があれば適用
+            final tId = task['id']?.toString();
+            if (tId != null && _taskDueOverrides.containsKey(tId)) {
+              task['due_at'] = _taskDueOverrides[tId];
             }
+            tasks.add(task);
           }
         } else if (res.statusCode == 403 || res.statusCode == 401) {
           // 課題機能がオフの授業や過去の授業はスルーする
@@ -1890,6 +1908,28 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }).toList();
   }
 
+  // 🟢 追加：期日の設定がない課題だけを「未提出/提出済」に分けて綺麗に抜き出す関数
+  List<dynamic> _filterNoDueTasks({required bool wantCompleted}) {
+    return _assignments.where((t) {
+      if (_dismissedTaskIds.contains(t['id'].toString())) return false;
+
+      // 1. 期日（due_at）が null または空文字のものだけを対象にする
+      final dueStr = t['due_at'];
+      if (dueStr != null && dueStr.toString().isNotEmpty) return false;
+
+      // 2. 提出状態の判定
+      bool isCompleted = false;
+      if (t['course_id'] == 'custom_t' || t['is_app_custom_task'] == true) {
+        isCompleted = t['is_completed'] == true;
+      } else {
+        final sub = t['submission'];
+        isCompleted = sub != null && (sub['workflow_state'] == 'submitted' || sub['workflow_state'] == 'graded' || sub['workflow_state'] == 'graded_excused');
+      }
+
+      return wantCompleted ? isCompleted : !isCompleted;
+    }).toList();
+  }
+
 
   List<dynamic> _filterMessages(bool Function(dynamic msg) condition) { return _messages.where((m) { if (_completelyDeletedMessageIds.contains(m['id'].toString())) return false; return condition(m); }).toList(); }
 
@@ -1950,14 +1990,261 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   void _showCompleteCustomTaskDialog(String taskId) {
     showDialog(context: context, builder: (ctx) => AlertDialog(backgroundColor: Colors.white, title: const Text('Complete Task', style: TextStyle(color: Colors.black)), content: const Text('Mark this task as completed?', style: TextStyle(color: Colors.black54)), actions: [TextButton(child: const Text('Cancel', style: TextStyle(color: Colors.black54)), onPressed: () => Navigator.pop(ctx)), TextButton(child: const Text('Complete', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)), onPressed: () {
       setState(() {
-        _customTasks.removeWhere((t) => t['id'].toString() == taskId);
-        _assignments.removeWhere((t) => t['id'].toString() == taskId);
+        // 🟢 解決の鍵：map処理を使い、変更可能な新しい箱（Map.from）にコピーしながらリストを安全に再生成します
+
+        // 1. 保存用のカスタムタスクリストを更新
+        _customTasks = _customTasks.map((t) {
+          if (t['id'].toString() == taskId) {
+            final writableMap = Map<String, dynamic>.from(t);
+            writableMap['is_completed'] = true;
+            return writableMap;
+          }
+          return t;
+        }).toList();
+
+        // 2. メインの課題リストも同様に更新
+        _assignments = _assignments.map((t) {
+          if (t['id'].toString() == taskId) {
+            final writableMap = Map<String, dynamic>.from(t);
+            writableMap['is_completed'] = true;
+            return writableMap;
+          }
+          return t;
+        }).toList();
+
         _saveCustomData();
       });
       // ★ 追加：即座にカレンダーから削除
       CalendarSyncService.deleteTaskFromCalendar(taskId);
       Navigator.pop(ctx);
     })]));
+  }
+
+
+  // 🟢 新設：白黒基調の期限前倒し編集ポップアップ
+  // ─── 🟢 修正：白黒モノクローム ＆ 指定レイアウト特化版ポップアップ ───
+  void _showDueEditDialog(Map<String, dynamic> task) {
+    final String taskId = task['id'].toString();
+
+    final String? dueStr = task['due_at'];
+    final String? origDueStr = task['original_due_at'];
+
+    final DateTime currentDue = dueStr != null ? DateTime.parse(dueStr).toLocal() : DateTime.now();
+    final DateTime originalDue = origDueStr != null ? DateTime.parse(origDueStr).toLocal() : currentDue;
+
+    // すでに前倒し上書きが実行されているかどうかの判定フラグ
+    final bool hasOverride = _taskDueOverrides.containsKey(taskId);
+    final bool hasDue = dueStr != null && dueStr.isNotEmpty;
+
+    final bool hasOriginalDue = origDueStr != null && origDueStr.isNotEmpty;
+
+    // 🪙 アプリ指定のカスタムフォントをここに定義（AppThemeに定義があればそちらに差し替えてください）
+    const String customFont = 'YourCustomFontName'; // 👈 アプリでダウンロードしたフォント名に書き換えてください
+
+    // 表示用の日時フォーマット文字列
+    String formattedCurrentDue = hasDue
+        ? "${currentDue.month}/${currentDue.day}  ${currentDue.hour.toString().padLeft(2, '0')}:${currentDue.minute.toString().padLeft(2, '0')}"
+        : "undetermined";
+
+    String formattedOriginalDue = origDueStr != null && origDueStr.isNotEmpty
+        ? "${originalDue.month}/${originalDue.day}  ${originalDue.hour.toString().padLeft(2, '0')}:${originalDue.minute.toString().padLeft(2, '0')}"
+        : "undetermined";
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            colorScheme: const ColorScheme.light(primary: Colors.black, onPrimary: Colors.white, surface: Colors.white, onSurface: Colors.black),
+            dialogBackgroundColor: Colors.white,
+          ),
+          child: AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            // ① カード上部：課題名
+            title: Text(
+                task['name'] ?? 'Task Title',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black, fontFamily: customFont)
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(height: 12),
+
+                // ② 中央揃えで大きく期日期限を表示
+                Text(
+                  formattedCurrentDue,
+                  style: const TextStyle(
+                    fontSize: 36,               // ドデカ文字サイズ
+                    fontWeight: FontWeight.w100, // 無機質でシャープな極細ウェイト
+                    color: Colors.black,
+                    letterSpacing: -0.5,
+                    fontFamily: customFont,      // 🟢 カスタムフォントを反映
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+
+                // ③ オリジナルから変更されている場合のみ、下部に中央揃えで小さくオリジナルの期限 ＋ 横にリセットボタン
+                if (hasOverride) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Original: $formattedOriginalDue",
+                        style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.black.withOpacity(0.9),
+                            fontWeight: FontWeight.w300,
+                            fontFamily: customFont // 🟢 カスタムフォントを反映
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // インライン設置型のミニマルなリセットボタン
+                      GestureDetector(
+                        onTap: () async {
+                          setState(() {
+                            _taskDueOverrides.remove(taskId);
+                            task['due_at'] = task['original_due_at'];
+                            _assignments = List.from(_assignments);
+                            _assignments.sort((a, b) => (DateTime.tryParse(a['due_at'] ?? '') ?? DateTime.now()).compareTo(DateTime.tryParse(b['due_at'] ?? '') ?? DateTime.now()));
+                          });
+                          await WidgetUpdateService.updateHomeWidgets(tasks: _assignments);
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setString('task_due_overrides_v10', jsonEncode(_taskDueOverrides));
+                          Navigator.pop(ctx);
+                        },
+                        child: Icon(
+                            Icons.restart_alt_rounded, // より洗練されたリセットアイコン
+                            size: 18,
+                            color: Colors.black.withOpacity(0.9)
+                        )
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
+              ],
+            ),
+            // ④ カードの下に配置されるアクションボタンエリア（横いっぱいに広げた編集ボタンのみ）
+            actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            actions: [
+              SizedBox(
+                width: double.infinity, // 横幅最大化
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black, // 純黒
+                    foregroundColor: Colors.white, // 純白
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text(
+                      '期限を変更',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w300, fontFamily: customFont) // 🟢 カスタムフォントを反映
+                  ),
+                  onPressed: () async {
+                    final now = DateTime.now();
+
+                    // 安全弁：もし元の期限がすでに過去（現在時刻より前）の場合
+                    if (origDueStr != null && origDueStr.isNotEmpty && originalDue.isBefore(now)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("すでに元の期限を過ぎているため、これ以上早めることはできません。")),
+                      );
+                      return;
+                    }
+
+                    // 🟢 追記：デフォルト表示用日時の決定（期日ありならその期日、未定なら現在時刻）
+                    final DateTime defaultDateTime = hasOriginalDue ? originalDue : now;
+
+                    // 🗓️ 日付選択（本来の期日をデフォルト表示）
+                    final pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: defaultDateTime, // 🟢 修正：now から変更
+                      firstDate: DateTime(now.year, now.month, now.day),
+                      lastDate: origDueStr != null && origDueStr.isNotEmpty ? originalDue : DateTime(2100),
+                      builder: (context, child) {
+                        return Theme(
+                          data: ThemeData.light().copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: Colors.black,
+                              onPrimary: Colors.white,
+                              surface: Colors.white,
+                              onSurface: Colors.black,
+                              secondary: Colors.black,
+                            ),
+                            textButtonTheme: TextButtonThemeData(
+                              style: TextButton.styleFrom(foregroundColor: Colors.black),
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (pickedDate == null) return;
+
+                    // ⏱️ 時刻選択（本来の期日の時間をデフォルト表示）
+                    final pickedTime = await showTimePicker(
+                      context: context,
+                      initialTime: TimeOfDay.fromDateTime(defaultDateTime), // 🟢 修正：now から変更
+                      builder: (context, child) {
+                        return Theme(
+                          data: ThemeData.light().copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: Colors.black,
+                              onPrimary: Colors.white,
+                              surface: Colors.white,
+                              onSurface: Colors.black,
+                            ),
+                            textButtonTheme: TextButtonThemeData(
+                              style: TextButton.styleFrom(foregroundColor: Colors.black),
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (pickedTime == null) return;
+
+                    // 結合して新しい日時を生成
+                    final DateTime newDue = DateTime(pickedDate.year, pickedDate.month, pickedDate.day, pickedTime.hour, pickedTime.minute);
+
+                    // 最終防衛線：現在時刻より前の日時はリジェクト
+                    if (newDue.isBefore(now)) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("現在時刻より前の日時は設定できません。")));
+                      return;
+                    }
+
+                    // 既存の防衛線：元の期限より遅くなっていないかチェック
+                    if (origDueStr != null && origDueStr.isNotEmpty && newDue.isAfter(originalDue)) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("元の期限より遅い日時は設定できません。")));
+                      return;
+                    }
+
+                    // すべてのチェックを通過した場合のみ永続化
+                    setState(() {
+                      final isoStr = newDue.toIso8601String();
+                      _taskDueOverrides[taskId] = isoStr;
+                      task['due_at'] = isoStr;
+                      _assignments = List.from(_assignments);
+                      _assignments.sort((a, b) => (DateTime.tryParse(a['due_at'] ?? '') ?? DateTime.now()).compareTo(DateTime.tryParse(b['due_at'] ?? '') ?? DateTime.now()));
+                    });
+
+                    await WidgetUpdateService.updateHomeWidgets(tasks: _assignments);
+
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('task_due_overrides_v10', jsonEncode(_taskDueOverrides));
+                    Navigator.pop(ctx);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
 
@@ -2363,15 +2650,50 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   // ★ 修正：左スワイプ時に余白を赤くし、白抜きのゴミ箱アイコンを表示（角丸対応）
-  Widget _buildGroupedTasks(List<dynamic> tasks, {bool isOverdue = false, bool isCompletedList = false}) {
+  // 🟢 修正：引数に enableSwipe を追加
+  Widget _buildGroupedTasks(List<dynamic> tasks, {bool isOverdue = false, bool isCompletedList = false, bool enableSwipe = false}) {
     if (tasks.isEmpty) return const SizedBox();
     return Container(
         clipBehavior: Clip.antiAlias, decoration: BoxDecoration(color: AppTheme.panel(context), borderRadius: BorderRadius.circular(30)),
         child: Column(children: tasks.map((task) {
-          final due = DateTime.tryParse(task['due_at'] ?? '')?.toLocal() ?? DateTime.now();
-          String dueStr = isOverdue ? "${due.year}/${due.month}/${due.day}  ${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}" : "${due.month}/${due.day}  ${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}";
+
+          final rawDue = task['due_at'];
+          final bool isNoDue = rawDue == null || rawDue.toString().isEmpty;
+
+          // 🟢 追記：このタスクが期限前倒しされているかの判定と純正期日のサルベージ
+          final String taskIdStr = task['id'].toString();
+          final bool isOverridden = _taskDueOverrides.containsKey(taskIdStr);
+          final String? origDueRaw = task['original_due_at'];
+
+          String dueStr = "";
+          String weekdayStr = ""; // 🟢 追記：曜日を保持する変数
+          if (!isNoDue) {
+            final due = DateTime.tryParse(rawDue.toString())?.toLocal() ?? DateTime.now();
+            dueStr = isOverdue ? "${due.year}/${due.month}/${due.day}  ${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}" : "${due.month}/${due.day}  ${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}";
+
+            // 🟢 追記：パースされた確定時刻から曜日を3文字で抽出
+            weekdayStr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'][due.weekday - 1];
+          }
+
+          // 🟢 追記：オリジナル期日表示用の文字列フォーマット（月/日 時:分）
+          // ❌ 修正前: String origDueStr = ""; if (origDueRaw != null) { ... }
+          // 🟢 修正後：本来の期日がある場合は日時をパースし、未定から変更された場合は "undetermined" を代入
+          String origDueStr = "";
+          if (origDueRaw != null && origDueRaw.toString().isNotEmpty) {
+            final origDue = DateTime.tryParse(origDueRaw.toString())?.toLocal() ?? DateTime.now();
+            origDueStr = "${origDue.month}/${origDue.day} ${origDue.hour.toString().padLeft(2, '0')}:${origDue.minute.toString().padLeft(2, '0')}";
+          } else if (isOverridden) {
+            // 🟢 追記：本来は期日のデータがない（未定）状態から前倒し設定された場合のスタンプ
+            origDueStr = "undetermined";
+          }
+
           String? subStr;
-          if (isCompletedList && task['submission'] != null && task['submission']['submitted_at'] != null) { final sub = DateTime.tryParse(task['submission']['submitted_at'])?.toLocal(); if (sub != null) { subStr = "提出: ${sub.month}/${sub.day} ${sub.hour.toString().padLeft(2,'0')}:${sub.minute.toString().padLeft(2,'0')}"; } }
+          if (isCompletedList && task['submission'] != null && task['submission']['submitted_at'] != null) {
+            final sub = DateTime.tryParse(task['submission']['submitted_at'])?.toLocal();
+            if (sub != null) {
+              subStr = "提出: ${sub.month}/${sub.day} ${sub.hour.toString().padLeft(2,'0')}:${sub.minute.toString().padLeft(2,'0')}";
+            }
+          }
 
           Widget rowContent = Container(
             color: AppTheme.panel(context),
@@ -2381,7 +2703,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   if (task['course_id'] == 'custom_t') {
                     _showCompleteCustomTaskDialog(task['id'].toString());
                   } else {
-                    // ★ 修正：リストのタスクをタップで直接WebViewを開く
                     String targetUrl = task['html_url'] ?? task['url'] ?? '';
                     if (targetUrl.isNotEmpty) {
                       openSmartUrl(context, targetUrl, widget.cookie, title: task['name'] ?? 'Task');
@@ -2391,14 +2712,103 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     }
                   }
                 },
+
+                onLongPress: () {
+                  // カスタムタスク（course_id == 'custom_t'）もMap構造が同じなのでそのまま編集可能です
+                  // 書き換え可能なオブジェクトであることを保証するため、型をキャストして送ります
+                  _showDueEditDialog(task as Map<String, dynamic>);
+                },
+
                 child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    child: Row(children: [Expanded(flex: 4, child: Transform(transform: Matrix4.diagonal3Values(0.8, 1.2, 1.0), alignment: Alignment.centerLeft, child: FittedBox(fit: BoxFit.scaleDown, child: Text(dueStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 32, fontWeight: FontWeight.w100))))), const SizedBox(width: 12), Expanded(flex: 5, child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(task['name'] ?? 'Task', style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), Text(currentLMS.cleanTitle(task['context_name'] ?? ''), style: TextStyle(color: AppTheme.textSub(context), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis), if (subStr != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(subStr, style: TextStyle(color: AppTheme.textSub(context), fontSize: 10, fontWeight: FontWeight.bold)))]))])
+                    child: Row(children: [
+                      Expanded(
+                        flex: 4,
+                        child: isNoDue
+                            ? Align(
+                                alignment: Alignment.center, // 🟢 修正：左端（centerLeft）から「中心」へホールド
+                                child: GestureDetector(
+                                  onTap: () {
+                                    _showDueEditDialog(task as Map<String, dynamic>);
+                                  },
+                                  // 🟢 修正：中央で完璧な対称性を保つため、不要な左パディング（Padding）をパージしました
+                                  child: Icon(
+                                    Icons.add_rounded,
+                                    color: AppTheme.textMain(context).withOpacity(0.85),
+                                    size: 26,
+                                  ),
+                                ),
+                              )
+                            : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start, // 左揃え
+                          children: [
+                            Transform(
+                              transform: Matrix4.diagonal3Values(0.8, 1.2, 1.0),
+                              alignment: Alignment.centerLeft,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(dueStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 32, fontWeight: FontWeight.w100, height: 1.0)),
+                              ),
+                            ),
+                            // 🟢 修正：すべての課題のデカ文字下に「曜日」を常時左詰めで配置
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3.0, left: 2.0),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // ① 曜日インジケータ（すべての期日あり課題で常時表示）
+                                  Text(
+                                    weekdayStr,
+                                    style: TextStyle(
+                                        color: AppTheme.textSub(context).withOpacity(0.55), // ソリッドで見やすい半透明
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w400, // 視認性の良いウェイト
+                                        letterSpacing: -0.1
+                                    ),
+                                  ),
+
+                                  // ② 変更時のみ、曜日の右隣にキープディスタンスを開けてオリジナル期日を結合
+                                  if (isOverridden && origDueStr.isNotEmpty) ...[
+                                    const SizedBox(width: 8), // 曜日との隙間
+                                    Text(
+                                      "original: $origDueStr",
+                                      style: TextStyle(
+                                          color: AppTheme.textSub(context).withOpacity(0.35), // 主張しない超極薄グレー
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w300,
+                                          letterSpacing: -0.2
+                                      ),
+                                      maxLines: 1,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12), // 元からある行
+
+                      Expanded(
+                        flex: 5,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(task['name'] ?? 'Task', style: TextStyle(color: AppTheme.textMain(context), fontSize: 14, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            Text(currentLMS.cleanTitle(task['context_name'] ?? ''), style: TextStyle(color: AppTheme.textSub(context), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            if (subStr != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(subStr, style: TextStyle(color: AppTheme.textSub(context), fontSize: 10, fontWeight: FontWeight.bold))),
+                          ],
+                        ),
+                      ),
+                    ])
                 )
             ),
           );
 
-          if (isOverdue || isCompletedList) {
+          // 🟢 修正：enableSwipe がONの時も横2段階スライドの対象に連結
+          if (isOverdue || isCompletedList || enableSwipe || isNoDue) {
             return _SwipeToDeleteWidget(
                 key: ValueKey("task_${task['id'] ?? UniqueKey()}"),
                 onDelete: () {
@@ -4196,7 +4606,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   child: Text(
                                       entry.value,
                                       style: TextStyle(
-                                          color: (isToday && !_isCapturing) ? Colors.black : Colors.white,
+                                        // 🟢 修正：画像化中(_isCapturing)かつライトモード(!isDark)なら黒字、それ以外は通常
+                                          color: (isToday && !_isCapturing)
+                                              ? Colors.black
+                                              : (_isCapturing && !isDark ? Colors.black : Colors.white),
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold
                                       )
@@ -4323,15 +4736,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                 child: RotatedBox(
                                                   quarterTurns: 1,
                                                   child: SizedBox(
-                                                    width: currentItemHeight, // 🟢 決定打：物理的な縦幅をマスの高さに完全ロック
+                                                    width: currentItemHeight,
                                                     child: Row(
                                                       mainAxisSize: MainAxisSize.max,
-                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // 🟢 マスの中で限界まで等間隔に引き伸ばす
+                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                       children: [
-                                                        // 🟢 修正：通常時の文字＆ハイフンを一切の透過のない「純度100%の不透明白（Colors.white）」へ純化
-                                                        Text(startStr, style: TextStyle(color: Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
-                                                        Text("-", style: TextStyle(color: Colors.white, fontSize: inactiveFontSize)),
-                                                        Text(endStr, style: TextStyle(color: Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                        // 🟢 修正：画像化中かつライトモードなら黒、それ以外は純度100%の不透明白
+                                                        Text(startStr, style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w300)),
+                                                        Text("-", style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                        Text(endStr, style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w300)),
                                                       ],
                                                     ),
                                                   ),
@@ -4496,9 +4909,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final next7DaysTasks = _filterTasks((due) => due.isAfter(now) && due.isBefore(nextWeek), wantCompleted: false);
     final futureTasks = _filterTasks((due) => due.isAfter(nextWeek) || due.isAtSameMomentAs(nextWeek), wantCompleted: false);
 
+    final noDuePendingTasks = _filterNoDueTasks(wantCompleted: false);
+
+
+
     // ★ 修正：ignoreTerm を削除
     // 右側：COMPLETED用データ
     List<dynamic> allCompletedTasks = _filterTasks((due) => true, wantCompleted: true);
+    final noDueCompletedTasks = _filterNoDueTasks(wantCompleted: true);
+    allCompletedTasks.addAll(noDueCompletedTasks);
+
+    // 提出日時（submitted_at）の新しい順に1つのタイムラインとしてソート
     allCompletedTasks.sort((a, b) {
       DateTime timeA = DateTime.tryParse(a['submission']?['submitted_at'] ?? a['due_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
       DateTime timeB = DateTime.tryParse(b['submission']?['submitted_at'] ?? b['due_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -4555,9 +4976,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     if (futureTasks.isNotEmpty) ...[
                       Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("future tasks", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
                       _buildGroupedTasks(futureTasks, isCompletedList: false),
+                      const SizedBox(height: 24), // 👈 追記
+                    ],
+                    // 🟢 追記：未提出の期日未定セクション
+                    // 🟢 修正：ダミー生成マップを完全パージし、スワイプを許可
+                    if (noDuePendingTasks.isNotEmpty) ...[
+                      Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("undetermined", style: TextStyle(color: AppTheme.textSub(context), fontSize: 18, fontWeight: FontWeight.w300))),
+                      _buildGroupedTasks(noDuePendingTasks, enableSwipe: true),
                     ],
                   ],
                 ),
+                // --- COMPLETED リスト ---
                 // --- COMPLETED リスト ---
                 ListView(
                   padding: EdgeInsets.only(
@@ -4568,6 +4997,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
+                    // 🟢 修正：期日未定も提出日時順で完全にマージされた美しい一本のリストを射出
                     if (allCompletedTasks.isNotEmpty)
                       _buildGroupedTasks(allCompletedTasks, isCompletedList: true),
                   ],
@@ -5025,32 +5455,50 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   // ─── 🟢 追加：ライフサイクルチェンジャー ───
   // ─── 🟢 修正：バックグラウンド暴発を100%封殺するライフサイクルチェンジャー ───
+  // ─── 🟢 修正：ただ裏から戻っただけの自動同期をパージ ───
+  // ─── 🟢 修正：1時間（60分）の絶対経過時間監視スタビライザー ───
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 📱 アプリが「完全な最前面（フォアグラウンド）」にいて、ユーザーが凝視している状態
     if (state == AppLifecycleState.resumed) {
-      _fetchDataParallel();      // 戻ってきた瞬間の最速同期
-      _startAutoRefreshTimer();  // 🟢 解決の鍵①：ここから「連続フォアグラウンド30分」のカウントを新規スタート！
-    }
-    // 💤 ホームに戻った(paused)、通知を下げた(inactive)、画面を切ったなど、最前面以外のすべて
-    else {
-      // 🎯 決定打：resumed 以外の状態に1ミリでも移行した瞬間、タイマーを跡形もなく即座に完全抹殺（cancel）！
-      // これにより、裏画面で通信が暴発する可能性が「構造上0%」になります。
+      // 📱 最前面に戻ってきたとき：バックグラウンド中に1時間以上が経過していたか判定
+      if (_lastFetchTime != null) {
+        final passedTime = DateTime.now().difference(_lastFetchTime!);
+
+        if (passedTime.inHours >= 1) {
+          debugPrint("バックグラウンド経由で1時間以上経過したため復帰時自動同期（経過: ${passedTime.inMinutes}分）");
+          _fetchDataParallel();
+        } else {
+          debugPrint("1時間未満の復帰のため通信をスキップ（経過: ${passedTime.inMinutes}分）");
+        }
+      } else {
+        // 初回など、スタンプがなければ同期
+        _fetchDataParallel();
+      }
+
+      // 1分周期の経過時間監視タイマーを再始動
+      _startAutoRefreshTimer();
+
+    } else {
+      // 💤 バックグラウンドに回った瞬間：無駄なタイマーを完全に抹殺
       _autoRefreshTimer?.cancel();
-      _autoRefreshTimer = null; // 完全にメモリ上からパージ
+      _autoRefreshTimer = null;
     }
   }
 
-  // ─── 🟢 追加：サイレント・オートリフレッシュ機構 ───
+  // ─── 🟢 修正：30分タイマーを完全廃止し、1分精度の経過時間チェッカーへ変更 ───
   void _startAutoRefreshTimer() {
-    _autoRefreshTimer?.cancel(); // 二重起動を防ぐため一度クリーンにクリア
+    _autoRefreshTimer?.cancel(); // 二重起動防止のクリーンアップ
 
-    // 🧭 30分（1800秒）に一回、裏で粛々とLMSから最新タスクをサルベージする周期レール
-    _autoRefreshTimer = Timer.periodic(const Duration(minutes: 30), (timer) {
-      if (mounted && widget.isAuthenticated) {
-        // 既存の予定カードやUIを画面に1ミリも崩さず維持したまま、
-        // 完全にバックグラウンドスレッド経由でデータを吸い上げてサイレントに同期します
-        _fetchDataParallel();
+    // ⏱️ 1分（60秒）に1回、時計の針をチェックする超軽量な監視レール
+    _autoRefreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted && widget.isAuthenticated && _lastFetchTime != null) {
+        final passedTime = DateTime.now().difference(_lastFetchTime!);
+
+        // アプリを開いたまま放置され、前回の同期から「1時間（60分）」が経過した瞬間をピンポイント検知
+        if (passedTime.inHours >= 1) {
+          debugPrint("フォアグラウンド放置状態で1時間以上経過したため自動同期します");
+          _fetchDataParallel();
+        }
       }
     });
   }
