@@ -21,6 +21,7 @@ import '../main.dart'; // ★ globalDisableAutoCacheClear を読み込むため�
 import '../utils/term_helper.dart'; // パスは適宜合わせてください
 import '../utils/dummy_data_helper.dart';
 import 'custom_camera_screen.dart';
+import 'dart:typed_data'; // 🟢 追記：これを入れることで Uint8List のエラーが消滅します
 
 //lib/screens/course_detail_screen.dartの中身です。
 
@@ -1749,10 +1750,11 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
       final box = context.findRenderObject() as RenderBox?;
       final rect = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
 
+      // 🟢 修正：XFileにMIMEタイプをインプラントし、iOSのテキスト2重生成バグを完全パージ
       await Share.shareXFiles(
-        [XFile(pdfResult)],
-        // 🟢 修正：全体用と個別用で共有テキストを最適化
-        text: isAllCombined ? "授業全体メモ" : _memos[memoIndex]['title'],
+        [XFile(pdfResult, mimeType: 'application/pdf')], // 👈 mimeType を明示
+        // ❌ 削除: text: isAllCombined ? "授業全体メモ" : _memos[memoIndex]['title'],
+        // 💡 ファイルとテキストの同時共有はiOSでは厳禁のため、潔く text 引数はパージします
         sharePositionOrigin: rect,
       );
     } else if (mounted) {
@@ -1847,6 +1849,16 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
       final fontData = await rootBundle.load('assets/fonts/ZenKakuGothicNew-Regular.ttf');
       final jpFont = pw.Font.ttf(fontData);
       final safeDisplayTitle = _sanitizeTextForPdf(documentDisplayTitle);
+      final Map<String, Uint8List> imageBytesMap = {};
+      for (var item in items) {
+        if (item['type'] != 'text') {
+          final String path = item['data'].toString();
+          if (await File(path).exists()) {
+            // 同期(Sync)ではなく、非同期(await)でバックグラウンドから安全にバイトを吸い出します
+            imageBytesMap[path] = await File(path).readAsBytes();
+          }
+        }
+      }
 
       pdf.addPage(
         pw.MultiPage(
@@ -1856,7 +1868,10 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
           ),
           build: (pw.Context context) => [
             // ─── 表紙・大判タイポグラフィセクター ───
+            // タイポグラフィ表紙ヘッダー
             pw.Row(
+              // ❌ 修正前: crossAxisAlignment: CrossAxisAlignment.start,
+              // 🟢 修正後：頭に pw. を付けてPDF純正パーツであることを明示
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Expanded(flex: 1, child: pw.SizedBox()),
@@ -1908,8 +1923,11 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
               }
 
               return pw.Column(
+                // ❌ 修正前: crossAxisAlignment: CrossAxisAlignment.start,
+                // 🟢 修正後：ここも頭に pw. を補填
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
+                  // 日付ヘッダー描画
                   if (showDateHeader) ...[
                     if (index > 0) pw.SizedBox(height: 28),
                     pw.Container(
@@ -1918,8 +1936,6 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                         item['date_group'] ?? '',
                         style: pw.TextStyle(
                           font: jpFont,
-                          // ❌ 修正前: fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.grey700
-                          // 🟢 修正後：視認性の高い「純黒」へ変更し、存在感を出すためサイズを 19 へ拡大
                           fontSize: 19,
                           fontWeight: pw.FontWeight.bold,
                           color: PdfColors.black,
@@ -1930,9 +1946,10 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                   pw.Container(
                     margin: const pw.EdgeInsets.symmetric(vertical: 8),
                     child: pw.Row(
+                      // ❌ 修正前: crossAxisAlignment: CrossAxisAlignment.start,
+                      // 🟢 修正後：ここにも頭に pw. を補填してPDFエンジン専用の型へ統一します
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        // 🟢 通常メモと同じく、左側は「時刻のみ」の幅を美しくホールド
                         pw.Expanded(
                             flex: 1,
                             child: pw.Text(item['time']?.toString() ?? '', style: pw.TextStyle(font: jpFont, fontSize: 14, color: PdfColors.black))
@@ -1946,10 +1963,13 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                             child: pw.ClipRRect(
                               horizontalRadius: 8,
                               verticalRadius: 8,
-                              child: pw.Image(
-                                pw.MemoryImage(File(item['data'].toString()).readAsBytesSync()),
+                              // ─── 🟢 ここを重い Sync から、軽量なプリロードマップ参照へ換装 ───
+                              child: imageBytesMap.containsKey(item['data'].toString())
+                                  ? pw.Image(
+                                pw.MemoryImage(imageBytesMap[item['data'].toString()]!),
                                 fit: pw.BoxFit.contain,
-                              ),
+                              )
+                                  : pw.SizedBox(), // 万が一画像ファイルが壊れて消失していてもクラッシュさせない防衛線
                             ),
                           ),
                         ),
