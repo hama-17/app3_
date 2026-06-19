@@ -85,48 +85,16 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
     _initializeCamera();
   }
 
+  // 🟢 修正：撮影レイテンシを0にし、画質を4.0へ極限ブーストした決定版シャッター
   Future<void> _takePicture() async {
     if (_controller == null || !_controller!.value.isInitialized || _isTakingPicture) return;
 
     setState(() => _isTakingPicture = true);
 
     try {
-      await Future.delayed(const Duration(milliseconds: 100));
-      XFile? rawImage;
+      // ❌ タイムラグの元凶だった先行100msディレイを完全にパージ
+      // await Future.delayed(const Duration(milliseconds: 100));
 
-      // ─── 🟢 iOS専用：設定による動的ルート分岐セクター ───
-      if (Platform.isIOS) {
-        final prefs = await SharedPreferences.getInstance();
-        final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
-
-        if (isSilentMode) {
-          // 🔇 【ルートA】完全無音モード（プレビュー・レンダリングキャプチャ）
-          // シャッター回路を通さないため100%無音。pixelRatioを3.0に引き上げることで、画面表示そのままのキレ味で保存します。
-          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-          final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData == null) throw Exception("Render capture failed");
-
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File('${tempDir.path}/IMG_TEMP_SILENT.png');
-          await tempFile.writeAsBytes(byteData.buffer.asUint8List());
-
-          rawImage = XFile(tempFile.path);
-          debugPrint("iOS: RepaintBoundary方式による完全無音キャプチャに成功");
-        } else {
-          // 📸 【ルートB】音あり最高物理画質モード
-          // 本物の静止画用最高画質シャッターを点火（カシャッと鳴りますが画質は最大）
-          rawImage = await _controller!.takePicture();
-          debugPrint("iOS: 本物のカメラシャッターによる最高画質撮影を実行");
-        }
-      } else {
-        // ─── 🟢 Android専用：常に無傷の最高物理画質静止画ルート ───
-        rawImage = await _controller!.takePicture();
-      }
-
-      if (rawImage == null) throw Exception("Image capture failed");
-
-      // ─── 以下、保存＆ギャラリー連携（元コードのまま維持） ───
       final docDir = await getApplicationDocumentsDirectory();
       final memoImgDir = Directory('${docDir.path}/memo_images');
       if (!await memoImgDir.exists()) {
@@ -136,6 +104,29 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
       final String fileName = 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final String permanentPath = join(memoImgDir.path, fileName);
 
+      if (Platform.isIOS) {
+        final prefs = await SharedPreferences.getInstance();
+        final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
+
+        if (isSilentMode) {
+          // 🔇 【ルートA】完全無音モード（プレビュー・レンダリングキャプチャ）
+          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+
+          // 🟢 画質強化：倍率を 4.0 へ引き上げ、黒板の数式や文字のキレ味を最大化
+          final ui.Image image = await boundary.toImage(pixelRatio: 4.0);
+
+          // 🟢 爆速化の鍵：激重なPNG化とI/Oの完了を【待たずに】、先にパスを返して画面を即座にpopします！
+          _customBackgroundWriteTask(image, permanentPath);
+
+          if (mounted) {
+            Navigator.pop(context, permanentPath);
+          }
+          return;
+        }
+      }
+
+      // 📸 【ルートB】音あり最高物理画質モード / Androidルート（ディレイ消滅によりこれらも爆速化）
+      final XFile rawImage = await _controller!.takePicture();
       await File(rawImage.path).copy(permanentPath);
 
       try {
@@ -151,6 +142,22 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
       debugPrint("Take Picture Error: $e");
       setState(() => _isTakingPicture = false);
     }
+  }
+
+  // 🟢 追記：重いエンコードとカメラロール保存をUIスレッドの裏で完全非同期処理するエンジン
+  void _customBackgroundWriteTask(ui.Image image, String permanentPath) {
+    Future(() async {
+      try {
+        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData == null) return;
+
+        await File(permanentPath).writeAsBytes(byteData.buffer.asUint8List());
+        await Gal.putImage(permanentPath);
+        debugPrint("iOS 無音バックグラウンド保存完了: $permanentPath");
+      } catch (e) {
+        debugPrint("Background write error: $e");
+      }
+    });
   }
 
   @override

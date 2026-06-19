@@ -404,11 +404,29 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
   }
 
+  // 🟢 修正：赤いエラー画面を一瞬たりとも出さない、先行シャットダウン型パージロジック
   Future<void> _disposeInlineCamera() async {
     if (!_isCamInitialized) return;
-    await _cameraController?.dispose();
+
+    // ① 【最重要】重い非同期処理（await）を待つ前に、同期的にフラグと変数を完全パージ！
+    // これにより、次の1フレーム（数ミリ秒後）の再描画で CameraPreview が呼ばれるルートを物理的に完全遮断します。
+    final tempController = _cameraController;
     _cameraController = null;
-    if (mounted) setState(() => _isCamInitialized = false);
+    _isCamInitialized = false;
+
+    if (mounted) {
+      setState(() {}); // 👈 描画を即座に安全なインジケータ（または暗転）へ切り替え
+    }
+
+    // ② UIスレッドの描画セクターを守りきった後、裏で安全にハードウェアを解放
+    if (tempController != null) {
+      try {
+        await tempController.dispose();
+        debugPrint("Inline Camera disposed safely without red error screen.");
+      } catch (e) {
+        debugPrint("Camera dispose error inside background task: $e");
+      }
+    }
   }
 
   void _switchCameraFacing() {
@@ -438,65 +456,54 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   // 🟢 修正：保存完了を一切待たずに、シャッターの瞬間にアニメーションを最優先点火する爆速版
   // 🟢 修正：設定フラグに完全連動するハイブリッド無音インラインシャッター
+  // 🟢 修正：レイテンシを完全消滅させ、画質を4.0へ上限突破させたインライン無音シャッター
   Future<void> _takeInlineCameraPhoto() async {
     if (_cameraController == null || !_isCamInitialized || _isCamTakingPicture) return;
     setState(() => _isCamTakingPicture = true);
     try {
-      await Future.delayed(const Duration(milliseconds: 100));
+      // ❌ 100msの先行ディレイを徹底パージ
+      // await Future.delayed(const Duration(milliseconds: 100));
 
-      String? imagePath;
+      final docDir = await getApplicationDocumentsDirectory();
+      final memoImgDir = Directory('${docDir.path}/memo_images');
+      if (!await memoImgDir.exists()) await memoImgDir.create(recursive: true);
 
-      // ─── 🟢 iOS専用：設定による動的ルート分岐セクター ───
+      final String permanentPath = join(memoImgDir.path, 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg');
+
       if (Platform.isIOS) {
         final prefs = await SharedPreferences.getInstance();
         final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
 
         if (isSilentMode) {
-          // 🔇 【ルートA】完全無音モード（プレビュー・レンダリングキャプチャ）
-          // シャッター回路を通さないため100%無音。画面表示そのままのキレ味(pixelRatio: 3.0)でPNGバッファを生成。
+          // 🔇 【ルートA】完全無音モード
           final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-          final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData == null) throw Exception("Render capture failed");
+          final ui.Image image = await boundary.toImage(pixelRatio: 4.0); // 🟢 画質を4.0へブースト
 
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File('${tempDir.path}/IMG_INLINE_TEMP_SILENT.png');
-          await tempFile.writeAsBytes(byteData.buffer.asUint8List());
-
-          imagePath = tempFile.path;
-          debugPrint("iOS Inline: RepaintBoundary方式による完全無音キャプチャに成功");
-        } else {
-          // 📸 【ルートB】音あり最高物理画質モード
-          // 純正の静止画用最高画質シャッターを点火（カシャッと鳴りますが画質は最大）
-          final XFile rawImage = await _cameraController!.takePicture();
-          imagePath = rawImage.path;
-          debugPrint("iOS Inline: 本物のカメラシャッターによる最高画質撮影を実行");
-        }
-      } else {
-        // ─── 🟢 Android専用：常に無傷の最高物理画質静止画ルート ───
-        final XFile rawImage = await _cameraController!.takePicture();
-        imagePath = rawImage.path;
-      }
-
-      if (imagePath == null) throw Exception("Image capture failed");
-
-      // ② 🟢 解決の鍵：一時ファイルの確保ができた時点で、即座に右下吸い込みアニメーションを最優先点火！
-      if (mounted) {
-        setState(() {
-          _capturedImagePathForAnim = imagePath;
-        });
-        _cameraCaptureAnimController.forward().then((_) {
+          // 🟢 アニメーション最優先：裏での処理完了を待たず、ダミーフラグを立てて即座に右下吸い込み演出を点火！
           if (mounted) {
-            setState(() {
-              _capturedImagePathForAnim = null;
-              _cameraCaptureAnimController.reset();
+            setState(() { _capturedImagePathForAnim = "LOCKED"; });
+            _cameraCaptureAnimController.forward().then((_) {
+              if (mounted) {
+                setState(() { _capturedImagePathForAnim = null; _cameraCaptureAnimController.reset(); });
+              }
             });
           }
-        });
-      }
 
-      // ③ 🟢 残りの重い永続化コピーやGalエクスポートなどのI/Oは「裏」で完全に非同期実行
-      _performBackgroundSaveTasks(imagePath);
+          // 🟢 ステルス保存：PNG化、Gal保存、LMSメモへの流し込みをすべて【awaitなし】で裏へ完全委譲
+          _performBackgroundSilentSave(image, permanentPath);
+
+        } else {
+          // 📸 【ルートB】音あり最高物理画質モード
+          final XFile rawImage = await _cameraController!.takePicture();
+          _triggerInlineAnimation(rawImage.path);
+          _performBackgroundSaveTasks(rawImage.path);
+        }
+      } else {
+        // ─── Android専用ルート ───
+        final XFile rawImage = await _cameraController!.takePicture();
+        _triggerInlineAnimation(rawImage.path);
+        _performBackgroundSaveTasks(rawImage.path);
+      }
 
     } catch (e) {
       debugPrint("Take Inline Camera Photo Error: $e");
@@ -507,60 +514,102 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
   }
 
+  void _triggerInlineAnimation(String path) {
+    if (!mounted) return;
+    setState(() { _capturedImagePathForAnim = path; });
+    _cameraCaptureAnimController.forward().then((_) {
+      if (mounted) {
+        setState(() { _capturedImagePathForAnim = null; _cameraCaptureAnimController.reset(); });
+      }
+    });
+  }
+
+  // 🟢 新設：iOS無音インライン用の完全ノンブロッキング保存タスク
+  void _performBackgroundSilentSave(ui.Image image, String permanentPath) {
+    Future(() async {
+      try {
+        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData == null) return;
+
+        await File(permanentPath).writeAsBytes(byteData.buffer.asUint8List());
+        await Gal.putImage(permanentPath);
+        await _addMemoToCourse('image', permanentPath);
+        debugPrint("iOS Inline 無音バックグラウンド保存完了");
+      } catch (e) {
+        debugPrint("Background silent save error: $e");
+      }
+    });
+  }
+
   // 🟢 追加：現在進行中、または直後の授業を正確に割り出すロジック
   // 🟢 修正：戻り値の型を Map<String, String>? から Map<String, dynamic>? に変更
   // これにより、Map の中に String と bool を混在させることが可能になり、エラー1が消滅します
+  // 🟢 修正：10分バッファ＆24時間完全リレー型・時間割自動同期エンジン
   Map<String, dynamic>? _getCurrentOrNextCourse() {
-    // 🟢 追加：手動で「対応なし」に置き換えられている場合は即座にnull（対応なし）を返す
     if (_cameraCourseMode == 'none') return null;
 
-    // 🟢 追加：手動で特定の授業に置き換えられている場合は、自動計算をスキップしてその授業データを返す
     if (_cameraCourseMode == 'manual' && _cameraManualCourseObj != null) {
       return _cameraManualCourseObj;
     }
 
-    // （これ以降の本来の自動判定ロジックは一切変更なし）
     final now = DateTime.now();
     final items = _getScheduleForDate(now);
 
+    // ① 当日のスケジュールから「有効な授業（class）」のみを抽出し、休講（status: 2）を徹底除外
+    final classItems = items.where((item) => item['type'] == 'class' && item['status'] != 2).toList();
+    if (classItems.isEmpty) return null; // 💡 授業が1コマもない日は、自動同期を安全に null（対応なし）にします
+
+    // 現在時刻を「0 〜 1439分」の絶対分数にコンバート
     int nowMins = now.hour * 60 + now.minute;
     Map<String, dynamic>? targetItem;
 
-    for (var item in items) {
-      if (item['type'] != 'class' || item['status'] == 2) continue;
+    // ② タイムラインを隙間なくセクターに分割し、現在時刻の所属先をパズル形式で判定
+    for (int i = 0; i < classItems.length; i++) {
+      final current = classItems[i];
+      DateTime start = current['time'];
+      DateTime end = current['endTime'] ?? start.add(const Duration(hours: 1));
 
-      DateTime start = item['time'];
-      DateTime end = item['endTime'] ?? start.add(const Duration(hours: 1));
       int startMins = start.hour * 60 + start.minute;
       int endMins = end.hour * 60 + end.minute;
 
-      if (nowMins >= startMins && nowMins <= endMins) {
-        targetItem = item;
+      // 【セクターの開始境界線】を算出
+      int sectorStart = 0; // 最初の授業（i == 0）なら、当日の朝 0:00 から担当開始
+      if (i > 0) {
+        // 前の授業の終了時刻 + 10分。ただし、この授業の開始時刻を絶対に追い越さないクランプ処理
+        final prev = classItems[i - 1];
+        DateTime prevStart = prev['time'];
+        DateTime prevEnd = prev['endTime'] ?? prevStart.add(const Duration(hours: 1));
+        int prevEndMins = prevEnd.hour * 60 + prevEnd.minute;
+
+        sectorStart = math.min(prevEndMins + 10, startMins);
+      }
+
+      // 【セクターの終了境界線】を算出
+      int sectorEnd = 1440; // 一日の最後の授業（i == 末尾）なら、深夜 24:00 まで担当を維持
+      if (i < classItems.length - 1) {
+        // 自身の終了時刻 + 10分。ただし、次の授業の開始時刻を絶対に追い越さないクランプ処理
+        final next = classItems[i + 1];
+        DateTime nextStart = next['time'];
+        int nextStartMins = nextStart.hour * 60 + nextStart.minute;
+
+        sectorEnd = math.min(endMins + 10, nextStartMins);
+      }
+
+      // ③ 現在の時刻が、この授業が支配すべきセクター内にジャストミートしたか判定
+      if (nowMins >= sectorStart && nowMins < sectorEnd) {
+        targetItem = current;
         break;
       }
     }
 
-    if (targetItem == null) {
-      for (var item in items) {
-        if (item['type'] != 'class' || item['status'] == 2) continue;
+    // 安全弁：境界線の極小の隙間に落ちた場合は、当日の最終授業にホールド
+    targetItem ??= classItems.last;
 
-        DateTime start = item['time'];
-        int startMins = start.hour * 60 + start.minute;
-        if (startMins > nowMins) {
-          targetItem = item;
-          break;
-        }
-      }
-    }
-
-    if (targetItem != null) {
-      return {
-        'courseId': targetItem['courseId'].toString(),
-        'courseName': targetItem['rawName']?.toString() ?? targetItem['title']?.toString() ?? '',
-        'isCustom': targetItem['isCustom'] == true,
-      };
-    }
-    return null;
+    return {
+      'courseId': targetItem['courseId'].toString(),
+      'courseName': targetItem['rawName']?.toString() ?? targetItem['title']?.toString() ?? '',
+      'isCustom': targetItem['isCustom'] == true,
+    };
   }
 
   // 🟢 追加：カメラ画面のメモテキストタップ時に起動する、全授業メモ選択用の共通ボトムシート
@@ -1975,6 +2024,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   // ★ 修正：一貫したスケジュール順の _displayCourses を詳細画面へ渡す
+  // 🟢 修正：カメラ自動パージ ＆ 復帰時ホーム強制送還シールド付き統合ルーター
+  // 🟢 修正：詳細を開いた瞬間にホーム（0.0）へ位置を完全リセットする仕様
+  // 🟢 修正：遷移中は -1.0 を維持し、開ききった瞬間に 0.0 へステルスリセットするルーター
   void _routeToCourse(String identifier, bool isCustom, int bottomIdx, String? taskId) {
     String heroTag = 'top_widget_hero';
     final allCourses = _displayCourses;
@@ -1984,6 +2036,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     });
     if (cIdx == -1) cIdx = 0;
 
+    // 現在カメラ画面（左画面）に完全に張り付いているかの防衛線判定
+    final bool cameFromCamera = _dragPosition < -0.9;
+
+    if (cameFromCamera) {
+      _disposeInlineCamera(); // ① カメラリソースを即座にパージして解放
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); // ② フルスクリーンを解除し、ステータスバーを即時復活
+      // ❌ ここでの即時リセット（0.0）はパージ。遷移中の -1.0 を維持させます。
+    }
+
     setState(() {
       final oldController = _schedulePageController;
       _schedulePageController = PageController(initialPage: _currentSchedulePage);
@@ -1992,21 +2053,43 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       });
     });
 
-    Navigator.push(context, PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), reverseTransitionDuration: const Duration(milliseconds: 400), pageBuilder: (context, animation, secondaryAnimation) {
-      return FadeTransition(opacity: animation, child: CourseDetailInteractivePage(
-        courses: allCourses, initialIndex: cIdx, cookie: widget.cookie, initialBottomIndex: bottomIdx, targetTaskId: taskId, isAuthenticated: widget.isAuthenticated, onLoginRequest: widget.onLogin, heroTag: heroTag, customCourseColors: _customCourseColors,
-        onColorChanged: (cId, cValue) { setState(() { if (cValue == null) _customCourseColors.remove(cId); else _customCourseColors[cId] = cValue; _saveCustomData(); }); },
-        onCourseEdited: (String targetName) { Navigator.pop(context); _showEditCourseDialog(targetName); },
-        onCourseDeleted: (String targetName) { setState(() { _customCourses.removeWhere((c) => c['name'] == targetName); _generateWeeklySchedule(); _saveCustomData(); }); Navigator.pop(context); },
+    // 🟢 タイムライン制御用に遷移アニメーションの時間（500ms）を変数化
+    const int pushDurationMs = 500;
 
-        // ★ 修正：詳細画面で学期のトグルを手動変更した際、最新の上書きデータをロードして直ちにフィルターを再適用する
-        onScheduleOverrideChanged: () async {
-          await _loadCustomData();
-          widget.onTermChanged(widget.currentYear, widget.currentTerm);
-          if (mounted) setState((){});
-        },
-      ));
-    })).then((_) => setState((){}));
+    Navigator.push(context, PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: pushDurationMs),
+        reverseTransitionDuration: const Duration(milliseconds: 400),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return FadeTransition(opacity: animation, child: CourseDetailInteractivePage(
+            courses: allCourses, initialIndex: cIdx, cookie: widget.cookie, initialBottomIndex: bottomIdx, targetTaskId: taskId, isAuthenticated: widget.isAuthenticated, onLoginRequest: widget.onLogin, heroTag: heroTag, customCourseColors: _customCourseColors,
+            onColorChanged: (cId, cValue) { setState(() { if (cValue == null) _customCourseColors.remove(cId); else _customCourseColors[cId] = cValue; _saveCustomData(); }); },
+            onCourseEdited: (String targetName) { Navigator.pop(context); _showEditCourseDialog(targetName); },
+            onCourseDeleted: (String targetName) { setState(() { _customCourses.removeWhere((c) => c['name'] == targetName); _generateWeeklySchedule(); _saveCustomData(); }); Navigator.pop(context); },
+            onScheduleOverrideChanged: () async {
+              await _loadCustomData();
+              widget.onTermChanged(widget.currentYear, widget.currentTerm);
+              if (mounted) setState((){});
+            },
+          ));
+        }
+    )).then((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+
+    // 🟢 追記：遷移中（500ms）は -1.0 を絶対維持。詳細画面が開ききって背面が完全に隠れた瞬間に、裏側で位置を 0.0 へ滑り込ませます。
+    if (cameFromCamera) {
+      Future.delayed(const Duration(milliseconds: pushDurationMs), () {
+        if (mounted) {
+          setState(() {
+            _dragPosition = 0.0;
+            _dragAnimController.value = 0.0;
+          });
+          debugPrint("iOS Inline: 詳細画面が完全に開ききったため、裏側で位置をホーム(0.0)へステルスリセットしました");
+        }
+      });
+    }
   }
 
 
@@ -3628,10 +3711,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                               bottomLeft: Radius.circular(20.0),
                                               bottomRight: Radius.circular(20.0),
                                             ),
-                                            child: Image.file(
+                                            child: _capturedImagePathForAnim == "LOCKED"
+                                                ? Container(color: Colors.black.withOpacity(0.45))
+                                                : Image.file(
                                               File(_capturedImagePathForAnim!),
                                               fit: BoxFit.cover,
-                                              gaplessPlayback: true, // 読み込み時の瞬間的なチラつきを完全に抹殺
+                                              gaplessPlayback: true,
                                             ),
                                           ),
                                         ),

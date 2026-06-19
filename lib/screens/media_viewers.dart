@@ -77,9 +77,17 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🟢 追記：現在のテーマがダークモードかどうかの判定シールドを展開
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 🟢 追記：ライトモードなら「黒文字（dark）」、ダークモードなら「白文字（light）」を動的に指定
+    SystemUiOverlayStyle overlayStyle = isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+
     final double statusBarHeight = MediaQuery.of(context).padding.top;
 
-    return PopScope(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: PopScope(
         canPop: false,
         onPopInvoked: (didPop) async {
           if (didPop) return;
@@ -227,7 +235,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                 ]
             )
         )
-    );
+    ));
   }
 }
 
@@ -296,11 +304,18 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🟢 追記：テーマ判定とオーバースタイルの動的生成
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    SystemUiOverlayStyle overlayStyle = isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+
     final double statusBarHeight = MediaQuery.of(context).padding.top;
-    return Scaffold(
-        backgroundColor: AppTheme.bg(context),
-        body: Stack(
-            children: [
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: Scaffold(
+            backgroundColor: AppTheme.bg(context),
+            body: Stack(
+              children: [
               // --- PDF ビューア本体 ---
               AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
@@ -395,7 +410,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               )
             ]
         )
-    );
+    ));
   }
 }
 
@@ -419,9 +434,15 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🟢 追記：テーマ判定とオーバースタイルの動的生成
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    SystemUiOverlayStyle overlayStyle = isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+
     final double statusBarHeight = MediaQuery.of(context).padding.top;
 
-    return PopScope(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: PopScope(
         canPop: false,
         onPopInvoked: (didPop) async {
           if (didPop) return;
@@ -471,7 +492,7 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
             ],
           ),
         )
-    );
+    ));
   }
 }
 
