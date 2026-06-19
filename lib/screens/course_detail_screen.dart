@@ -2229,21 +2229,42 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
                               : Align(
                               alignment: Alignment.centerLeft,
                               child: GestureDetector(
-                                // ─── 🟢 修正：全体ビューの時は、日付を超越する全画像スライダーを召喚 ───
                                   onTap: () {
                                     if (isAllCombined) {
                                       final currentPath = item['data'].toString();
                                       final int initialIdx = allCombinedImages.indexOf(currentPath);
-                                      // 全画像リストと、現在タップされた画像のインデックスを渡して起動
                                       _showAllImagesSlider(allCombinedImages, initialIdx);
                                     } else {
-                                      // 通常モードは以前の単発ビューを100%維持
                                       _showFullScreenImage(memoIndex, item['data']);
                                     }
                                   },
                                   child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.file(File(item['data']), width: 180, height: 120, fit: BoxFit.cover)
+                                    borderRadius: BorderRadius.circular(8),
+                                    // ─── 🟢 修正：オリジナル高画質はそのまま、デコード負荷のみを1/100へパージ ───
+                                    child: Image.file(
+                                      File(item['data']),
+                                      width: 180,
+                                      height: 120,
+                                      fit: BoxFit.cover,
+
+                                      // 💡 コアハック：メモリに展開するサイズを表示枠の2倍（Retinaディスプレイ等の高精細対応）に完全制限！
+                                      cacheWidth: 360,  // 180 * 2
+                                      cacheHeight: 240, // 120 * 2
+
+                                      gaplessPlayback: true, // 状態更新時の画像のチラつきをハードウェア側で防止
+
+                                      // スナップ撮影直後やファイル書き込みの超微細なラグによる一瞬の不発をガード
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return Container(
+                                          width: 180, height: 120,
+                                          decoration: BoxDecoration(
+                                            color: contentTextCol.withOpacity(0.05),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Icon(Icons.broken_image, color: deleteIconCol, size: 20),
+                                        );
+                                      },
+                                    ),
                                   )
                               )
                           ),
