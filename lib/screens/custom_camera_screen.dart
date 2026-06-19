@@ -86,14 +86,16 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
   }
 
   // 🟢 修正：撮影レイテンシを0にし、画質を4.0へ極限ブーストした決定版シャッター
+  // 🟢 修正：20msのテクスチャ固定ディレイ ＆ .png拡張子への完全バインド決定版
+  // 🟢 修正：中身のデータ形式と拡張子を100%完全一致させ、ブラックアウトを根絶する動的ルート分岐
   Future<void> _takePicture() async {
     if (_controller == null || !_controller!.value.isInitialized || _isTakingPicture) return;
 
     setState(() => _isTakingPicture = true);
 
     try {
-      // ❌ タイムラグの元凶だった先行100msディレイを完全にパージ
-      // await Future.delayed(const Duration(milliseconds: 100));
+      // ─── 🟢 20msのテクスチャ確定ホールド ───
+      await Future.delayed(const Duration(milliseconds: 20));
 
       final docDir = await getApplicationDocumentsDirectory();
       final memoImgDir = Directory('${docDir.path}/memo_images');
@@ -101,21 +103,19 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
         await memoImgDir.create(recursive: true);
       }
 
-      final String fileName = 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final String permanentPath = join(memoImgDir.path, fileName);
+      final String timeStamp = DateTime.now().millisecondsSinceEpoch.toString();
 
       if (Platform.isIOS) {
         final prefs = await SharedPreferences.getInstance();
         final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
 
         if (isSilentMode) {
-          // 🔇 【ルートA】完全無音モード（プレビュー・レンダリングキャプチャ）
-          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+          // 🔇 【ルートA】完全無音モード（描画キャプチャ ➔ 中身はPNGバイト）
+          final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.png'); // 🟢 PNGでバインド
 
-          // 🟢 画質強化：倍率を 4.0 へ引き上げ、黒板の数式や文字のキレ味を最大化
+          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
           final ui.Image image = await boundary.toImage(pixelRatio: 4.0);
 
-          // 🟢 爆速化の鍵：激重なPNG化とI/Oの完了を【待たずに】、先にパスを返して画面を即座にpopします！
           _customBackgroundWriteTask(image, permanentPath);
 
           if (mounted) {
@@ -125,7 +125,9 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
         }
       }
 
-      // 📸 【ルートB】音あり最高物理画質モード / Androidルート（ディレイ消滅によりこれらも爆速化）
+      // 📸 【ルートB】音あり最高物理画質モード / Androidルート（カメラ本来のJPEG出力）
+      final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.jpg'); // 🟢 中身に合わせてJPGでバインド
+
       final XFile rawImage = await _controller!.takePicture();
       await File(rawImage.path).copy(permanentPath);
 
@@ -140,7 +142,9 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
       }
     } catch (e) {
       debugPrint("Take Picture Error: $e");
-      setState(() => _isTakingPicture = false);
+      if (mounted) {
+        setState(() => _isTakingPicture = false);
+      }
     }
   }
 
@@ -208,7 +212,7 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
                           onScaleUpdate: (details) async {
                             double newZoom = (_baseZoomLevel * details.scale).clamp(_minZoomLevel, _maxZoomLevel);
                             setState(() => _currentZoomLevel = newZoom);
-                            await _controller!.setZoomLevel(newZoom);
+                            _controller!.setZoomLevel(newZoom);
                           },
                           // ピンチズーム終了
                           onScaleEnd: (details) {

@@ -362,6 +362,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   late AnimationController _cameraCaptureAnimController;
   String? _capturedImagePathForAnim;
+  ui.Image? _capturedUiImageForAnim;
   Map<String, String> _taskDueOverrides = {};
 
   Timer? _autoRefreshTimer;
@@ -436,73 +437,95 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   // 🟢 追加：永続化コピーやGal登録、授業メモ追加などの重いI/Oを「裏」で完全に非同期実行するメソッド
-  Future<void> _performBackgroundSaveTasks(String tmpPath) async {
+  // 🟢 修正：パスを外部から固定で受け取り、メインスレッドを1ミリもブロックしない非同期物理保存
+  Future<void> _performBackgroundSaveTasks(String tmpPath, String permanentPath) async {
     try {
-      final docDir = await getApplicationDocumentsDirectory();
-      final memoImgDir = Directory('${docDir.path}/memo_images');
-      if (!await memoImgDir.exists()) await memoImgDir.create(recursive: true);
-
-      final String permanentPath = join(memoImgDir.path, 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg');
-
-      // 🟢 ユーザーを待たせる原因だった重い処理群を、ここで安全にバックグラウンド並行処理
       await File(tmpPath).copy(permanentPath);
       await Gal.putImage(permanentPath);
-      await _addMemoToCourse('image', permanentPath);
-
     } catch (e) {
       debugPrint("Background save error: $e");
     }
   }
 
+  // 🟢 修正：無音保存側も同様にディスク書き込みとGal登録のみに純化
+  void _performBackgroundSilentSave(ui.Image image, String permanentPath) {
+    Future(() async {
+      try {
+        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData == null) return;
+
+        await File(permanentPath).writeAsBytes(byteData.buffer.asUint8List());
+        await Gal.putImage(permanentPath);
+        debugPrint("iOS Inline 無音バックグラウンド保存完了");
+      } catch (e) {
+        debugPrint("Background silent save error: $e");
+      }
+    });
+  }
+
   // 🟢 修正：保存完了を一切待たずに、シャッターの瞬間にアニメーションを最優先点火する爆速版
   // 🟢 修正：設定フラグに完全連動するハイブリッド無音インラインシャッター
   // 🟢 修正：レイテンシを完全消滅させ、画質を4.0へ上限突破させたインライン無音シャッター
+  // 🟢 修正：20msホールド・先行メモデータ射出・最高画質4.0維持の決定版インラインシャッター
   Future<void> _takeInlineCameraPhoto() async {
     if (_cameraController == null || !_isCamInitialized || _isCamTakingPicture) return;
     setState(() => _isCamTakingPicture = true);
     try {
-      // ❌ 100msの先行ディレイを徹底パージ
-      // await Future.delayed(const Duration(milliseconds: 100));
+      // ─── 🟢 決定打①：プレビューテクスチャが完全に確定するのを20ms待機 ───
+      // これにより、ビデオ描画ストリームとのラグによる「虚空（真っ黒画面）」のキャプチャを100%防ぎます
+      await Future.delayed(const Duration(milliseconds: 20));
 
       final docDir = await getApplicationDocumentsDirectory();
       final memoImgDir = Directory('${docDir.path}/memo_images');
       if (!await memoImgDir.exists()) await memoImgDir.create(recursive: true);
 
-      final String permanentPath = join(memoImgDir.path, 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      final String timeStamp = DateTime.now().millisecondsSinceEpoch.toString();
 
       if (Platform.isIOS) {
         final prefs = await SharedPreferences.getInstance();
         final bool isSilentMode = prefs.getBool('ios_silent_camera_v10') ?? true;
 
         if (isSilentMode) {
-          // 🔇 【ルートA】完全無音モード
-          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-          final ui.Image image = await boundary.toImage(pixelRatio: 4.0); // 🟢 画質を4.0へブースト
+          // 🔇 【ルートA】完全無音モード（中身はPNGバイト）
+          final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.png'); // 🟢 正しく.pngで確定
 
-          // 🟢 アニメーション最優先：裏での処理完了を待たず、ダミーフラグを立てて即座に右下吸い込み演出を点火！
+          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+          final ui.Image image = await boundary.toImage(pixelRatio: 4.0); // 画質4.0ブースト
+
+          // ─── 🟢 決定打②：ディスクへの重い書き込みより「先に」メモリデータを更新 ───
+          // これにより、撮影直後に詳細画面へジャンプしてもカメラ画像が一瞬でタイムラインに反映されます
+          await _addMemoToCourse('image', permanentPath);
+
+          // アニメーション用に生の ui.Image オブジェクトを射出
           if (mounted) {
-            setState(() { _capturedImagePathForAnim = "LOCKED"; });
+            setState(() { _capturedUiImageForAnim = image; });
             _cameraCaptureAnimController.forward().then((_) {
               if (mounted) {
-                setState(() { _capturedImagePathForAnim = null; _cameraCaptureAnimController.reset(); });
+                setState(() { _capturedUiImageForAnim = null; _cameraCaptureAnimController.reset(); });
               }
             });
           }
 
-          // 🟢 ステルス保存：PNG化、Gal保存、LMSメモへの流し込みをすべて【awaitなし】で裏へ完全委譲
+          // 重いシリアライズは裏へ完全委譲
           _performBackgroundSilentSave(image, permanentPath);
 
         } else {
-          // 📸 【ルートB】音あり最高物理画質モード
+          // 📸 【ルートB】音あり最高物理画質モード（カメラ標準のJPEG出力）
+          final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.jpg'); // 🟢 JPGで確定
+
           final XFile rawImage = await _cameraController!.takePicture();
+          await _addMemoToCourse('image', permanentPath); // 先行反映
           _triggerInlineAnimation(rawImage.path);
-          _performBackgroundSaveTasks(rawImage.path);
+          _performBackgroundSaveTasks(rawImage.path, permanentPath);
         }
       } else {
         // ─── Android専用ルート ───
+        final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.jpg');
+
         final XFile rawImage = await _cameraController!.takePicture();
+        await _addMemoToCourse('image', permanentPath); // 先行反映
         _triggerInlineAnimation(rawImage.path);
-        _performBackgroundSaveTasks(rawImage.path);
+        _performBackgroundSaveTasks(rawImage.path, permanentPath);
       }
 
     } catch (e) {
@@ -525,21 +548,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   // 🟢 新設：iOS無音インライン用の完全ノンブロッキング保存タスク
-  void _performBackgroundSilentSave(ui.Image image, String permanentPath) {
-    Future(() async {
-      try {
-        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData == null) return;
 
-        await File(permanentPath).writeAsBytes(byteData.buffer.asUint8List());
-        await Gal.putImage(permanentPath);
-        await _addMemoToCourse('image', permanentPath);
-        debugPrint("iOS Inline 無音バックグラウンド保存完了");
-      } catch (e) {
-        debugPrint("Background silent save error: $e");
-      }
-    });
-  }
 
   // 🟢 追加：現在進行中、または直後の授業を正確に割り出すロジック
   // 🟢 修正：戻り値の型を Map<String, String>? から Map<String, dynamic>? に変更
@@ -3667,14 +3676,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
                             // 🟢 追加：タブレット（Pad）環境の場合のみ、ファインダー内部にボタンを綺麗に浮かせる（オーバーレイ）
 
-                            if (_capturedImagePathForAnim != null)
+                            if (_capturedImagePathForAnim != null || _capturedUiImageForAnim != null)
                               Positioned.fill(
                                 child: AnimatedBuilder(
                                   animation: _cameraCaptureAnimController,
                                   builder: (context, child) {
                                     double v = _cameraCaptureAnimController.value;
 
-                                    // 🟢 解決の鍵①：タイムラインを時間差で2分割（0〜40%で縮小、40%〜100%で真右スライド）
                                     double shrinkV = CurvedAnimation(
                                       parent: _cameraCaptureAnimController,
                                       curve: const Interval(0.0, 0.4, curve: Curves.easeOutCubic),
@@ -3685,23 +3693,18 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                       curve: const Interval(0.4, 1.0, curve: Curves.easeInCubic),
                                     ).value;
 
-                                    // ① 右下をアンカーにして、その場でキュッと小さく縮小 (1.0 ➔ 0.3サイズ)
                                     double scale = ui.lerpDouble(1.0, 0.3, shrinkV)!;
-
-                                    // ② 縮小が100%完了したトドメの瞬間から、不透明のまま画面の真右へ完全パージ
-                                    // 移動量を screenWidth にすることで、横画面時でも確実に場外へすっ飛んでいきます
                                     double slideX = ui.lerpDouble(0.0, screenWidth, slideV)!;
-                                    double slideY = 0.0; // 🧭 真右へのスライドのため、上下のブレ（Y軸）は0にガチガチに固定
+                                    double slideY = 0.0;
 
                                     return Transform.translate(
                                       offset: Offset(slideX, slideY),
                                       child: Transform.scale(
                                         scale: scale,
-                                        alignment: Alignment.bottomRight, // 🟢 解決の鍵②：縮小の支点を「右下」に完全固定
+                                        alignment: Alignment.bottomRight,
                                         child: Container(
-                                          // 🟢 解決の鍵③：元のデザインのフィレットを100%継承した、シャープな「不透明ホワイト枠線」をドッキング
                                           decoration: BoxDecoration(
-                                            border: Border.all(color: Color(0xFF7ebbdc), width: 8.0), // 高級感のある4pxソリッド白枠
+                                            border: Border.all(color: const Color(0xFF7ebbdc), width: 8.0),
                                             borderRadius: const BorderRadius.only(
                                               topLeft: Radius.circular(32.0),
                                               topRight: Radius.circular(32.0),
@@ -3711,18 +3714,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                           ),
                                           child: ClipRRect(
                                             borderRadius: const BorderRadius.only(
-                                              topLeft: Radius.circular(28.0), // 枠線の内側に綺麗にフィットさせるため微調整
+                                              topLeft: Radius.circular(28.0),
                                               topRight: Radius.circular(28.0),
                                               bottomLeft: Radius.circular(20.0),
                                               bottomRight: Radius.circular(20.0),
                                             ),
-                                            child: _capturedImagePathForAnim == "LOCKED"
-                                                ? Container(color: Colors.black.withOpacity(0.45))
-                                                : Image.file(
+                                            // ─── 🟢 修正：黒い目隠しをパージし、今撮った鮮明な板書そのものをリアルタイム投影 ───
+                                            child: _capturedUiImageForAnim != null
+                                                ? RawImage(
+                                              image: _capturedUiImageForAnim,
+                                              fit: BoxFit.cover,
+                                            )
+                                                : (_capturedImagePathForAnim != null
+                                                ? Image.file(
                                               File(_capturedImagePathForAnim!),
                                               fit: BoxFit.cover,
                                               gaplessPlayback: true,
-                                            ),
+                                            )
+                                                : const SizedBox()),
                                           ),
                                         ),
                                       ),

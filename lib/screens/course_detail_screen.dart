@@ -1533,6 +1533,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
   }
 
   // 🟢 内製カスタムカメラルーティング（インターロック完備）
+  // 🟢 確認：course_detail_screen.dart 側の _takePhoto メソッド
   Future<void> _takePhoto() async {
     try {
       globalDisableAutoCacheClear = true;
@@ -1540,6 +1541,9 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
         context,
         MaterialPageRoute(builder: (_) => const CustomCameraScreen()),
       );
+
+      // 💡 CameraScreenから正真正銘の「.png」パスが返ってくるため、
+      // cacheWidth 制限サムネイルが詰まることなく一瞬で点灯するようになります！
       if (savedPath != null && savedPath.isNotEmpty) {
         _addItemToMemo('image', savedPath);
       }
@@ -2249,7 +2253,7 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
 
                                       // 💡 コアハック：メモリに展開するサイズを表示枠の2倍（Retinaディスプレイ等の高精細対応）に完全制限！
                                       cacheWidth: 360,  // 180 * 2
-                                      cacheHeight: 240, // 120 * 2
+                                      //cacheHeight: 240, // 120 * 2
 
                                       gaplessPlayback: true, // 状態更新時の画像のチラつきをハードウェア側で防止
 
