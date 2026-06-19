@@ -2843,20 +2843,25 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                     child: Row(children: [
+                      // ① 左側カラム（flex: 4）
                       Expanded(
                         flex: 4,
                         child: isNoDue
                             ? Align(
-                                alignment: Alignment.center, // 🟢 修正：左端（centerLeft）から「中心」へホールド
+                                alignment: Alignment.center,
                                 child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque, // 🟢 追記：透明な余白へのタップも100%泥棒して反応させる魔法
                                   onTap: () {
                                     _showDueEditDialog(task as Map<String, dynamic>);
                                   },
-                                  // 🟢 修正：中央で完璧な対称性を保つため、不要な左パディング（Padding）をパージしました
-                                  child: Icon(
-                                    Icons.add_rounded,
-                                    color: AppTheme.textMain(context).withOpacity(0.85),
-                                    size: 26,
+                                  // 🟢 修正：アイコンの周りに上下左右のゆったりとしたタップ座席を確保
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 14.0),
+                                    child: Icon(
+                                      Icons.add_rounded,
+                                      color: AppTheme.textMain(context).withOpacity(0.85),
+                                      size: 26,
+                                    ),
                                   ),
                                 ),
                               )
@@ -3277,15 +3282,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   children: [
                                     Icon(
                                       Icons.arrow_back_rounded,
-                                      color: AppTheme.textMain(context).withOpacity(0.35),
+                                      color: AppTheme.textMain(context).withOpacity(0.8),
                                       size: 22,
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
-                                      "CAMERA MEMO",
+                                      "Silent Camera",
                                       style: TextStyle(
-                                        color: AppTheme.textMain(context).withOpacity(0.5), // ノイズにならない超極薄グレー
-                                        fontSize: 30,
+                                        color: AppTheme.textMain(context).withOpacity(1), // ノイズにならない超極薄グレー
+                                        fontSize: 24,
                                         fontWeight: FontWeight.w200, // スタイリッシュな極細字
                                         letterSpacing: - 0.4,          // テック感を出す広めのカーニング
                                       ),
@@ -4107,7 +4112,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               // すべての予定が終わった後：最終アイテムの時刻の間にホールド
                               else if (nowMins > lastEndMins) {
                                 int i = allItems.length - 1;
-                                lineY = i * 56.0 + 37.5;
+                                // 56.0 を掛けることで、最後の授業カードの完全に「下側の境界線上」へ横線を追い出します
+                                lineY = (i + 1) * 56.0;
                               }
                               // 進行中の時間帯
                               else {
@@ -4935,7 +4941,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                 courseName,
                                                 style: TextStyle(
                                                     color: AppTheme.getTextColorForBackground(color),
-                                                    fontSize: isHalf ? (isPad ? 13.0 : 8.5) : (isPad ? 15.0 : 10.0),
+                                                    fontSize: isHalf ? (isPad ? 30.0 : 8.0) : (isPad ? 38.0 : 10.0),
                                                     fontWeight: FontWeight.w400,
                                                     height: 1.1
                                                 ),
