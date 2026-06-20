@@ -4975,7 +4975,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                 courseName,
                                                 style: TextStyle(
                                                     color: AppTheme.getTextColorForBackground(color),
-                                                    fontSize: isHalf ? (isPad ? 20.0 : 8.0) : (isPad ? 24.0 : 10.0),
+                                                    fontSize: isHalf ? (isPad ? 16.0 : 8.0) : (isPad ? 20.0 : 10.0),
                                                     fontWeight: FontWeight.w400,
                                                     height: 1.1
                                                 ),
