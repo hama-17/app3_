@@ -750,7 +750,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                               children: [
                                 _buildCustomListItem("Guide", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GuideScreen()))),
                                 Divider(height: 1, color: AppTheme.bg(context)),
-                                _buildCustomListItem("Version", trailingText: "1.0.2", onTap: () {}),
+                                _buildCustomListItem("Version", trailingText: "1.0.1", onTap: () {}),
                                 Divider(height: 1, color: AppTheme.bg(context)),
                                 _buildCustomListItem("Clear Cache (Free up space)", onTap: _clearAppCache, hideArrow: true),
                               ]
