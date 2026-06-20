@@ -2427,14 +2427,23 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
 
+  // 🟢 修正：AnimatedSwitcher のフェード中にコントローラが即死して赤画面になるバグを時間差パージで完全封殺
   void _handleBackNavigation() {
-    if (_schedulePageController.hasClients) _schedulePageController.dispose();
+    // ① 古いコントローラの参照を一時退避し、新しいコントローラを先行配備
+    final oldController = _schedulePageController;
     _schedulePageController = PageController(initialPage: _currentSchedulePage);
 
+    // ② 決定打：1秒間の時間差（ディレイ）を設け、フェードアウトが100%完了した後に裏で安全に解放
+    Future.delayed(const Duration(seconds: 1), () {
+      try {
+        oldController.dispose();
+        debugPrint("Schedule PageController disposed safely after view transition.");
+      } catch (_) {}
+    });
 
     setState(() {
       _currentViewState = ViewState.home;
-      _showCompletedTasks = false; // ★ 追加：ホームに戻る時は必ず「未提出」状態にリセット
+      _showCompletedTasks = false; // ホームに戻る時は必ず「未提出」状態にリセット
     });
   }
 
@@ -3433,7 +3442,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
         double scheduleMinHeight = topPadding + 40.0;
         double activeTasksScrollOffset = 0.0;
-        if (_tasksScrollController.hasClients) {
+        if (_tasksScrollController.hasClients && _tasksScrollController.position.hasContentDimensions) {
           double maxScroll = _tasksScrollController.position.maxScrollExtent;
           if (maxScroll > 0) activeTasksScrollOffset = _tasksScrollOffset;
         }
