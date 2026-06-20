@@ -87,6 +87,9 @@ class _MainSkeletonState extends State<MainSkeleton> {
     _selectedYear = savedYear ?? defaultYear;
     _selectedTerm = savedTerm ?? defaultTerm;
 
+    final savedGradient = prefs.getString('settings_theme_mode_v10') ?? 'blue';
+    appGradientThemeNotifier.value = savedGradient;
+
     _loadData();
   }
 
@@ -3366,446 +3369,442 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   Widget _buildDynamicHeaderWidget(double topPadding) {
-    bool isDark = Theme.of(context).brightness == Brightness.dark;
-    const Color defaultTopGradient = Color(0xFF020304);
-    const Color defaultMiddleGradient = Color(0xff174a69);
-    const Color defaultBottomGradient = Color(0xff7ebbdc);
+    // 🟢 決定打：メソッドの最外殻を ValueListenableBuilder で接続。
+    // これにより、グラデーション領域のみを最軽量かつピンポイントにリアクティブ化します。
+    return ValueListenableBuilder<String>(
+      valueListenable: appGradientThemeNotifier,
+      builder: (context, gradientMode, child) {
+        bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
-    List<Color> scheduleColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
+        // 🟢 追記：グローバルパレットから選択中のカラー定義（3色）を動的サルベージ
+        final currentPalette = AppGradient.getColors(gradientMode);
+        final Color defaultTopGradient = currentPalette[0];
+        final Color defaultMiddleGradient = currentPalette[1];
+        final Color defaultBottomGradient = currentPalette[2];
 
-    if (_scheduleMode == 'D') {
-      DateTime date = DateTime.now().add(Duration(days: _currentSchedulePage - 10000));
-      final items = _getScheduleForDate(date);
-      if (items.isNotEmpty) {
-        Color? customTop; Color? customMid; Color? customBot;
-        for (var item in items) {
-          if (_hasCustomColor(item['courseObj'])) {
-            Color c = _getCourseColor(item['courseObj']);
-            int hour = (item['time'] as DateTime).hour;
-            if (hour < 12) customTop = c; else if (hour < 16) customMid = c; else customBot = c;
+        double scheduleHeight = _getScheduleHeight(_currentSchedulePage, topPadding);
+        List<Color> scheduleColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
+
+        if (_scheduleMode == 'D') {
+          DateTime date = DateTime.now().add(Duration(days: _currentSchedulePage - 10000));
+          final items = _getScheduleForDate(date);
+          if (items.isNotEmpty) {
+            Color? customTop; Color? customMid; Color? customBot;
+            for (var item in items) {
+              if (_hasCustomColor(item['courseObj'])) {
+                Color c = _getCourseColor(item['courseObj']);
+                int hour = (item['time'] as DateTime).hour;
+                if (hour < 12) customTop = c; else if (hour < 16) customMid = c; else customBot = c;
+              }
+            }
+            scheduleColors = [customTop ?? defaultTopGradient, customMid ?? defaultMiddleGradient, customBot ?? defaultBottomGradient];
           }
         }
-        scheduleColors = [customTop ?? defaultTopGradient, customMid ?? defaultMiddleGradient, customBot ?? defaultBottomGradient];
-      }
-    }
 
-    List<Color> calendarColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
+        List<Color> calendarColors = [defaultTopGradient, defaultMiddleGradient, defaultBottomGradient];
 
-    double blendPos = _dragPosition.clamp(0.0, 1.0);
-    Color c1 = Color.lerp(scheduleColors[0], calendarColors[0], blendPos)!;
-    Color c2 = Color.lerp(scheduleColors[1], calendarColors[1], blendPos)!;
-    Color c3 = Color.lerp(scheduleColors[2], calendarColors[2], blendPos)!;
+        double blendPos = _dragPosition.clamp(0.0, 1.0);
+        Color c1 = Color.lerp(scheduleColors[0], calendarColors[0], blendPos)!;
+        Color c2 = Color.lerp(scheduleColors[1], calendarColors[1], blendPos)!;
+        Color c3 = Color.lerp(scheduleColors[2], calendarColors[2], blendPos)!;
 
-    List<Color> currentGradient = [c1, c2, c3];
+        List<Color> currentGradient = [c1, c2, c3];
 
-    int maxPeriod = -1; bool hasSaturdayClasses = false;
-    for (var item in _weeklySchedule) {
-      if (item['period'] > maxPeriod) maxPeriod = item['period'];
-      if (item['day'] == 5) hasSaturdayClasses = true;
-    }
-    if (maxPeriod == -1) maxPeriod = 0;
+        int maxPeriod = -1; bool hasSaturdayClasses = false;
+        for (var item in _weeklySchedule) {
+          if (item['period'] > maxPeriod) maxPeriod = item['period'];
+          if (item['day'] == 5) hasSaturdayClasses = true;
+        }
+        if (maxPeriod == -1) maxPeriod = 0;
 
-    int displayDaysCount = hasSaturdayClasses ? 6 : 5;
-    double screenWidth = MediaQuery.of(context).size.width;
-    double spacing = 2.0;
+        int displayDaysCount = hasSaturdayClasses ? 6 : 5;
+        double screenWidth = MediaQuery.of(context).size.width;
+        double spacing = 2.0;
 
-    double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
-    double itemWidth = (screenWidth - 16.0 - timeColumnWidth - (spacing * (displayDaysCount - 1))) / displayDaysCount;
+        double timeColumnWidth = _isTimeVisible ? 16.0 : 0.0;
+        double itemWidth = (screenWidth - 16.0 - timeColumnWidth - (spacing * (displayDaysCount - 1))) / displayDaysCount;
 
-    double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
-    double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
-    double shrinkLimit = headerMaxHeight - headerMinHeight;
+        double headerMaxHeight = topPadding + 48.0 + 24.0 + 4.0 + ((maxPeriod + 1) * itemWidth) + (maxPeriod * 2.0) + 12.0;
+        double headerMinHeight = topPadding + 48.0 + ((maxPeriod + 1) * 12.0) + (maxPeriod * 2.0) + 12.0;
+        double shrinkLimit = headerMaxHeight - headerMinHeight;
 
-    double t = shrinkLimit > 0 ? (_courseScrollOffset  / shrinkLimit).clamp(0.0, 1.0) : 0.0;
-    double calendarHeight = headerMaxHeight - t * shrinkLimit;
+        double t = shrinkLimit > 0 ? (_courseScrollOffset  / shrinkLimit).clamp(0.0, 1.0) : 0.0;
+        double calendarHeight = headerMaxHeight - t * shrinkLimit;
 
-    double scheduleMinHeight = topPadding + 40.0;
-    double activeTasksScrollOffset = 0.0;
-    if (_tasksScrollController.hasClients) {
-      double maxScroll = _tasksScrollController.position.maxScrollExtent;
-      if (maxScroll > 0) activeTasksScrollOffset = _tasksScrollOffset;
-    }
+        double scheduleMinHeight = topPadding + 40.0;
+        double activeTasksScrollOffset = 0.0;
+        if (_tasksScrollController.hasClients) {
+          double maxScroll = _tasksScrollController.position.maxScrollExtent;
+          if (maxScroll > 0) activeTasksScrollOffset = _tasksScrollOffset;
+        }
 
-    double dynamicScheduleHeight = math.max(scheduleMinHeight, scheduleHeight - activeTasksScrollOffset);
-    double taskT = (activeTasksScrollOffset / math.max(1.0, scheduleHeight - scheduleMinHeight)).clamp(0.0, 1.0);
-    Color monoBg = isDark ? Colors.black : const Color(0xFFEEEEEE);
-    Color monoTextColor = isDark ? Colors.white : Colors.black;
+        double dynamicScheduleHeight = math.max(scheduleMinHeight, scheduleHeight - activeTasksScrollOffset);
+        double taskT = (activeTasksScrollOffset / math.max(1.0, scheduleHeight - scheduleMinHeight)).clamp(0.0, 1.0);
+        Color monoBg = isDark ? Colors.black : const Color(0xFFEEEEEE);
+        Color monoTextColor = isDark ? Colors.white : Colors.black;
 
-    // ─── _buildDynamicHeaderWidget() メソッド内のカメラプレビューサイズ算出周辺 ───
+        // ─── _buildDynamicHeaderWidget() メソッド内のカメラプレビューサイズ算出周辺 ───
 
-    // ─── _buildDynamicHeaderWidget() メソッド内のカメラプレビューサイズ算出周辺 ───
+        // ─── _buildDynamicHeaderWidget() メソッド内のカメラプレビューサイズ算出周辺 ───
 
-    double effectiveScheduleHeight = _dragPosition < 0.5 ? dynamicScheduleHeight : scheduleHeight;
+        double effectiveScheduleHeight = _dragPosition < 0.5 ? dynamicScheduleHeight : scheduleHeight;
 
-    // ─── 🟢 サイズ計算ロジックの冒頭 ───
-    // ─── 🟢 修正：画面サイズと操作バーの完全共存ロジック ───
-    // ─── 🟢 修正：デバイスの回転に合わせて「縦長 ⇄ 横長」を完全自動スイッチ ───
-    // ─── 🟢 修正：縦画面時の左右均一マージン完全復活ロジック ───
-    bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-    bool isPad = screenWidth >= 600 || MediaQuery.of(context).size.shortestSide >= 600;
-    double camMargin = 8.0;
-    double basePreviewW = screenWidth - (camMargin * 2);
+        // ─── 🟢 サイズ計算ロジックの冒頭 ───
+        // ─── 🟢 修正：画面サイズと操作バーの完全共存ロジック ───
+        // ─── 🟢 修正：デバイスの回転に合わせて「縦長 ⇄ 横長」を完全自動スイッチ ───
+        // ─── 🟢 修正：縦画面時の左右均一マージン完全復活ロジック ───
+        bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+        bool isPad = screenWidth >= 600 || MediaQuery.of(context).size.shortestSide >= 600;
+        double camMargin = 8.0;
+        double basePreviewW = screenWidth - (camMargin * 2);
 
-    // 下部操作バーと衝突しないための安全な最大縦幅（185pxの防衛線を維持）
-    double maxAvailableH = MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - MediaQuery.of(context).padding.bottom - 185.0;
+        // 下部操作バーと衝突しないための安全な最大縦幅（185pxの防衛線を維持）
+        double maxAvailableH = MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - MediaQuery.of(context).padding.bottom - 185.0;
 
-    double activeAspect = (_isCamInitialized && _cameraController != null)
-        ? _cameraController!.value.aspectRatio
-        : (16 / 9);
+        double activeAspect = (_isCamInitialized && _cameraController != null)
+            ? _cameraController!.value.aspectRatio
+            : (16 / 9);
 
-    double previewW = basePreviewW;
-    double previewH;
+        double previewW = basePreviewW;
+        double previewH;
 
-    if (isLandscape) {
-      // 🎬 横画面：大迫力の横長シネマサイズ（これまで通り安全にホールド）
-      previewH = previewW / activeAspect;
-      if (previewH > maxAvailableH) {
-        previewH = maxAvailableH;
-        previewW = previewH * activeAspect;
-      }
-    } else {
-      // 📱 縦画面：枠幅を均一（上下左右 8px）に保つジャストフィット思想
-      // 基本は横幅いっぱいに広げ、アスペクト比を掛け算
-      previewH = previewW * activeAspect;
+        if (isLandscape) {
+          // 🎬 横画面：大迫力の横長シネマサイズ（これまで通り安全にホールド）
+          previewH = previewW / activeAspect;
+          if (previewH > maxAvailableH) {
+            previewH = maxAvailableH;
+            previewW = previewH * activeAspect;
+          }
+        } else {
+          // 📱 縦画面：枠幅を均一（上下左右 8px）に保つジャストフィット思想
+          // 基本は横幅いっぱいに広げ、アスペクト比を掛け算
+          previewH = previewW * activeAspect;
 
-      // 💡 決定打：もし縦が長すぎて最大高さを超えてしまう場合は、
-      // プレビュー自体を縮小するのではなく、最大高さ（maxAvailableH）の枠内に
-      // カメラプレビューが「はみ出さずに綺麗に収まる（Clip/補正する）」ようにホールドし、
-      // 横幅（previewW）は basePreviewW のまま固定して左右のマージンが広がるのを絶対阻止します。
-      if (previewH > maxAvailableH) {
-        previewH = maxAvailableH;
-      }
-    }
+          // 💡 決定打：もし縦が長すぎて最大高さを超えてしまう場合は、
+          // プレビュー自体を縮小するのではなく、最大高さ（maxAvailableH）の枠内に
+          // カメラプレビューが「はみ出さずに綺麗に収まる（Clip/補正する）」ようにホールドし、
+          // 横幅（previewW）は basePreviewW のまま固定して左右のマージンが広がるのを絶対阻止します。
+          if (previewH > maxAvailableH) {
+            previewH = maxAvailableH;
+          }
+        }
 
-    // 縦画面で最大クランプに達していない時は、常に左右マージンが「camMargin (8px)」に固定されます
-    double previewLeft = (screenWidth - previewW) / 2;
-    double cameraTargetHeight = camMargin + previewH + camMargin;
-    // ─── 🟢 ここまで ───
+        // 縦画面で最大クランプに達していない時は、常に左右マージンが「camMargin (8px)」に固定されます
+        double previewLeft = (screenWidth - previewW) / 2;
+        double cameraTargetHeight = camMargin + previewH + camMargin;
+        // ─── 🟢 ここまで ───
 
-    double currentHeight;
-    if (_dragPosition >= 0.0) {
-      currentHeight = effectiveScheduleHeight + (calendarHeight - effectiveScheduleHeight) * _dragPosition;
-    } else {
-      double camFactor = _dragPosition.abs();
-      currentHeight = ui.lerpDouble(effectiveScheduleHeight, cameraTargetHeight, camFactor)!;
-    }
+        double currentHeight;
+        if (_dragPosition >= 0.0) {
+          currentHeight = effectiveScheduleHeight + (calendarHeight - effectiveScheduleHeight) * _dragPosition;
+        } else {
+          double camFactor = _dragPosition.abs();
+          currentHeight = ui.lerpDouble(effectiveScheduleHeight, cameraTargetHeight, camFactor)!;
+        }
 
-    String heroTag = 'top_widget_hero';
-    Color tCol = Colors.white;
+        String heroTag = 'top_widget_hero';
 
-    bool isTransitioning = _dragAnimController.isAnimating || (_dragPosition != 0.0 && _dragPosition != 1.0 && _dragPosition != -1.0);
-    bool isVerticalScrolling = _courseScrollOffset > 4.0 || _tasksScrollOffset > 4.0;
-    Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
+        // 🟢 修正：白テーマ（white）の時は文字・アイコンの基本色を黒に、それ以外は白に自動反転
+        Color tCol = (gradientMode == 'white') ? Colors.black87 : Colors.white;
 
-    return Hero(
-      tag: heroTag,
-      child: Material(
-        type: MaterialType.transparency,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragEnd: (details) {
-            if (_dragPosition > 0.5 && details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
-              setState(() { _isTimeVisible = details.primaryVelocity! > 0; });
-            }
-          },
-          child: AnimatedContainer(
-            duration: animDuration,
-            curve: Curves.easeOutCubic,
-            width: double.infinity,
-            height: currentHeight,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [c1, c2, c3], begin: Alignment.topLeft, end: Alignment.bottomRight, stops: const [0.0, 0.5, 1.0]),
-              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
-            ),
-            child: Stack(
-              children: [
-                // 既存の予定・カレンダー表示（そのまま維持）
-                IgnorePointer(ignoring: _dragPosition < -0.01 || _dragPosition >= 0.5, child: AnimatedOpacity(duration: const Duration(milliseconds: 150), opacity: _dragPosition >= 0.0 ? (1.0 - _dragPosition * 2).clamp(0.0, 1.0) : (1.0 - _dragPosition.abs() * 3).clamp(0.0, 1.0), child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT))),
-                IgnorePointer(ignoring: _dragPosition < 0.5, child: RepaintBoundary(key: _calendarKey, child: Opacity(opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0), child: GestureDetector(behavior: HitTestBehavior.opaque, onVerticalDragUpdate: (details) { if (_mainScrollController.hasClients) { double maxScroll = _mainScrollController.position.maxScrollExtent; if (maxScroll > 0) { double newOffset = (_mainScrollController.offset - details.primaryDelta!).clamp(0.0, maxScroll); _mainScrollController.jumpTo(newOffset); } } }, child: Container(color: Colors.transparent, child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount)))))),
+        Color pCol = (gradientMode == 'white') ? Colors.black54 : Colors.white70; // サブテキスト用
 
-                // カメラプレビュー領域
-                if (_dragPosition < 0.0) ...[
-                  Positioned(
-                    top: camMargin,
-                    left: previewLeft,
-                    width: previewW,
-                    height: previewH,
-                    child: Opacity(
-                      opacity: _dragPosition.abs(),
-                      child: Container(
-                        clipBehavior: Clip.antiAlias,
-                        decoration: const BoxDecoration(
-                          borderRadius: BorderRadius.only(
-                            topLeft: Radius.circular(32.0),
-                            topRight: Radius.circular(32.0),
-                            bottomLeft: Radius.circular(24.0),
-                            bottomRight: Radius.circular(24.0),
-                          ),
-                          color: Colors.black,
-                        ),
-                        child: _isCamInitialized && _cameraController != null
-                            ? Stack(
-                          children: [
-                            // 1. 【視覚ベース層】 純粋にカメラ映像を描画するだけのレイヤー（最背面）
-                            // 🟢 変更：無理なアスペクト比の上書きをパージし、参考コード（CustomCameraScreen）と同じ等倍 CameraPreview へ純化します。
-                            // ４隅のフィレット（ClipRRect）や下方の吸い込みアニメーション等の意匠は1ミリも崩さず維持されます。
-                            Positioned.fill(
-                              child: ClipRRect(
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(32.0),
-                                  topRight: Radius.circular(32.0),
-                                  bottomLeft: Radius.circular(24.0),
-                                  bottomRight: Radius.circular(24.0),
-                                ),
-                                child: RepaintBoundary(
-                                  key: _previewContainerKey,
-                                  child: CameraPreview(_cameraController!),
-                                ),
+        bool isTransitioning = _dragAnimController.isAnimating || (_dragPosition != 0.0 && _dragPosition != 1.0 && _dragPosition != -1.0);
+        bool isVerticalScrolling = _courseScrollOffset > 4.0 || _tasksScrollOffset > 4.0;
+        Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
+
+        return Hero(
+          tag: heroTag,
+          child: Material(
+            type: MaterialType.transparency,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragEnd: (details) {
+                if (_dragPosition > 0.5 && details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
+                  setState(() { _isTimeVisible = details.primaryVelocity! > 0; });
+                }
+              },
+              child: AnimatedContainer(
+                duration: animDuration,
+                curve: Curves.easeOutCubic,
+                width: double.infinity,
+                height: currentHeight,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  // 💡 計算された動的補間カラー[c1, c2, c3]を展開して適用
+                  gradient: LinearGradient(colors: [c1, c2, c3], begin: Alignment.topLeft, end: Alignment.bottomRight, stops: const [0.0, 0.5, 1.0]),
+                  borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
+                ),
+                child: Stack(
+                  children: [
+                    // 既存の予定・カレンダー表示（そのまま維持）
+                    IgnorePointer(ignoring: _dragPosition < -0.01 || _dragPosition >= 0.5, child: AnimatedOpacity(duration: const Duration(milliseconds: 150), opacity: _dragPosition >= 0.0 ? (1.0 - _dragPosition * 2).clamp(0.0, 1.0) : (1.0 - _dragPosition.abs() * 3).clamp(0.0, 1.0), child: _buildInnerSchedule(topPadding, tCol, monoBg, monoTextColor, dynamicScheduleHeight, scheduleMinHeight, scheduleHeight, taskT))),
+                    IgnorePointer(ignoring: _dragPosition < 0.5, child: RepaintBoundary(key: _calendarKey, child: Opacity(opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0), child: GestureDetector(behavior: HitTestBehavior.opaque, onVerticalDragUpdate: (details) { if (_mainScrollController.hasClients) { double maxScroll = _mainScrollController.position.maxScrollExtent; if (maxScroll > 0) { double newOffset = (_mainScrollController.offset - details.primaryDelta!).clamp(0.0, maxScroll); _mainScrollController.jumpTo(newOffset); } } }, child: Container(color: Colors.transparent, child: _buildInnerCalendar(topPadding + 40.0, isDark, t, itemWidth, maxPeriod, spacing, displayDaysCount)))))),
+
+                    // カメラプレビュー領域
+                    if (_dragPosition < 0.0) ...[
+                      Positioned(
+                        top: camMargin,
+                        left: previewLeft,
+                        width: previewW,
+                        height: previewH,
+                        child: Opacity(
+                          opacity: _dragPosition.abs(),
+                          child: Container(
+                            clipBehavior: Clip.antiAlias,
+                            decoration: const BoxDecoration(
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(32.0),
+                                topRight: Radius.circular(32.0),
+                                bottomLeft: Radius.circular(24.0),
+                                bottomRight: Radius.circular(24.0),
                               ),
+                              color: Colors.black,
                             ),
-
-                            // 2. 【上部ジェスチャー専用層】 ズーム＆ホーム戻り（中間層）
-                            // 🟢 修正：触れた場所を問わず、2指の相対位置の変化だけでヌルヌル追従させる排他スタビライザー
-                            Positioned(
-                              top: 0,
-                              bottom: isPad ? 200 : 100,
-                              left: 0,
-                              right: 0,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onScaleStart: (details) {
-                                  _camBaseZoom = _camCurrentZoom;
-                                  // 🟢 解決の鍵①：2本指が触れた瞬間、またはすでにピンチ中の場合はスタビライザーを即点火
-                                  if (details.pointerCount >= 2 || _isCameraPinching) {
-                                    _isCameraPinching = true;
-                                    setState(() => _camShowZoomText = true);
-                                  }
-                                },
-                                // ─── 🟢 修正：onScaleUpdate 内のズーム処理 ───
-                                onScaleUpdate: (details) {
-                                  if (_isCameraPinching) {
-                                    if (_camMaxZoom <= _camMinZoom) return;
-                                    double nz = (_camBaseZoom * details.scale).clamp(_camMinZoom, _camMaxZoom);
-                                    setState(() => _camCurrentZoom = nz);
-
-                                    // 🟢 決定打：頭の「await」を完全に削除！
-                                    // レンズ制御の完了を待たずにUI描画を最優先させることで、120Hzで指に吸い付くようになります。
-                                    _cameraController!.setZoomLevel(_camCurrentZoom);
-                                  }
-                                  else if (details.pointerCount == 1 && !_camShowZoomText) {
-                                    double deltaX = details.focalPointDelta.dx / screenWidth;
-                                    setState(() {
-                                      _dragPosition = (_dragPosition + deltaX).clamp(-1.0, 0.0);
-                                    });
-                                    _dragAnimController.value = _dragPosition;
-                                  }
-                                },
-                                onScaleEnd: (details) {
-                                  // 🟢 解決の鍵③：全ての指が画面から完全に浮くまで、またはスワイプ吸着が走るまでフラグをパージ
-                                  _isCameraPinching = false;
-                                  setState(() => _camShowZoomText = false);
-
-                                  if (_dragPosition < 0.0) {
-                                    double velocityX = details.velocity.pixelsPerSecond.dx;
-                                    if (velocityX < -400 || _dragPosition > -0.5) {
-                                      _dragPosition = 0.0;
-                                    } else {
-                                      _dragPosition = -1.0;
-                                    }
-                                    _dragAnimController.animateTo(
-                                        _dragPosition,
-                                        duration: const Duration(milliseconds: 250),
-                                        curve: Curves.easeOutCubic
-                                    );
-                                  }
-                                },
-                                child: const SizedBox.expand(),
-                              ),
-                            ),
-
-                            // 🟢 修正：上部ジェスチャー層の「下（前面）」に移動
-                            // これにより、タッチ判定が透明なエリアに吸われず、レンズ反転処理が100%確実に発動します
-                            Positioned(
-                              top: 12,
-                              left: 12,
-                              child: IconButton(
-                                icon: const Icon(Icons.sync_rounded, color: Colors.white, size: 28),
-                                onPressed: _switchCameraFacing,
-                              ),
-                            ),
-
-                            // ─── 💡 ここから下の Positioned(目盛りバー) は元のまま続けてください ───
-                            Positioned(
-                              bottom: isPad ? 116 : 16,
-                              left: 0, right: 0,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 200),
-                                    opacity: _camShowZoomText ? 1.0 : 0.0,
-                                    child: Text("${_camCurrentZoom.toStringAsFixed(1)}x", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w200, letterSpacing: 1.0)),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onHorizontalDragStart: (_) => setState(() => _camShowZoomText = true),
-                                    // ─── 🟢 修正：ダイヤルバー内のドラッグ処理 ───
-                                    onHorizontalDragUpdate: (details) async {
-                                      if (_camMaxZoom <= _camMinZoom) return;
-                                      double sensitivity = 0.04;
-                                      double dz = -details.delta.dx * sensitivity;
-                                      double tgt = _camCurrentZoom + dz;
-                                      setState(() => _camCurrentZoom = tgt.clamp(_camMinZoom, _camMaxZoom));
-
-                                      // 🟢 決定打：ここからも「await」を完全抹消！
-                                      // これにより、ダイヤルを弾いたときの目盛りの滑り出しが爆速化します。
-                                      _cameraController!.setZoomLevel(_camCurrentZoom);
-                                    },
-                                    onHorizontalDragEnd: (_) => setState(() => _camShowZoomText = false),
-                                    child: SizedBox(
-                                      width: previewW, height: 24,
-                                      child: CustomPaint(painter: _SlidingDialTicksPainter(progress: (_camCurrentZoom - _camMinZoom) / (_camMaxZoom - _camMinZoom))),
+                            child: _isCamInitialized && _cameraController != null
+                                ? Stack(
+                              children: [
+                                // 1. 【視覚ベース層】 純粋にカメラ映像を描画するだけのレイヤー（最背面）
+                                Positioned.fill(
+                                  child: ClipRRect(
+                                    borderRadius: const BorderRadius.only(
+                                      topLeft: Radius.circular(32.0),
+                                      topRight: Radius.circular(32.0),
+                                      bottomLeft: Radius.circular(24.0),
+                                      bottomRight: Radius.circular(24.0),
+                                    ),
+                                    child: RepaintBoundary(
+                                      key: _previewContainerKey,
+                                      child: CameraPreview(_cameraController!),
                                     ),
                                   ),
-                                ],
-                              ),
-                            ),
+                                ),
 
-                            // 🟢 追加：タブレット（Pad）環境の場合のみ、ファインダー内部にボタンを綺麗に浮かせる（オーバーレイ）
+                                // 2. 【上部ジェスチャー専用層】 ズーム＆ホーム戻り（中間層）
+                                Positioned(
+                                  top: 0,
+                                  bottom: isPad ? 200 : 100,
+                                  left: 0,
+                                  right: 0,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onScaleStart: (details) {
+                                      _camBaseZoom = _camCurrentZoom;
+                                      if (details.pointerCount >= 2 || _isCameraPinching) {
+                                        _isCameraPinching = true;
+                                        setState(() => _camShowZoomText = true);
+                                      }
+                                    },
+                                    onScaleUpdate: (details) {
+                                      if (_isCameraPinching) {
+                                        if (_camMaxZoom <= _camMinZoom) return;
+                                        double nz = (_camBaseZoom * details.scale).clamp(_camMinZoom, _camMaxZoom);
+                                        setState(() => _camCurrentZoom = nz);
+                                        _cameraController!.setZoomLevel(_camCurrentZoom);
+                                      }
+                                      else if (details.pointerCount == 1 && !_camShowZoomText) {
+                                        double deltaX = details.focalPointDelta.dx / screenWidth;
+                                        setState(() {
+                                          _dragPosition = (_dragPosition + deltaX).clamp(-1.0, 0.0);
+                                        });
+                                        _dragAnimController.value = _dragPosition;
+                                      }
+                                    },
+                                    onScaleEnd: (details) {
+                                      _isCameraPinching = false;
+                                      setState(() => _camShowZoomText = false);
 
-                            if (_capturedImagePathForAnim != null || _capturedUiImageForAnim != null)
-                              Positioned.fill(
-                                child: AnimatedBuilder(
-                                  animation: _cameraCaptureAnimController,
-                                  builder: (context, child) {
-                                    double v = _cameraCaptureAnimController.value;
+                                      if (_dragPosition < 0.0) {
+                                        double velocityX = details.velocity.pixelsPerSecond.dx;
+                                        if (velocityX < -400 || _dragPosition > -0.5) {
+                                          _dragPosition = 0.0;
+                                        } else {
+                                          _dragPosition = -1.0;
+                                        }
+                                        _dragAnimController.animateTo(
+                                            _dragPosition,
+                                            duration: const Duration(milliseconds: 250),
+                                            curve: Curves.easeOutCubic
+                                        );
+                                      }
+                                    },
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
 
-                                    double shrinkV = CurvedAnimation(
-                                      parent: _cameraCaptureAnimController,
-                                      curve: const Interval(0.0, 0.4, curve: Curves.easeOutCubic),
-                                    ).value;
+                                Positioned(
+                                  top: 12,
+                                  left: 12,
+                                  child: IconButton(
+                                    icon: const Icon(Icons.sync_rounded, color: Colors.white, size: 28),
+                                    onPressed: _switchCameraFacing,
+                                  ),
+                                ),
 
-                                    double slideV = CurvedAnimation(
-                                      parent: _cameraCaptureAnimController,
-                                      curve: const Interval(0.4, 1.0, curve: Curves.easeInCubic),
-                                    ).value;
-
-                                    double scale = ui.lerpDouble(1.0, 0.3, shrinkV)!;
-                                    double slideX = ui.lerpDouble(0.0, screenWidth, slideV)!;
-                                    double slideY = 0.0;
-
-                                    return Transform.translate(
-                                      offset: Offset(slideX, slideY),
-                                      child: Transform.scale(
-                                        scale: scale,
-                                        alignment: Alignment.bottomRight,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            border: Border.all(color: const Color(0xFF7ebbdc), width: 8.0),
-                                            borderRadius: const BorderRadius.only(
-                                              topLeft: Radius.circular(32.0),
-                                              topRight: Radius.circular(32.0),
-                                              bottomLeft: Radius.circular(24.0),
-                                              bottomRight: Radius.circular(24.0),
-                                            ),
-                                          ),
-                                          child: ClipRRect(
-                                            borderRadius: const BorderRadius.only(
-                                              topLeft: Radius.circular(28.0),
-                                              topRight: Radius.circular(28.0),
-                                              bottomLeft: Radius.circular(20.0),
-                                              bottomRight: Radius.circular(20.0),
-                                            ),
-                                            // ─── 🟢 修正：黒い目隠しをパージし、今撮った鮮明な板書そのものをリアルタイム投影 ───
-                                            child: _capturedUiImageForAnim != null
-                                                ? RawImage(
-                                              image: _capturedUiImageForAnim,
-                                              fit: BoxFit.cover,
-                                            )
-                                                : (_capturedImagePathForAnim != null
-                                                ? Image.file(
-                                              File(_capturedImagePathForAnim!),
-                                              fit: BoxFit.cover,
-                                              gaplessPlayback: true,
-                                            )
-                                                : const SizedBox()),
-                                          ),
+                                Positioned(
+                                  bottom: isPad ? 116 : 16,
+                                  left: 0, right: 0,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      AnimatedOpacity(
+                                        duration: const Duration(milliseconds: 200),
+                                        opacity: _camShowZoomText ? 1.0 : 0.0,
+                                        child: Text("${_camCurrentZoom.toStringAsFixed(1)}x", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w200, letterSpacing: 1.0)),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onHorizontalDragStart: (_) => setState(() => _camShowZoomText = true),
+                                        onHorizontalDragUpdate: (details) async {
+                                          if (_camMaxZoom <= _camMinZoom) return;
+                                          double sensitivity = 0.04;
+                                          double dz = -details.delta.dx * sensitivity;
+                                          double tgt = _camCurrentZoom + dz;
+                                          setState(() => _camCurrentZoom = tgt.clamp(_camMinZoom, _camMaxZoom));
+                                          _cameraController!.setZoomLevel(_camCurrentZoom);
+                                        },
+                                        onHorizontalDragEnd: (_) => setState(() => _camShowZoomText = false),
+                                        child: SizedBox(
+                                          width: previewW, height: 24,
+                                          child: CustomPaint(painter: _SlidingDialTicksPainter(progress: (_camCurrentZoom - _camMinZoom) / (_camMaxZoom - _camMinZoom))),
                                         ),
                                       ),
-                                    );
-                                  },
+                                    ],
+                                  ),
                                 ),
-                              ),
 
-                          ],
-                        )
-                            : const Center(child: CircularProgressIndicator(color: Colors.white)),
-                      ),
-                    ),
-                  ),
-                ],
+                                if (_capturedImagePathForAnim != null || _capturedUiImageForAnim != null)
+                                  Positioned.fill(
+                                    child: AnimatedBuilder(
+                                      animation: _cameraCaptureAnimController,
+                                      builder: (context, child) {
+                                        double v = _cameraCaptureAnimController.value;
 
-                // 左上：学期タイトル
-                Positioned(
-                  top: topPadding - 20,
-                  left: 8.0,
-                  child: IgnorePointer(
-                    ignoring: _dragPosition < 0.5,
-                    child: Opacity(
-                      opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
-                      child: Builder(
-                          builder: (context) {
-                            String term = widget.currentTerm.toUpperCase();
-                            String line1 = term; String line2 = "";
-                            if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) { line1 = "Spring"; line2 = "Semester"; }
-                            else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) { line1 = "Fall"; line2 = "Semester"; }
-                            else if (term.startsWith('Q')) { line1 = "Quarter"; String n = term.replaceAll(RegExp(r'[^0-9]'), ''); line2 = n == '1' ? "One" : n == '2' ? "Two" : n == '3' ? "Three" : n == '4' ? "Four" : n; }
-                            return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(line1, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
-                                  if (line2.isNotEmpty) Text(line2, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
-                                  Text("(${widget.currentYear})", style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5))
-                                ]
-                            );
-                          }
-                      ),
-                    ),
-                  ),
-                ),
+                                        double shrinkV = CurvedAnimation(
+                                          parent: _cameraCaptureAnimController,
+                                          curve: const Interval(0.0, 0.4, curve: Curves.easeOutCubic),
+                                        ).value;
 
-                // 右上：各種コントロールボタン
-                Positioned(
-                  top: topPadding - 32,
-                  right: 16,
-                  child: IgnorePointer(
-                    ignoring: _dragPosition < 0.5,
-                    child: Opacity(
-                      opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
-                      child: Row(
-                        children: [
-                          if (_dragPosition > 0.95)
-                            IconButton(
-                              icon: Icon(Icons.share, color: tCol, size: 22),
-                              onPressed: _shareCalendarImage,
-                            ),
-                          IconButton(
-                            icon: Icon(Icons.add, color: tCol, size: 24),
-                            onPressed: _showAddCourseDialog,
+                                        double slideV = CurvedAnimation(
+                                          parent: _cameraCaptureAnimController,
+                                          curve: const Interval(0.4, 1.0, curve: Curves.easeInCubic),
+                                        ).value;
+
+                                        double scale = ui.lerpDouble(1.0, 0.3, shrinkV)!;
+                                        double slideX = ui.lerpDouble(0.0, screenWidth, slideV)!;
+                                        double slideY = 0.0;
+
+                                        return Transform.translate(
+                                          offset: Offset(slideX, slideY),
+                                          child: Transform.scale(
+                                            scale: scale,
+                                            alignment: Alignment.bottomRight,
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                border: Border.all(color: const Color(0xFF7ebbdc), width: 8.0),
+                                                borderRadius: const BorderRadius.only(
+                                                  topLeft: Radius.circular(32.0),
+                                                  topRight: Radius.circular(32.0),
+                                                  bottomLeft: Radius.circular(24.0),
+                                                  bottomRight: Radius.circular(24.0),
+                                                ),
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius: const BorderRadius.only(
+                                                  topLeft: Radius.circular(28.0),
+                                                  topRight: Radius.circular(28.0),
+                                                  bottomLeft: Radius.circular(20.0),
+                                                  bottomRight: Radius.circular(20.0),
+                                                ),
+                                                child: _capturedUiImageForAnim != null
+                                                    ? RawImage(
+                                                  image: _capturedUiImageForAnim,
+                                                  fit: BoxFit.cover,
+                                                )
+                                                    : (_capturedImagePathForAnim != null
+                                                    ? Image.file(
+                                                  File(_capturedImagePathForAnim!),
+                                                  fit: BoxFit.cover,
+                                                  gaplessPlayback: true,
+                                                )
+                                                    : const SizedBox()),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+
+                              ],
+                            )
+                                : const Center(child: CircularProgressIndicator(color: Colors.white)),
                           ),
-                        ],
+                        ),
+                      ),
+                    ],
+
+                    // 左上：学期タイトル
+                    Positioned(
+                      top: topPadding - 20,
+                      left: 8.0,
+                      child: IgnorePointer(
+                        ignoring: _dragPosition < 0.5,
+                        child: Opacity(
+                          opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
+                          child: Builder(
+                              builder: (context) {
+                                String term = widget.currentTerm.toUpperCase();
+                                String line1 = term; String line2 = "";
+                                if (term.contains('春') || term.contains('前期') || term.contains('SPRING')) { line1 = "Spring"; line2 = "Semester"; }
+                                else if (term.contains('秋') || term.contains('後期') || term.contains('FALL')) { line1 = "Fall"; line2 = "Semester"; }
+                                else if (term.startsWith('Q')) { line1 = "Quarter"; String n = term.replaceAll(RegExp(r'[^0-9]'), ''); line2 = n == '1' ? "One" : n == '2' ? "Two" : n == '3' ? "Three" : n == '4' ? "Four" : n; }
+                                return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(line1, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
+                                      if (line2.isNotEmpty) Text(line2, style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5)),
+                                      Text("(${widget.currentYear})", style: TextStyle(color: tCol, fontSize: 20, fontWeight: FontWeight.w300, height: 1.1, letterSpacing: 1.5))
+                                    ]
+                                );
+                              }
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+
+                    // 右上：各種コントロールボタン
+                    Positioned(
+                      top: topPadding - 32,
+                      right: 16,
+                      child: IgnorePointer(
+                        ignoring: _dragPosition < 0.5,
+                        child: Opacity(
+                          opacity: ((_dragPosition - 0.5) * 2).clamp(0.0, 1.0),
+                          child: Row(
+                            children: [
+                              if (_dragPosition > 0.95)
+                                IconButton(
+                                  icon: Icon(Icons.share, color: tCol, size: 22),
+                                  onPressed: _shareCalendarImage,
+                                ),
+                              IconButton(
+                                icon: Icon(Icons.add, color: tCol, size: 24),
+                                onPressed: _showAddCourseDialog,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -3902,25 +3901,42 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       _schedulePageController.animateToPage(10000, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
                     }
                   },
-                  // ★ 修正：BackdropFilter を使って本格的なすりガラスを表現
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(14),
                     child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0), // ぼかし効果
-                      child: Container(
-                        height: 28,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2), // 透明度を下げた白
-                            borderRadius: BorderRadius.circular(14)
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          // ★ 修正：文字とアイコンを白に固定
-                          children: _currentSchedulePage > 10000
-                              ? [const Icon(Icons.arrow_back_ios_new, size: 10, color: Colors.white), const SizedBox(width: 4), Text("${DateTime.now().month}/${DateTime.now().day}", style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w300))]
-                              : [Text("${DateTime.now().month}/${DateTime.now().day}", style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w300)), const SizedBox(width: 4), const Icon(Icons.arrow_forward_ios, size: 10, color: Colors.white)],
-                        ),
+                      filter: ui.ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
+                      child: Builder(
+                          builder: (context) {
+                            // 🟢 追記：現在のグラデーション状態を読み込み、パーツ色を動的にスイッチ
+                            final String gradientMode = appGradientThemeNotifier.value;
+                            final bool isWhiteTheme = gradientMode == 'white';
+
+                            final Color btnElementColor = isWhiteTheme ? Colors.black87 : Colors.white;
+                            final Color btnBgColor = isWhiteTheme ? Colors.black.withOpacity(0) : Colors.white.withOpacity(0);
+
+                            return Container(
+                              height: 28,
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                  color: btnBgColor, // 🟢 修正
+                                  borderRadius: BorderRadius.circular(14)
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: _currentSchedulePage > 10000
+                                    ? [
+                                  Icon(Icons.arrow_back_ios_new, size: 10, color: btnElementColor), // 🟢 修正
+                                  const SizedBox(width: 4),
+                                  Text("${DateTime.now().month}/${DateTime.now().day}", style: TextStyle(color: btnElementColor, fontSize: 16, fontWeight: FontWeight.w300)) // 🟢 修正
+                                ]
+                                    : [
+                                  Text("${DateTime.now().month}/${DateTime.now().day}", style: TextStyle(color: btnElementColor, fontSize: 16, fontWeight: FontWeight.w300)), // 🟢 修正
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.arrow_forward_ios, size: 10, color: btnElementColor) // 🟢 修正
+                                ],
+                              ),
+                            );
+                          }
                       ),
                     ),
                   ),
@@ -4212,7 +4228,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                             }
 
                             // ─── 🟢 変更②：太さ（FontWeight）の主律リバランス ───
-                            FontWeight titleWeight = FontWeight.w500; // 通常の講義（座学）は w300 をホールド
+                            FontWeight titleWeight = FontWeight.w400; // 通常の講義（座学）は w300 をホールド
 
                             if (isExternal) {
                               // 🟢 カレンダー同期の文字のみ、さらにミニマルで無機質な w200 へピンポイントコンバート
@@ -4221,7 +4237,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               // タイトルに「演習」が含まれる授業、または課題予定（Task）のみを w600 へ引き上げ
                               bool isPracticeClass = item['type'] == 'class' && item['title'].toString().contains('演習');
                               if (isTask || isPracticeClass) {
-                                titleWeight = FontWeight.w900;
+                                titleWeight = FontWeight.w600;
                               }
                             }
 
@@ -4271,7 +4287,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                   child: Text(startTimeStr, style: TextStyle(color: tCol, fontSize: 14, fontWeight: FontWeight.w400, height: 1.0)),
                                                 ),
                                                 const SizedBox(width: 12),
-                                                if (isTask) ...[Icon(Icons.assignment_late, size: 20, color: tCol), const SizedBox(width: 4)],
+                                                if (isTask) ...[Icon(Icons.assignment_late, size: 18, color: tCol), const SizedBox(width: 4)],
                                                 if (isExternal) ...[Icon(Icons.event, size: 16, color: tCol), const SizedBox(width: 4)],
 
                                                 Expanded(
@@ -4698,6 +4714,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   // ★ 修正：引数に displayDaysCount を追加
   // ★ 修正：引数に displayDaysCount を追加
   Widget _buildInnerCalendar(double topPadding, bool isDark, double t, double baseItemWidth, int maxPeriod, double baseSpacing, int displayDaysCount) {
+    // 🟢 追記：現在のグラデーションテーマの状態をスキャン
+    final String gradientMode = appGradientThemeNotifier.value;
+    final bool isWhiteTheme = gradientMode == 'white';
+
+    // テーマに応じたベース文字色とアクティブ背景色を定義
+    final Color calTextColor = isWhiteTheme ? Colors.black87 : Colors.white;
+    final Color calSubTextColor = isWhiteTheme ? Colors.black54 : Colors.white70;
+    final Color activeCapsuleBg = isWhiteTheme ? Colors.black.withOpacity(0.08) : Colors.white.withOpacity(0.95);
+    final Color activeCapsuleText = isWhiteTheme ? Colors.black : Colors.black;
     double currentItemHeight = baseItemWidth - t * (baseItemWidth - 12.0);
     double currentSpacing = 1.0;
     double textOpacity = math.max(0.0, 1.0 - t * 3.0);
@@ -4747,10 +4772,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   child: Text(
                                       entry.value,
                                       style: TextStyle(
-                                        // 🟢 修正：画像化中(_isCapturing)かつライトモード(!isDark)なら黒字、それ以外は通常
                                           color: (isToday && !_isCapturing)
-                                              ? Colors.black
-                                              : (_isCapturing && !isDark ? Colors.black : Colors.white),
+                                              ? (isWhiteTheme ? Colors.white : Colors.black) // 今日かつ白テーマなら文字を白に
+                                              : (_isCapturing && !isDark ? Colors.black : calTextColor), // 通常時の曜日文字色
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold
                                       )
@@ -4840,7 +4864,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                             width: 14.0,
                                             height: currentItemHeight,
                                             decoration: BoxDecoration(
-                                              color: Colors.white.withOpacity(0.95),
+                                              color: activeCapsuleBg, // 動的カプセル背景
                                               borderRadius: BorderRadius.circular(6),
                                             ),
                                             child: Padding(
@@ -4850,14 +4874,15 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                 child: RotatedBox(
                                                   quarterTurns: 1,
                                                   child: SizedBox(
-                                                    width: currentItemHeight, // 🟢 決定打：物理的な縦幅をマスの高さに完全ロック
+                                                    width: currentItemHeight, // 物理的な縦幅をマスの高さに完全ロック
                                                     child: Row(
                                                       mainAxisSize: MainAxisSize.max,
-                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // 🟢 マスの中で限界まで等間隔に引き伸ばす
+                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // マスの中で限界まで等間隔に引き伸ばす
                                                       children: [
-                                                        Text(startStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
-                                                        Text("-", style: TextStyle(color: Colors.black.withOpacity(0.4), fontSize: activeFontSize - 1)),
-                                                        Text(endStr, style: TextStyle(color: Colors.black, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                        // 🟢 修正：中略（...）を完全にパージし、本来のスタイルプロパティを完全結合
+                                                        Text(startStr, style: TextStyle(color: activeCapsuleText, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
+                                                        Text("-", style: TextStyle(color: activeCapsuleText.withOpacity(0.4), fontSize: activeFontSize - 1)),
+                                                        Text(endStr, style: TextStyle(color: activeCapsuleText, fontSize: activeFontSize, fontWeight: FontWeight.w300, letterSpacing: 0.1)),
                                                       ],
                                                     ),
                                                   ),
@@ -4882,10 +4907,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                       mainAxisSize: MainAxisSize.max,
                                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                       children: [
-                                                        // 🟢 修正：画像化中かつライトモードなら黒、それ以外は純度100%の不透明白
-                                                        Text(startStr, style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w300)),
-                                                        Text("-", style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
-                                                        Text(endStr, style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : Colors.white, fontSize: inactiveFontSize, fontWeight: FontWeight.w300)),
+                                                        // 🟢 修正：通常時の時限テキスト色
+                                                        Text(startStr, style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : calTextColor, fontSize: inactiveFontSize, fontWeight: FontWeight.w300)),
+                                                        Text("-", style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : calTextColor, fontSize: inactiveFontSize, fontWeight: FontWeight.w200)),
+                                                        Text(endStr, style: TextStyle(color: (_isCapturing && !isDark) ? Colors.black : calTextColor, fontSize: inactiveFontSize, fontWeight: FontWeight.w300)),
                                                       ],
                                                     ),
                                                   ),
@@ -5651,91 +5676,99 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   Widget build(BuildContext context) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    SystemUiOverlayStyle overlayStyle = _currentViewState == ViewState.home
-        ? SystemUiOverlayStyle.light
-        : (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark);
+    // 🟢 決定打：最外殻を ValueListenableBuilder で包み、白テーマ時のステータスバー文字反転をリアルタイム同期
+    return ValueListenableBuilder<String>(
+      valueListenable: appGradientThemeNotifier,
+      builder: (context, gradientMode, child) {
 
-    // 🟢 修正：左画面にスワイプする時（_dragPosition < 0）のみ、下部バー群がホーム画面と同期して右側に「すーっ」と掃ける
-    double leftSwipeOffset = _dragPosition < 0.0 ? -_dragPosition * MediaQuery.of(context).size.width : 0.0;
+        // ホーム画面かつ白テーマ（white）の時だけ、ステータスバー文字を専用の「黒（dark）」にスイッチ
+        SystemUiOverlayStyle overlayStyle = _currentViewState == ViewState.home
+            ? (gradientMode == 'white' ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light)
+            : (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark);
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: overlayStyle,
-      child: PopScope(
-        // 🟢 修正：無地画面のときは、戻るボタン（またはスワイプ戻り）で中央面へ引き返せるようにガード
-        canPop: _currentViewState == ViewState.home && _dragPosition == 0.0,
-        onPopInvoked: (didPop) {
-          if (didPop) return;
-          if (_dragPosition < 0.0) {
-            _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
-          } else if (_currentViewState != ViewState.home) {
-            _handleBackNavigation(); // 👈 🟢 修正：末尾に () を追加して関数を確実に実行させます
-          }
-        },
-        child: Stack(
-          children: [
-            Positioned.fill(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  child: _currentViewState == ViewState.home
-                      ? _buildHomeContent()
-                      : _currentViewState == ViewState.fullTasks
-                      ? _buildFullTasksContent()
-                      : _buildFullMessagesContent(),
-                )
-            ),
+        // 🟢 修正：左画面にスワイプする時（_dragPosition < 0）のみ、下部バー群がホーム画面と同期して右側に「すーっ」と掃ける
+        double leftSwipeOffset = _dragPosition < 0.0 ? -_dragPosition * MediaQuery.of(context).size.width : 0.0;
 
-            // 下部かすみ用グラデーションマスク
-            Positioned(
-              bottom: 0,
-              left: leftSwipeOffset, // 👈 🟢 追従オフセットを適用
-              right: -leftSwipeOffset, // 👈 🟢 追従オフセットを適用
-              height: 140.0 + MediaQuery.of(context).padding.bottom + 16.0,
-              child: IgnorePointer(
-                child: Column(
-                  children: [
-                    Container(
-                      height: 140.0,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            AppTheme.bg(context).withOpacity(0.00),
-                            AppTheme.bg(context).withOpacity(0.02),
-                            AppTheme.bg(context).withOpacity(0.06),
-                            AppTheme.bg(context).withOpacity(0.12),
-                            AppTheme.bg(context).withOpacity(0.22),
-                            AppTheme.bg(context).withOpacity(0.35),
-                            AppTheme.bg(context).withOpacity(0.52),
-                            AppTheme.bg(context).withOpacity(0.72),
-                            AppTheme.bg(context).withOpacity(0.88),
-                            AppTheme.bg(context).withOpacity(0.97),
-                            AppTheme.bg(context),
-                          ],
-                          stops: const [0.0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.75, 0.88, 0.96, 1.0],
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Container(
-                        color: AppTheme.bg(context),
-                      ),
-                    ),
-                  ],
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: overlayStyle,
+          child: PopScope(
+            // 🟢 修正：無地画面のときは、戻るボタン（またはスワイプ戻り）で中央面へ引き返せるようにガード
+            canPop: _currentViewState == ViewState.home && _dragPosition == 0.0,
+            onPopInvoked: (didPop) {
+              if (didPop) return;
+              if (_dragPosition < 0.0) {
+                _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+              } else if (_currentViewState != ViewState.home) {
+                _handleBackNavigation();
+              }
+            },
+            child: Stack(
+              children: [
+                Positioned.fill(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: _currentViewState == ViewState.home
+                          ? _buildHomeContent()
+                          : _currentViewState == ViewState.fullTasks
+                          ? _buildFullTasksContent()
+                          : _buildFullMessagesContent(),
+                    )
                 ),
-              ),
-            ),
 
-            // 下部ナビゲーションユニット本体
-            Positioned(
-                bottom: 0,
-                left: leftSwipeOffset, // 👈 🟢 追従オフセットを適用
-                right: -leftSwipeOffset, // 👈 🟢 追従オフセットを適用
-                child: _buildBottomNavigation()
-            )
-          ],
-        ),
-      ),
+                // 下部かすみ用グラデーションマスク
+                Positioned(
+                  bottom: 0,
+                  left: leftSwipeOffset, // 👈 🟢 追従オフセットを適用
+                  right: -leftSwipeOffset, // 👈 🟢 追従オフセットを適用
+                  height: 140.0 + MediaQuery.of(context).padding.bottom + 16.0,
+                  child: IgnorePointer(
+                    child: Column(
+                      children: [
+                        Container(
+                          height: 140.0,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                AppTheme.bg(context).withOpacity(0.00),
+                                AppTheme.bg(context).withOpacity(0.02),
+                                AppTheme.bg(context).withOpacity(0.06),
+                                AppTheme.bg(context).withOpacity(0.12),
+                                AppTheme.bg(context).withOpacity(0.22),
+                                AppTheme.bg(context).withOpacity(0.35),
+                                AppTheme.bg(context).withOpacity(0.52),
+                                AppTheme.bg(context).withOpacity(0.72),
+                                AppTheme.bg(context).withOpacity(0.88),
+                                AppTheme.bg(context).withOpacity(0.97),
+                                AppTheme.bg(context),
+                              ],
+                              stops: const [0.0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.75, 0.88, 0.96, 1.0],
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Container(
+                            color: AppTheme.bg(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // 下部ナビゲーションユニット本体
+                Positioned(
+                    bottom: 0,
+                    left: leftSwipeOffset, // 👈 🟢 追従オフセットを適用
+                    right: -leftSwipeOffset, // 👈 🟢 追従オフセットを適用
+                    child: _buildBottomNavigation()
+                )
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -6022,149 +6055,156 @@ class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with TickerProvi
     Color circleIconColor = isDark ? Colors.black : Colors.white;
     double screenWidth = MediaQuery.of(context).size.width;
 
-    return Stack(
-      children: [
-        // 🟢 ① 背景グラデーションだけを 250ms のじんわりフェードに個別バインド
-        Positioned.fill(
-          child: FadeTransition(
-            opacity: _fadeController,
-            child: GestureDetector(
-              onTap: _closeWithFade,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withOpacity(1),
-                      const Color(0xFF020304).withOpacity(1),
-                      const Color(0xff174a69).withOpacity(1),
-                      const Color(0xff7ebbdc).withOpacity(1),
-                    ],
-                      stops: const [0.0, 0.26, 0.63, 1.0]
+    // 🟢 決定打：背景とインプラントを ValueListenableBuilder で包み、電線と直結同期
+    return ValueListenableBuilder<String>(
+      valueListenable: appGradientThemeNotifier,
+      builder: (context, gradientMode, child) {
+        // 現在選択されているテーマの3色パレットを動的に取得
+        final currentPalette = AppGradient.getColors(gradientMode);
+
+        return Stack(
+          children: [
+            // 🟢 ① 背景グラデーションだけを 250ms のじんわりフェードに個別バインド
+            Positioned.fill(
+              child: FadeTransition(
+                opacity: _fadeController,
+                child: GestureDetector(
+                  onTap: _closeWithFade,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(1),
+                          currentPalette[0], // 🟢 動的パレット（Top）を注入
+                          currentPalette[1], // 🟢 動的パレット（Mid）を注入
+                          currentPalette[2], // 🟢 動的パレット（Bot）を注入
+                        ],
+                        stops: const [0.0, 0.26, 0.63, 1.0],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
 
-        // 🟢 ② 左上の大きめタイトルも 250ms のじんわりフェードに個別バインド
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 20,
-          left: 20, right: 20,
-          child: FadeTransition(
-            opacity: _fadeController,
-            child: Text(
-              widget.memoTitleText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 30,
-                fontWeight: FontWeight.w300,
-                letterSpacing: -0.5,
+            // 🟢 ② 左上の大きめタイトルも 250ms のじんわりフェードに個別バインド
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 20,
+              left: 20, right: 20,
+              child: FadeTransition(
+                opacity: _fadeController,
+                child: Text(
+                  widget.memoTitleText,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: -0.5,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
-          ),
-        ),
 
-        // 🟢 ③ メモの四角（コンソール外殻）はフェードから完全に解放！
-        // 起動時はフェードせずパッと存在感を放ち、戻る時はキーボードが沈むのを待ってサッとカメラ画面へ引き継ぎます。
-        // 🟢 ③ メモの四角（コンソール外殻）
-        Positioned(
-          bottom: 8, left: 8, right: 8,
-          child: AnimatedBuilder(
-            animation: Listenable.merge([_animController, _fadeController]), // 🟢 変更：フェードの進捗も同時に監視
-            builder: (context, child) {
-              double scale = ui.lerpDouble(1.0, 0.75, Curves.easeOutCubic.transform(_animController.value))!;
-              double slideX = ui.lerpDouble(0.0, screenWidth * 1.3, Curves.easeInOutCubic.transform(_animController.value))!;
+            // 🟢 ③ メモの四角（コンソール外殻）はフェードから完全に解放！
+            Positioned(
+              bottom: 8, left: 8, right: 8,
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_animController, _fadeController]),
+                builder: (context, child) {
+                  double scale = ui.lerpDouble(1.0, 0.75, Curves.easeOutCubic.transform(_animController.value))!;
+                  double slideX = ui.lerpDouble(0.0, screenWidth * 1.3, Curves.easeInOutCubic.transform(_animController.value))!;
 
-              // 🟢 修正：起動時・キャンセル時は滑らかにフェードし、矢印保存時のみフェードアウトを1.0で完全ロック
-              double boxOpacity = _isSaving ? 1.0 : _fadeController.value;
+                  // 起動時・キャンセル時は滑らかにフェードし、矢印保存時のみフェードアウトを1.0で完全ロック
+                  double boxOpacity = _isSaving ? 1.0 : _fadeController.value;
 
-              return Transform.translate(
-                offset: Offset(slideX, 0),
-                child: Transform.scale(
-                  scale: scale,
-                  alignment: Alignment.center,
-                  child: Opacity(
-                    opacity: boxOpacity, // 🟢 独自の透明度を四角にのみインプラント
-                    child: child,
-                  ),
-                ),
-              );
-            },
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ×マーク（角丸四角のすぐ左上）
-                Padding(
-                  padding: const EdgeInsets.only(left: 12.0, bottom: 4.0),
-                  child: IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
-                    onPressed: _closeWithFade,
-                  ),
-                ),
-
-                // メモ四角（R30フィレット）
-                Container(
-                  padding: const EdgeInsets.all(20.0),
-                  decoration: BoxDecoration(
-                    color: AppTheme.panel(context),
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: Stack(
-                    alignment: Alignment.bottomRight,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 32.0),
-                        child: TextField(
-                          controller: widget.controller,
-                          focusNode: widget.focusNode,
-                          minLines: 3,
-                          maxLines: null,
-                          cursorColor: isDark ? Colors.white : Colors.black,
-                          style: TextStyle(color: AppTheme.textMain(context), fontSize: 18, height: 1.4),
-                          decoration: InputDecoration(
-                            hintText: "メモを追加",
-                            hintStyle: TextStyle(color: AppTheme.textSub(context).withOpacity(0.4), fontSize: 18),
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                        ),
+                  return Transform.translate(
+                    offset: Offset(slideX, 0),
+                    child: Transform.scale(
+                      scale: scale,
+                      alignment: Alignment.center,
+                      child: Opacity(
+                        opacity: boxOpacity,
+                        child: child,
                       ),
+                    ),
+                  );
+                },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ×マーク（角丸四角のすぐ左上）
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12.0, bottom: 4.0),
+                      child: IconButton(
+                        icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                        onPressed: _closeWithFade,
+                      ),
+                    ),
 
-                      // 右下の矢印ボタン
-                      GestureDetector(
-                        onTap: _hasText ? _handlePublish : null,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 150),
-                          opacity: _hasText ? 1.0 : 0.15,
-                          child: Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: circleBgColor,
-                            ),
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              color: circleIconColor,
-                              size: 22,
+                    // メモ四角（R30フィレット）
+                    Container(
+                      padding: const EdgeInsets.all(20.0),
+                      decoration: BoxDecoration(
+                        color: AppTheme.panel(context),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 32.0),
+                            child: TextField(
+                              controller: widget.controller,
+                              focusNode: widget.focusNode,
+                              minLines: 3,
+                              maxLines: null,
+                              cursorColor: isDark ? Colors.white : Colors.black,
+                              style: TextStyle(color: AppTheme.textMain(context), fontSize: 18, height: 1.4),
+                              decoration: InputDecoration(
+                                hintText: "メモを追加",
+                                hintStyle: TextStyle(color: AppTheme.textSub(context).withOpacity(0.4), fontSize: 18),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
                             ),
                           ),
-                        ),
+
+                          // 右下の矢印ボタン
+                          GestureDetector(
+                            onTap: _hasText ? _handlePublish : null,
+                            child: AnimatedOpacity(
+                              duration: const Duration(milliseconds: 150),
+                              opacity: _hasText ? 1.0 : 0.15,
+                              child: Container(
+                                width: 40, height: 40,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: circleBgColor,
+                                ),
+                                child: Icon(
+                                  Icons.arrow_forward_rounded,
+                                  color: circleIconColor,
+                                  size: 22,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

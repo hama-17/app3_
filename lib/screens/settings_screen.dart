@@ -136,6 +136,18 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   late String tempTerm;
   late bool _isAuthenticated;
 
+  // 🟢 追記：テーマカラー管理用のフラグ
+  String _selectedThemeMode = 'blue';
+
+  // 🟢 追記：固定カラーパレットマトリクス
+  final Color _blueTop = const Color(0xFF020304);
+  final Color _blueMid = const Color(0xFF174a69);
+  final Color _blueBot = const Color(0xFF7ebbdc);
+
+  final Color _greenTop = const Color(0xFF161616);
+  final Color _greenMid = const Color(0xFF455451);
+  final Color _greenBot = const Color(0xFFABBBB1);
+
   late AnimationController _pulseController;
   bool _isClockwise = true;
 
@@ -197,6 +209,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       _liveNotifyClasses = true;
       _liveNotifyTasks = true;
       _isSilentCameraEnabled = prefs.getBool('ios_silent_camera_v10') ?? true;
+
+      // 🟢 追記：起動時に前回のグラデーションテーマ状態をロード
+      _selectedThemeMode = prefs.getString('settings_theme_mode_v10') ?? 'blue';
     });
 
     // 🟢 追記：裏側のバックグラウンドサービスが常にONとして動くよう、Prefs 側も true で上書き固定
@@ -216,6 +231,25 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       if (_targetCalendarId != null && !_availableCalendars.any((c) => c.id == _targetCalendarId)) {
         _targetCalendarId = null;
       }
+    });
+  }
+
+  // 🟢 新設：テーマカラードット選択時の高速永続化＆グローバル電線への射出ロジック
+  // 🟢 修正：レイテンシを完全抹消したノンブロッキング型トグル関数
+  void _switchThemeMode(String mode) {
+    if (_selectedThemeMode == mode) return; // 無駄な連打をガード
+
+    // ① 何よりも最優先で画面（ドットの伸縮）を更新
+    setState(() {
+      _selectedThemeMode = mode;
+    });
+
+    // ② ⚡ 0秒射出：Dashboard側とSettings自身のグラデーションへ光速伝播
+    appGradientThemeNotifier.value = mode;
+
+    // ③ 重いストレージへの保存処理は裏スレッドへ完全委譲（awaitしない）
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('settings_theme_mode_v10', mode);
     });
   }
 
@@ -465,7 +499,111 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   padding: EdgeInsets.only(top: maxHeaderHeight + 34.0, bottom: 100.0 + MediaQuery.of(context).padding.bottom),
                   physics: const BouncingScrollPhysics(),
                   children: [
-                    // カレンダー同期ウィジェット
+
+                    // ─── 🟢 新設：選択中の円が大きくなるトグル・カラーインジケータードット ───
+                    // ─── 🟢 修正：見た目の美しさはそのままに、タップ判定をドカンと拡大 ───
+                    // ─── 🟢 修正：4色（青・緑・黒・白）の拡張型カラーインジケータードット ───
+                    // ─── 🟢 修正：5色（青・緑・紫・黒・白）対応型カラーインジケータードットバー ───
+                    // Padding(
+                    //   padding: const EdgeInsets.only(bottom: 24.0),
+                    //   child: Row(
+                    //     mainAxisAlignment: MainAxisAlignment.center,
+                    //     children: [
+                    //       // 🔵 青ドット
+                    //       GestureDetector(
+                    //         behavior: HitTestBehavior.opaque,
+                    //         onTap: () => _switchThemeMode('blue'),
+                    //         child: Padding(
+                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0), // 5色化に伴いクッション幅を最適化
+                    //           child: AnimatedContainer(
+                    //             duration: const Duration(milliseconds: 180),
+                    //             curve: Curves.easeOutCubic,
+                    //             width: _selectedThemeMode == 'blue' ? 20 : 9,
+                    //             height: _selectedThemeMode == 'blue' ? 20 : 9,
+                    //             decoration: const BoxDecoration(color: Color(0xFF174a69), shape: BoxShape.circle),
+                    //           ),
+                    //         ),
+                    //       ),
+                    //
+                    //       // 🟢 緑ドット
+                    //       GestureDetector(
+                    //         behavior: HitTestBehavior.opaque,
+                    //         onTap: () => _switchThemeMode('green'),
+                    //         child: Padding(
+                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                    //           child: AnimatedContainer(
+                    //             duration: const Duration(milliseconds: 180),
+                    //             curve: Curves.easeOutCubic,
+                    //             width: _selectedThemeMode == 'green' ? 20 : 9,
+                    //             height: _selectedThemeMode == 'green' ? 20 : 9,
+                    //             decoration: const BoxDecoration(color: Color(0xFF455451), shape: BoxShape.circle),
+                    //           ),
+                    //         ),
+                    //       ),
+                    //
+                    //       // 🟣 紫ドット
+                    //       GestureDetector(
+                    //         behavior: HitTestBehavior.opaque,
+                    //         onTap: () => _switchThemeMode('purple'),
+                    //         child: Padding(
+                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                    //           child: AnimatedContainer(
+                    //             duration: const Duration(milliseconds: 180),
+                    //             curve: Curves.easeOutCubic,
+                    //             width: _selectedThemeMode == 'purple' ? 20 : 9,
+                    //             height: _selectedThemeMode == 'purple' ? 20 : 9,
+                    //             decoration: const BoxDecoration(
+                    //               color: Color(0xFF9E86EF), // 💡 パステルネオンパープル
+                    //               shape: BoxShape.circle,
+                    //             ),
+                    //           ),
+                    //         ),
+                    //       ),
+                    //
+                    //       // ⚫ 黒ドット
+                    //       GestureDetector(
+                    //         behavior: HitTestBehavior.opaque,
+                    //         onTap: () => _switchThemeMode('black'),
+                    //         child: Padding(
+                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                    //           child: AnimatedContainer(
+                    //             duration: const Duration(milliseconds: 180),
+                    //             curve: Curves.easeOutCubic,
+                    //             width: _selectedThemeMode == 'black' ? 20 : 9,
+                    //             height: _selectedThemeMode == 'black' ? 20 : 9,
+                    //             decoration: BoxDecoration(
+                    //               color: const Color(0xFF1A1A1A),
+                    //               shape: BoxShape.circle,
+                    //               border: Border.all(color: Colors.white24, width: 0.5),
+                    //             ),
+                    //           ),
+                    //         ),
+                    //       ),
+                    //
+                    //       // ⚪ 白ドット
+                    //       GestureDetector(
+                    //         behavior: HitTestBehavior.opaque,
+                    //         onTap: () => _switchThemeMode('white'),
+                    //         child: Padding(
+                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                    //           child: AnimatedContainer(
+                    //             duration: const Duration(milliseconds: 180),
+                    //             curve: Curves.easeOutCubic,
+                    //             width: _selectedThemeMode == 'white' ? 20 : 9,
+                    //             height: _selectedThemeMode == 'white' ? 20 : 9,
+                    //             decoration: BoxDecoration(
+                    //               color: const Color(0xFFE5E5E5),
+                    //               shape: BoxShape.circle,
+                    //               border: Border.all(color: Colors.black12, width: 0.5),
+                    //             ),
+                    //           ),
+                    //         ),
+                    //       ),
+                    //     ],
+                    //   ),
+                    // ),
+
+                    // カレンダー同期ウィジェット（ここへそのまま直結）
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8.0),
                       child: Container(
@@ -768,154 +906,166 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
               Positioned(
                   top: 0, left: 0, right: 0,
                   height: currentHeaderHeight,
-                  child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Color(0xFF020304),
-                            Color(0xFF174a69),
-                            Color(0xFF7ebbdc),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.only(
-                          bottomLeft: Radius.circular(32),
-                          bottomRight: Radius.circular(32),
-                        ),
-                      ),
-                      child: SafeArea(
-                          bottom: false,
-                          child: Column(
-                              children: [
-                                Container(
-                                    height: 56.0,
-                                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                                    child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          GestureDetector(
-                                              behavior: HitTestBehavior.opaque,
-                                              onTap: () => Navigator.pop(context),
-                                              child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                                                Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
-                                                SizedBox(width: 8),
-                                                Text("SETTINGS", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w300, letterSpacing: 1.0)),
-                                              ])
-                                          ),
-                                          GestureDetector(
-                                            behavior: HitTestBehavior.opaque,
-                                            onTap: () {
-                                              if (_isAuthenticated) { widget.onLogout(); setState(() => _isAuthenticated = false); }
-                                              else { Navigator.pop(context); widget.onLogin(); }
-                                            },
-                                            child: Icon(_isAuthenticated ? Icons.logout_rounded : Icons.login_rounded, color: Colors.white, size: 24),
-                                          )
-                                        ]
-                                    )
-                                ),
+                  child: ValueListenableBuilder<String>(
+                    valueListenable: appGradientThemeNotifier,
+                    builder: (context, gradientMode, child) {
+                      final currentPalette = AppGradient.getColors(gradientMode);
 
-                                if (contentOpacity > 0)
-                                  Expanded(
-                                    child: SingleChildScrollView(
-                                      physics: const NeverScrollableScrollPhysics(),
-                                      child: Opacity(
-                                        opacity: contentOpacity,
-                                        child: Column(
-                                          children: [
-                                            Padding(
-                                                padding: const EdgeInsets.only(left: 32.0, right: 32.0, bottom: 8.0, top: 4.0),
-                                                child: Center(
-                                                  child: ConstrainedBox(
-                                                    constraints: const BoxConstraints(maxWidth: 380),
-                                                    child: Row(children: [
-                                                      Expanded(
-                                                          flex: 1,
-                                                          child: LayoutBuilder(builder: (context, constraints) {
-                                                            return AspectRatio(
-                                                                aspectRatio: 1.0,
-                                                                child: Stack(
-                                                                  alignment: Alignment.center,
-                                                                  children: [
-                                                                    SizedBox(
-                                                                      width: constraints.maxWidth, height: constraints.maxWidth,
-                                                                      child: AnimatedBuilder(
-                                                                        animation: _pulseController,
-                                                                        builder: (context, child) => CustomPaint(painter: YearCirclePainter(_pulseController.value, _isClockwise, Colors.white, Colors.white.withOpacity(0.2))),
-                                                                      ),
-                                                                    ),
-                                                                    Column(
-                                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                                      children: [
-                                                                        _buildArrowBtn(Icons.keyboard_arrow_up, () => _animateYear(true), Colors.white),
-                                                                        Text(tempYear.toString(), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w200, letterSpacing: 2.0, height: 1.0)),
-                                                                        _buildArrowBtn(Icons.keyboard_arrow_down, () => _animateYear(false), Colors.white),
-                                                                      ],
-                                                                    )
-                                                                  ],
-                                                                ));
-                                                          })
-                                                      ),
-                                                      const SizedBox(width: 32),
-                                                      Expanded(
-                                                          flex: 1,
-                                                          child: LayoutBuilder(builder: (context, constraints) {
-                                                            return GestureDetector(
-                                                                onTapDown: (details) => _handleCircleTap(details.localPosition, Size(constraints.maxWidth, constraints.maxWidth)),
-                                                                child: AspectRatio(
+                      // 🟢 追記：白テーマの時はヘッダー内の要素を黒（ダーク色）に反転させる定義
+                      final bool isWhiteTheme = gradientMode == 'white';
+                      final Color headerTextColor = isWhiteTheme ? Colors.black87 : Colors.white;
+                      final Color circleInactiveColor = isWhiteTheme ? Colors.black.withOpacity(0.12) : Colors.white.withOpacity(0.2);
+
+                      return Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: currentPalette,
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(32),
+                              bottomRight: Radius.circular(32),
+                            ),
+                          ),
+                          child: SafeArea(
+                              bottom: false,
+                              child: Column(
+                                  children: [
+                                    Container(
+                                        height: 56.0,
+                                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                        child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              GestureDetector(
+                                                  behavior: HitTestBehavior.opaque,
+                                                  onTap: () => Navigator.pop(context),
+                                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                                    Icon(Icons.arrow_back_ios, color: headerTextColor, size: 20), // 🟢 修正
+                                                    const SizedBox(width: 8),
+                                                    Text("SETTINGS", style: TextStyle(color: headerTextColor, fontSize: 20, fontWeight: FontWeight.w300, letterSpacing: 1.0)), // 🟢 修正
+                                                  ])
+                                              ),
+                                              GestureDetector(
+                                                behavior: HitTestBehavior.opaque,
+                                                onTap: () {
+                                                  if (_isAuthenticated) { widget.onLogout(); setState(() => _isAuthenticated = false); }
+                                                  else { Navigator.pop(context); widget.onLogin(); }
+                                                },
+                                                child: Icon(_isAuthenticated ? Icons.logout_rounded : Icons.login_rounded, color: headerTextColor, size: 24), // 🟢 修正
+                                              )
+                                            ]
+                                        )
+                                    ),
+
+                                    if (contentOpacity > 0)
+                                      Expanded(
+                                        child: SingleChildScrollView(
+                                          physics: const NeverScrollableScrollPhysics(),
+                                          child: Opacity(
+                                            opacity: contentOpacity,
+                                            child: Column(
+                                              children: [
+                                                // ─── 🟢 括弧の不整合を完全修復したツインサークルエリア ───
+                                                Padding(
+                                                    padding: const EdgeInsets.only(left: 32.0, right: 32.0, bottom: 8.0, top: 4.0),
+                                                    child: Center(
+                                                      child: ConstrainedBox(
+                                                        constraints: const BoxConstraints(maxWidth: 380),
+                                                        child: Row(children: [
+                                                          // 1. 左側：年度選択サークル
+                                                          Expanded(
+                                                              flex: 1,
+                                                              child: LayoutBuilder(builder: (context, constraints) {
+                                                                return AspectRatio(
                                                                     aspectRatio: 1.0,
                                                                     child: Stack(
                                                                       alignment: Alignment.center,
                                                                       children: [
                                                                         SizedBox(
                                                                           width: constraints.maxWidth, height: constraints.maxWidth,
-                                                                          child: CustomPaint(painter: TermCirclePainter(q1, q2, q3, q4, Colors.white, Colors.white.withOpacity(0.2))),
-                                                                        ),
-                                                                        Padding(
-                                                                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                                                                          child: Text(tempTerm, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w300), maxLines: 2, overflow: TextOverflow.ellipsis),
-                                                                        ),
+                                                                          child: AnimatedBuilder(
+                                                                            animation: _pulseController,
+                                                                            builder: (context, child) => CustomPaint(painter: YearCirclePainter(_pulseController.value, _isClockwise, headerTextColor, circleInactiveColor)),
+                                                                          ), // 💡 AnimatedBuilder を閉じる
+                                                                        ), // 💡 SizedBox を閉じる
+                                                                        Column(
+                                                                          mainAxisAlignment: MainAxisAlignment.center,
+                                                                          children: [
+                                                                            _buildArrowBtn(Icons.keyboard_arrow_up, () => _animateYear(true), headerTextColor),
+                                                                            Text(tempYear.toString(), style: TextStyle(color: headerTextColor, fontSize: 32, fontWeight: FontWeight.w200, letterSpacing: 2.0, height: 1.0)),
+                                                                            _buildArrowBtn(Icons.keyboard_arrow_down, () => _animateYear(false), headerTextColor),
+                                                                          ],
+                                                                        )
                                                                       ],
-                                                                    )));
-                                                          })
+                                                                    ));
+                                                              })
+                                                          ),
+                                                          const SizedBox(width: 32),
+
+                                                          // 2. 右側：学期選択サークル
+                                                          Expanded(
+                                                              flex: 1,
+                                                              child: LayoutBuilder(builder: (context, constraints) {
+                                                                return GestureDetector(
+                                                                    onTapDown: (details) => _handleCircleTap(details.localPosition, Size(constraints.maxWidth, constraints.maxWidth)),
+                                                                    child: AspectRatio(
+                                                                        aspectRatio: 1.0,
+                                                                        child: Stack(
+                                                                          alignment: Alignment.center,
+                                                                          children: [
+                                                                            SizedBox(
+                                                                              width: constraints.maxWidth, height: constraints.maxWidth,
+                                                                              child: CustomPaint(painter: TermCirclePainter(q1, q2, q3, q4, headerTextColor, circleInactiveColor)),
+                                                                            ),
+                                                                            Padding(
+                                                                              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                                                              child: Text(tempTerm, textAlign: TextAlign.center, style: TextStyle(color: headerTextColor, fontSize: 14, fontWeight: FontWeight.w300), maxLines: 2, overflow: TextOverflow.ellipsis),
+                                                                            ),
+                                                                          ],
+                                                                        )));
+                                                              })
+                                                          ),
+                                                        ]),
                                                       ),
-                                                    ]),
+                                                    )
+                                                ),
+
+                                                const SizedBox(height: 8),
+
+                                                Padding(
+                                                  padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 16.0),
+                                                  child: Center(
+                                                    child: ConstrainedBox(
+                                                      constraints: const BoxConstraints(maxWidth: 380),
+                                                      child: Container(
+                                                          decoration: BoxDecoration(
+                                                            color: headerTextColor.withOpacity(0.15), // 🟢 修正：セグメントの枠も動的化
+                                                            borderRadius: BorderRadius.circular(30),
+                                                          ),
+                                                          padding: const EdgeInsets.all(4.0),
+                                                          child: Row(
+                                                              children: [
+                                                                _buildThemeSegment("System", ThemeMode.system),
+                                                                _buildThemeSegment("Light", ThemeMode.light),
+                                                                _buildThemeSegment("Dark", ThemeMode.dark),
+                                                              ]
+                                                          )
+                                                      ),
+                                                    ),
                                                   ),
                                                 )
+                                              ],
                                             ),
-
-                                            const SizedBox(height: 8),
-
-                                            Padding(
-                                              padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 16.0),
-                                              child: Center(
-                                                child: ConstrainedBox(
-                                                  constraints: const BoxConstraints(maxWidth: 380),
-                                                  child: Container(
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white.withOpacity(0.15),
-                                                        borderRadius: BorderRadius.circular(30),
-                                                      ),
-                                                      padding: const EdgeInsets.all(4.0),
-                                                      child: Row(
-                                                          children: [
-                                                            _buildThemeSegment("System", ThemeMode.system),
-                                                            _buildThemeSegment("Light", ThemeMode.light),
-                                                            _buildThemeSegment("Dark", ThemeMode.dark),
-                                                          ]
-                                                      )
-                                                  ),
-                                                ),
-                                              ),
-                                            )
-                                          ],
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  )
-                              ]
+                                      )
+                                  ]
+                              )
                           )
-                      )
+                      );
+                    },
                   )
               ),
 

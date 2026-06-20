@@ -4,6 +4,31 @@ import 'package:flutter/material.dart';
 
 final ValueNotifier<ThemeMode> appThemeNotifier = ValueNotifier(ThemeMode.system);
 
+// 🟢 app_theme.dart の ValueNotifier のすぐ下あたりに追記
+final ValueNotifier<String> appGradientThemeNotifier = ValueNotifier('blue');
+
+// 🟢 app_theme.dart の AppGradient クラスを以下に差し替え
+// 🟢 app_theme.dart の AppGradient クラスを以下に差し替え
+class AppGradient {
+  static const List<Color> blue = [Color(0xFF020304), Color(0xFF174a69), Color(0xFF7ebbdc)];
+  static const List<Color> green = [Color(0xFF161616), Color(0xFF455451), Color(0xFFABBBB1)];
+  static const List<Color> black = [Color(0xFF000000), Color(0xFF1A1A1A), Color(0xFF2D2D2C)];
+  static const List<Color> white = [Color(0xFFDCDCDC), Color(0xFFF5F5F5), Color(0xFFFFFFFF)];
+  static const List<Color> purple = [Color(0xFF3D2866), Color(0xFF6E4EAA), Color(0xFFB39DDB)]; // 💡 新設：未来感パステルパープル
+
+  static List<Color> getColors(String mode) {
+    switch (mode) {
+      case 'green': return green;
+      case 'black': return black;
+      case 'white': return white;
+      case 'purple': return purple; // 💡 追記：パープルフローを通す
+      case 'blue':
+      default:
+        return blue;
+    }
+  }
+}
+
 class AppTheme {
   static const Color accent = Color(0xFFD0312D);
   static Color bg(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? Colors.black : const Color(0xFFF2F2F2);

@@ -174,7 +174,13 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
     }
 
     double screenWidth = MediaQuery.of(context).size.width;
-    double previewHeight = screenWidth * _controller!.value.aspectRatio;
+
+    // 🟢 修正①：デバイスの回転状態を検知
+    bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    double camAspect = _controller!.value.aspectRatio;
+
+    // 🟢 修正②：縦画面なら「縦長（1 / Aspect）」、横画面なら「横長（Aspect）」に比率を動的スイッチ
+    double finalAspect = isLandscape ? camAspect : (1 / camAspect);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -185,24 +191,25 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
         bottom: true,
         child: Column(
           children: [
-            // -------------------------------------------------------------------
-            // 1. 左右余白なし・画像が歪まない「完全縦長」の角丸プレビュー窓
-            // -------------------------------------------------------------------
-            Expanded(
-              child: Center(
-                child: Container(
-                  width: screenWidth,
-                  height: previewHeight,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(28.0),
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: GestureDetector(
-                          // ピンチズーム開始
-                          onScaleStart: (details) {
+        // -------------------------------------------------------------------
+        // 1. 左右余白なし・画像が歪まない「完全縦長/横長」の角丸プレビュー窓
+        // -------------------------------------------------------------------
+        Expanded(
+        child: Center(
+        // 🟢 修正：Center の直下に AspectRatio をインジェクション
+        child: AspectRatio(
+          aspectRatio: finalAspect, // センサーの縦横比（isLandscape に応じて自動反転）を強制ホールド
+          child: Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28.0),
+            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    // ピンチズーム開始
+                    onScaleStart: (details) {
                             setState(() {
                               _baseZoomLevel = _currentZoomLevel;
                               _showZoomText = true; // 🟢 テキスト表示
@@ -304,9 +311,10 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
                           ],
                         ),
                       ),
-                    ],
+                     ],
+                   ),
                   ),
-                ),
+               ), // 🟢 追記：この位置に AspectRatio を閉じるカッコを追加
               ),
             ),
 
