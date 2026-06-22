@@ -35,6 +35,8 @@ import 'package:gal/gal.dart';
 import '../services/live_notification_service.dart';
 import '../services/p2p_sync_service.dart'; // 🟢 追記：先ほど作成したP2Pサービスを認識させる
 import 'package:qr_flutter/qr_flutter.dart'; // 🟢 追記：QRコード関連のクラスを一括インポート
+
+import '../utils/qr_payload_parser.dart'; // 🟢 追記：スキャンパーサーをダッシュボードに認識させる
 //lib/screens/dashboard_screen.dartの中身です。
 
 
@@ -391,30 +393,43 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     try {
       _cameraController = CameraController(
         _cameraList[_selectedCamIdx],
-        ResolutionPreset.max, // 🟢 最高画質に完全復活！
+        ResolutionPreset.medium, // 🟢 修正：max から medium に引き下げて安定性を極限まで高める
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.yuv420
+            : ImageFormatGroup.bgra8888, // 🟢 Androidなら明示的にYUVを指定
       );
 
       await _cameraController!.initialize();
 
-      // 🟢 追記：インラインカメラのビデオストリームの裏側でQRコードの常時ステルススキャンを開始
+      // 🟢 追記セクター：バックグラウンドでのQRスキャンを間引き（スロットリング）制御しながら完全実動化
+      bool _isQrProcessing = false; // 内部二重発火防止フラグ
+
       _cameraController!.startImageStream((CameraImage availableImage) async {
-        if (_isCamTakingPicture || !mounted) return; // シャッター中や画面破棄時はスキャンを一時保護
+        // シャッター中、またはすでに前のフレームを解析中なら、このフレームは音速でスルー（無視）する
+        if (_isCamTakingPicture || _isQrProcessing || !mounted) return;
+
+        _isQrProcessing = true; // レーダーロック（解析開始）
 
         try {
-          // 💡 availableImage（YUV420形式等の生バイト）をQRスキャナーに流す
-          // final String? scannedQrText = await MyQrParser.decodeStream(availableImage);
-          String? scannedQrText; // 解析ライブラリから取得した文字列が入る変数（仮）
+          // 🟢 修正：nullや空データが混ざらないようガードを強化
+          if (availableImage.planes.isEmpty) return;
 
-          // もしカメラが「kportal_p2p_v1:」から始まるQRコードを捉えたら
+          final String? scannedQrText = await QrPayloadParser.parseCameraImage(
+              availableImage,
+              _cameraList[_selectedCamIdx]
+          );
+          // (以下略)
+
+          // カメラが「kportal_p2p_v1:」から始まる暗号化QRコードを完全に捉えたら
           if (scannedQrText != null && scannedQrText.startsWith("kportal_p2p_v1:")) {
-            _cameraController!.stopImageStream(); // レーダーを重複発火防止のために即時停止
+            await _cameraController!.stopImageStream(); // 迎撃レーダーを重複発火防止のために即時完全停止
 
-            // 暗暗号化クッキーを一瞬でソケット射出！
+            // 暗号化クッキーをWi-Fi空間へ向けてPOST射出！
             bool sendSuccess = await P2pSyncService.scanAndSendCookie(scannedQrText);
 
             if (sendSuccess && mounted) {
+              HapticFeedback.vibrate(); // 📱 密輸成功を手のひらに伝えるバイブ演出
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('⚡ P2P Link: クッキーの暗号化密輸に成功しました。')),
               );
@@ -422,6 +437,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           }
         } catch (e) {
           debugPrint("Inline QR stream parsing error: $e");
+        } finally {
+          _isQrProcessing = false; // レーダー解放（次のフレームの解析を許可）
         }
       });
 

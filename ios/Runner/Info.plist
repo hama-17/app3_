@@ -65,5 +65,11 @@
 		<false/>
 		<key>NSSupportsLiveActivities</key>
         	<true/>
+        <key>NSLocalNetworkUsageDescription</key>
+        <string>QRコード同期のためにローカルネットワーク上のデバイスと通信します</string>
+        <key>NSBonjourServices</key>
+        <array>
+            <string>_http._tcp</string>
+        </array>
 	</dict>
 </plist>

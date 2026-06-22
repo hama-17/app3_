@@ -62,6 +62,7 @@ dependencies:
   gal: ^2.3.2
   qr_flutter: ^4.1.0
   encrypt: ^5.0.3
+  google_mlkit_barcode_scanning: ^0.14.2
 
 dev_dependencies:
   flutter_test:
