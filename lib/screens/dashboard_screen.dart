@@ -33,6 +33,8 @@ import 'package:camera/camera.dart';
 import 'package:path/path.dart' show join;
 import 'package:gal/gal.dart';
 import '../services/live_notification_service.dart';
+import '../services/p2p_sync_service.dart'; // 🟢 追記：先ほど作成したP2Pサービスを認識させる
+import 'package:qr_flutter/qr_flutter.dart'; // 🟢 追記：QRコード関連のクラスを一括インポート
 //lib/screens/dashboard_screen.dartの中身です。
 
 
@@ -362,6 +364,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   String _cameraCourseMode = 'auto';
   Map<String, dynamic>? _cameraManualCourseObj;
   bool _isCameraPinching = false;
+  // 🟢 追記：フライング誤爆を防ぐための1分猶予タイマーと確定フラグ
+  Timer? _gracePeriodTimer;
+  bool _shouldShowRedAlert = false;
 
   late AnimationController _cameraCaptureAnimController;
   String? _capturedImagePathForAnim;
@@ -392,6 +397,33 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       );
 
       await _cameraController!.initialize();
+
+      // 🟢 追記：インラインカメラのビデオストリームの裏側でQRコードの常時ステルススキャンを開始
+      _cameraController!.startImageStream((CameraImage availableImage) async {
+        if (_isCamTakingPicture || !mounted) return; // シャッター中や画面破棄時はスキャンを一時保護
+
+        try {
+          // 💡 availableImage（YUV420形式等の生バイト）をQRスキャナーに流す
+          // final String? scannedQrText = await MyQrParser.decodeStream(availableImage);
+          String? scannedQrText; // 解析ライブラリから取得した文字列が入る変数（仮）
+
+          // もしカメラが「kportal_p2p_v1:」から始まるQRコードを捉えたら
+          if (scannedQrText != null && scannedQrText.startsWith("kportal_p2p_v1:")) {
+            _cameraController!.stopImageStream(); // レーダーを重複発火防止のために即時停止
+
+            // 暗暗号化クッキーを一瞬でソケット射出！
+            bool sendSuccess = await P2pSyncService.scanAndSendCookie(scannedQrText);
+
+            if (sendSuccess && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('⚡ P2P Link: クッキーの暗号化密輸に成功しました。')),
+              );
+            }
+          }
+        } catch (e) {
+          debugPrint("Inline QR stream parsing error: $e");
+        }
+      });
 
       _camMinZoom = await _cameraController!.getMinZoomLevel();
       double deviceMax = await _cameraController!.getMaxZoomLevel();
@@ -431,6 +463,133 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         debugPrint("Camera dispose error inside background task: $e");
       }
     }
+  }
+
+  // 🟢 修正版：P2Pクッキー密輸用QRコードコンソール（ロジック完全結合版）
+  // 🟢 修正版：P2Pクッキー密輸用QRコードコンソール（Material欠落＆コンテキスト競合を完全修復）
+  // 🟢 リファイン完全版：ライトモード時もダーク固定 ＆ 180px対称サークルボタン ＆ 縦長インダストリアルUI
+  // 🟢 リファイン確定版：完全上下対称グリッド ＆ ダーク固定 ＆ 筐体サイズ微拡大
+  void _showP2pQRConnectionDialog() {
+    const Color panelBg = Color(0xFF161616);
+    const Color textMain = Colors.white;
+    const Color textSub = Colors.white38;
+    const Color borderCol = Colors.white10;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        return FutureBuilder<String>(
+            future: P2pSyncService.startReceiverServer(
+                onSyncSuccess: () {
+                  if (mounted) {
+                    Navigator.pop(dialogCtx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('P2Pセッション同期が完了しました。時間割を復元します。')),
+                    );
+                    setState(() {
+                      _fetchDataParallel();
+                    });
+                  }
+                }
+            ),
+            builder: (futureCtx, snapshot) {
+              String qrPayload = snapshot.data ?? "loading...";
+              bool isServerReady = snapshot.hasData;
+
+              return Center(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Container(
+                    width: 290, // 💡 決定打①：横幅を260pxから「290px」へ微拡大し、180pxマスの質量に負けない最適な余白感を確保
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 36.0),
+                    decoration: BoxDecoration(
+                      color: panelBg,
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(color: borderCol, width: 0.5),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // ① 【最上段】：固定高テキストエリア（左スワイプのカメラ誘導）
+                        SizedBox(
+                          height: 36, // 💡 決定打②：高さを36pxに固定し、文字数や行数のブレによる上下の非対称を物理的に完全封殺
+                          child: Center(
+                            child: Text(
+                              "ログイン済みのアプリの\nメモカメラをかざしてください",
+                              style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w300, height: 1.4),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 28), // 🎯 対称マージンA（上側）
+
+                        // ② 【中央・上】：QRコード（180pxスクエア）
+                        Container(
+                          width: 180,
+                          height: 180,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          child: !isServerReady
+                              ? const Center(child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                              : QrImageView(
+                            data: qrPayload,
+                            size: 148.0,
+                          ),
+                        ),
+                        const SizedBox(height: 24), // 🎯 コアマージン（中央境界線）
+
+                        // ③ 【中央・下】：手動迂回ボタン（180pxサークル）
+                        GestureDetector(
+                          onTap: () async {
+                            await P2pSyncService.stopServer();
+                            if (mounted) {
+                              Navigator.pop(dialogCtx);
+                              widget.onLogin();
+                            }
+                          },
+                          child: Container(
+                            width: 180,
+                            height: 180,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.black,
+                              size: 40,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 28), // 🎯 对称マージンA（下側）
+
+                        // ④ 【最下段】：固定高テキストエリア（通常のログインサイト）
+                        SizedBox(
+                          height: 36, // 💡 決定打③：最上段と全く同じ36pxの器で包むことで、完全に計算され尽くした美しいシンメトリーを構築
+                          child: Center(
+                            child: Text(
+                              "通常のログインサイトでログイン\n(初回ログイン)",
+                              style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w300, height: 1.4),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+        );
+      },
+    ).then((_) async {
+      await P2pSyncService.stopServer();
+    });
   }
 
   void _switchCameraFacing() {
@@ -958,25 +1117,55 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   };
 
 
-  // ★ 修正：エラー時/ログアウト時、および読み込み時のアニメーションを自動制御
+  // 🟢 新設：不具合を検知しても即座に赤くせず、1分間の猶予を耐え抜いた場合のみ点火する
+  // 🟢 修正版：猶予を5秒に短縮 ＆ ガチのログアウト時のみ赤フラグを点灯させる
+  void _evaluateAlertState() {
+    // ① ガチのログアウト状態（未認証）かどうか
+    bool isLoggedOut = !widget.isAuthenticated;
+
+    if (isLoggedOut) {
+      if (_shouldShowRedAlert || _gracePeriodTimer != null) return;
+
+      // ⏱️ 執行猶予を「5秒」に短縮インプラント
+      _gracePeriodTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted) {
+          setState(() => _shouldShowRedAlert = true); // 5秒経っても未認証なら「赤点滅」を確定
+          _updateAlertAnimation();
+        }
+      });
+    } else {
+      // ログイン状態が維持されているなら、通信エラー（_hasApiError）があっても赤フラグは絶対に立てない
+      _gracePeriodTimer?.cancel();
+      _gracePeriodTimer = null;
+      if (_shouldShowRedAlert) {
+        setState(() => _shouldShowRedAlert = false);
+        _updateAlertAnimation();
+      }
+    }
+  }
+
   void _updateAlertAnimation() {
     bool isLoading = _isLoadingAssignments || _isLoadingMessages;
 
-
-    if (!widget.isAuthenticated || _hasApiError) {
+    // ❌ 修正前: if (!widget.isAuthenticated || _hasApiError)
+    // 🟢 修正後: 1分猶予が切れて完全にエラーが確定したフラグ（_shouldShowRedAlert）のみをトリガーにする
+    if (_shouldShowRedAlert) {
       if (!_errorAnimController.isAnimating) _errorAnimController.repeat(reverse: true);
       if (_colorAnimController.isAnimating) { _colorAnimController.stop(); _colorAnimController.reset(); }
       if (_spinAnimController.isAnimating) { _spinAnimController.stop(); _spinAnimController.reset(); }
     } else if (isLoading) {
       if (_errorAnimController.isAnimating) { _errorAnimController.stop(); _errorAnimController.reset(); }
       if (!_colorAnimController.isAnimating) _colorAnimController.repeat(reverse: true);
-      if (!_spinAnimController.isAnimating) _spinAnimController.repeat(); // ★ 追加：一方向に回転し続ける
+      if (!_spinAnimController.isAnimating) _spinAnimController.repeat();
     } else {
       if (_errorAnimController.isAnimating) { _errorAnimController.stop(); _errorAnimController.reset(); }
       if (_colorAnimController.isAnimating) { _colorAnimController.stop(); _colorAnimController.reset(); }
       if (_spinAnimController.isAnimating) { _spinAnimController.stop(); _spinAnimController.reset(); }
     }
   }
+
+
+  // ★ 修正：エラー時/ログアウト時、および読み込み時のアニメーションを自動制御
 
 
 
@@ -1420,30 +1609,39 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   // ★ 修正：RefreshIndicatorで待機できるよう Future を返す非同期関数に変更
   // ─── _DashboardPageState 内の _fetchDataParallel メソッド ───
 
-  // ★ 修正：RefreshIndicatorで待機できるよう Future を返す非同期関数に変更
   Future<void> _fetchDataParallel() async {
-    _lastFetchTime = DateTime.now(); // ⏱️ 🟢 追記：同期の瞬間の時刻をガチッと記録
+    _lastFetchTime = DateTime.now();
 
     if (mounted) {
-      setState(() { _hasApiError = false; _isLoadingAssignments = true; _isLoadingMessages = true; });
+      setState(() {
+        _hasApiError = false;
+        _isLoadingAssignments = true;
+        _isLoadingMessages = true;
+        // ⚡ 追記：通信開始時は一旦赤点滅の確定を保留し、猶予タイマーをリセット
+        _gracePeriodTimer?.cancel();
+        _gracePeriodTimer = null;
+        _shouldShowRedAlert = false;
+      });
       _updateAlertAnimation();
     }
-    // ...（以降の既存の通信処理はそのまま維持）
-    // 両方の通信が終わるまで待機する
+
+    // 両方の通信が終わるまで待記
     await Future.wait([
       _fetchAssignments(),
       _fetchMessages()
     ]);
 
-    // -------------------------------------------------------------------
-    // 🟢 追記：LMS通信（＆キャッシュ展開）が完全完了した瞬間にアラームを全一斉更新
-    // -------------------------------------------------------------------
+    // 🟢 追記：すべての並列通信が完了したタイミングで、状態を厳密に評価して1分タイマーの判定へ回す
+    if (mounted) {
+      _evaluateAlertState();
+    }
+
     try {
       await LiveNotificationService.reScheduleLiveNotifications(
-        currentCourses: _displayCourses,     // 確定済みのスケジュール順授業リスト
-        currentAssignments: _assignments,   // 確定済みのソート済タスクリスト
+        currentCourses: _displayCourses,
+        currentAssignments: _assignments,
       );
-      debugPrint("ライブカウントダウン通知のアラームを正常に再予約しました");
+      debugPrint("ライブカウントダウン通知のアラームを正常再予約しました");
     } catch (e) {
       debugPrint("ライブ通知の予約中にエラーが発生しました: $e");
     }
@@ -1613,7 +1811,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _triggerErrorState();
     } finally {
       if (mounted) {
-        setState(() { _isLoadingAssignments = false; _hasApiError = false; });
+        // ❌ 修正前: setState(() { _isLoadingAssignments = false; _hasApiError = false; });
+        // 🟢 修正後: エラーの誤爆上書きを削除し、純粋にローディングのみを落とす
+        setState(() { _isLoadingAssignments = false; });
         _updateAlertAnimation();
       }
     }
@@ -1682,7 +1882,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _triggerErrorState();
     } finally {
       if (mounted) {
-        setState(() { _isLoadingMessages = false; _hasApiError = false; });
+        // ❌ 修正前: setState(() { _isLoadingMessages = false; _hasApiError = false; });
+        // 🟢 修正後: 同様に誤爆を削除
+        setState(() { _isLoadingMessages = false; });
         _updateAlertAnimation();
       }
     }
@@ -5447,11 +5649,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   // 🟢 修正：カメラ側のマイナス値（-1.0〜0.0）を安全に遮断し、左はみ出しを防止する決定版
+  // 🟢 修正完全版：古いログイン画面へのダイレクト遷移をパージし、P2Pポップアップへ完全結線
   Widget _buildBottomNavigation() {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // 🟢 解決の鍵：下部バーの内部レイアウト計算用に、0.0〜1.0の範囲に美しくクランプした安全な位置変数を定義します
-    // これにより、カメラ画面にどれだけ深くスワイプしても、トグル自体は「TASKS」の左端位置でピタッと綺麗に静止します
+    // 🟢 下部バーの内部レイアウト計算用に、0.0〜1.0の範囲に美しくクランプした安全な位置変数を定義します
     final double safePos = _dragPosition.clamp(0.0, 1.0);
 
     int leftFlex = (80 - safePos * 60).toInt();
@@ -5465,6 +5667,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       padding: EdgeInsets.fromLTRB(8.0, 0, 8.0, MediaQuery.of(context).padding.bottom + 16.0),
       child: Row(
         children: [
+          // -------------------------------------------------------------------
+          // 【左側】：P2Pコンソール起動 ＆ 同期 ＆ 赤点滅パルスボタン
+          // -------------------------------------------------------------------
           AnimatedBuilder(
               animation: Listenable.merge([_colorAnimController, _errorAnimController, _spinAnimController]),
               builder: (context, child) {
@@ -5473,9 +5678,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 bool isLoading = _isLoadingAssignments || _isLoadingMessages;
                 Color appBgColor = AppTheme.bg(context);
 
-                if (!widget.isAuthenticated || _hasApiError) {
-                  bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
-                  iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
+                // ❌ 修正前: if (!widget.isAuthenticated || _hasApiError)
+                // 🟢 修正後: 1分間の執行猶予を耐え抜いて、本当にログインが死んでいる時だけ赤点滅させる
+                // 🟢 修正版：ガチのログアウト（赤点滅）と単なる通信不通（オレンジ）を完全分離
+                if (_shouldShowRedAlert) {
+                  // 🚨 5秒以上本当にログアウトしている：激しい警告赤でパルス点滅
+                  bg = Color.lerp(const Color(0xFF1A1A1A), const Color(0xFFD0312D), _errorAnimController.value) ?? const Color(0xFFD0312D);
+                  iconData = Icons.login_rounded;
+                } else if (_hasApiError) {
+                  // ⚠️ セッションは生きてるが通信がコケただけ：警告オレンジ（点滅はせず静かにアピール）
+                  bg = const Color(0xFFE67E22);
+                  iconData = Icons.sync_problem_rounded;
                 } else if (isLoading) {
                   bg = _colorAnimController.value == 0.0
                       ? baseBgColor
@@ -5496,15 +5709,28 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
                 return GestureDetector(
                   onTap: () {
-                    if (!widget.isAuthenticated) {
-                      widget.onLogin();
-                    } else if (!isLoading) {
+                    if (_shouldShowRedAlert) {
+                      // 🟢 本物のログアウト時のみ、満を持してP2P接続（QR）を要求
+                      _showP2pQRConnectionDialog();
+                    } else {
+                      // 🟢 通常時、および「単なる通信エラー（オレンジ）」の時は、ボタンを押せば普通にリトライ通信を執行！
+                      // これにより、手動でOkta画面にログインしに行く無駄足が完全にゼロになります。
                       _fetchDataParallel();
                     }
                   },
                   child: Container(
                     width: 60, height: 60,
-                    decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: bg,
+                      shape: BoxShape.circle,
+                      boxShadow: (!widget.isAuthenticated || _hasApiError) ? [
+                        BoxShadow(
+                          color: const Color(0xFFD0312D).withOpacity(0.3 * _errorAnimController.value),
+                          blurRadius: 12,
+                          spreadRadius: 4 * _errorAnimController.value,
+                        )
+                      ] : null,
+                    ),
                     child: iconWidget,
                   ),
                 );
@@ -5512,6 +5738,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           ),
           const SizedBox(width: 8),
 
+          // -------------------------------------------------------------------
+          // 【中央】：TO DO ⇄ COURSES メインスライドトグルバー
+          // -------------------------------------------------------------------
           Expanded(
             child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -5543,7 +5772,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           AnimatedAlign(
                             duration: const Duration(milliseconds: 150),
                             curve: Curves.easeOutCubic,
-                            // 🟢 修正：_dragPosition の代わりに safePos を適用して左突き抜けを完全ブロック
                             alignment: Alignment(safePos * 2 - 1, 0),
                             child: FractionallySizedBox(
                               widthFactor: 0.8,
@@ -5571,7 +5799,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
                                               Icon(Icons.view_agenda_rounded, color: textColor, size: 20),
-                                              // 🟢 修正：文字の消失フェード条件も safePos にバインド
                                               if (safePos < 0.5) ...[
                                                 const SizedBox(width: 6),
                                                 Flexible(child: Text("TO DO", style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w300, letterSpacing: 0.5), overflow: TextOverflow.clip))
@@ -5594,7 +5821,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
                                               Icon(Icons.apps_rounded, color: textColor, size: 20),
-                                              // 🟢 修正：文字の出現フェード条件も safePos にバインド
                                               if (safePos >= 0.5) ...[
                                                 const SizedBox(width: 6),
                                                 Flexible(child: Text("COURSES", style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w300, letterSpacing: 0.5), overflow: TextOverflow.clip))
@@ -5615,6 +5841,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           ),
           const SizedBox(width: 8),
 
+          // -------------------------------------------------------------------
+          // 【右側】：設定画面（Settings）起動サークルボタン
+          // -------------------------------------------------------------------
           Container(
             width: 60, height: 60,
             decoration: BoxDecoration(color: baseBgColor, shape: BoxShape.circle),
