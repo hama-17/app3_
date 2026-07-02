@@ -8,56 +8,56 @@ class DummyDataHelper {
     return [
       {
         'id': 991,
-        'name': '[月1] 材料力学第1[14棟201]',
+        'name': '[月2] 力学第1[14棟201]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 1, 'name': '佐藤 教授'}]
       },
       {
         'id': 992,
-        'name': '[月3月4] 制御工学概論[11棟312]',
+        'name': '[月3月4木3木4] 機械工学実験[11棟312]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 2, 'name': '田中 准教授'}]
       },
       {
         'id': 993,
-        'name': '[火4木4] 熱力学基礎[12棟102]',
+        'name': '[月5木5] 熱力学基礎[12棟102]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 3, 'name': '鈴木 教授'}]
       },
       {
         'id': 994,
-        'name': '[水2金2] 電磁気学[14棟101]',
+        'name': '[火4金4] 電磁気学[14棟101]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 4, 'name': '高橋 教授'}]
       },
       {
         'id': 995,
-        'name': '[水5] 流体力学[14棟203]',
+        'name': '[火1火2] 流体力学[14棟203]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 5, 'name': '渡辺 准教授'}]
       },
       {
         'id': 996,
-        'name': '[木1木2] 解析力学[14棟202]',
+        'name': '[木2] 解析力学[14棟202]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 6, 'name': '伊藤 教授'}]
       },
       {
         'id': 997,
-        'name': '[水4金4] 数理統計学[10棟201]',
+        'name': '[水2] 数理統計学[10棟201]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 7, 'name': '山本 教授'}]
       },
       {
         'id': 998,
-        'name': '[金5] システムデザイン論[11棟205]',
+        'name': '[火5金5] システムデザイン論[11棟205]',
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 8, 'name': '中村 准教授'}]
@@ -71,8 +71,8 @@ class DummyDataHelper {
     return [
       {
         'id': 881,
-        'name': '第3章：不静定応力に関する演習問題レポート',
-        'due_at': DateTime(now.year, now.month, now.day + 1, 23, 59).toIso8601String(),
+        'name': '演習レポート',
+        'due_at': DateTime(now.year, now.month, now.day + 2, 10, 00).toIso8601String(),
         'context_name': '材料力学第1 [MON 1.2] [14棟201]',
         'course_id': 991,
         'points_possible': 10,
@@ -81,7 +81,7 @@ class DummyDataHelper {
       },
       {
         'id': 882,
-        'name': 'マクスウェル方程式の導出と境界条件の考察',
+        'name': '課題5',
         'due_at': DateTime(now.year, now.month, now.day + 3, 18, 0).toIso8601String(),
         'context_name': '電磁気学 [WED 1.2] [14棟101]',
         'course_id': 994,
@@ -91,14 +91,24 @@ class DummyDataHelper {
       },
       {
         'id': 883,
-        'name': '前半部分の中間振り返りレポート（全2枚）',
-        'due_at': DateTime(now.year, now.month, now.day + 6, 23, 59).toIso8601String(),
+        'name': '小テスト9回目',
+        'due_at': DateTime(now.year, now.month, now.day + 5, 23, 59).toIso8601String(),
         'context_name': '解析力学 [THU 1.2] [14棟202]',
         'course_id': 996,
         'points_possible': 100,
         'submission_types': ['online_upload'],
         'allowed_extensions': ['pdf', 'docx']
-      }
+      },
+      {
+        'id': 884,
+        'name': '(7)予習課題3',
+        'due_at': DateTime(now.year, now.month, now.day + 6, 23, 59).toIso8601String(),
+        'context_name': '材料力学第1 [MON 1.2] [14棟201]',
+        'course_id': 991,
+        'points_possible': 10,
+        'submission_types': ['online_upload'],
+        'allowed_extensions': ['pdf']
+      },
     ];
   }
 
@@ -115,7 +125,7 @@ class DummyDataHelper {
       },
       {
         'id': 772,
-        'title': 'レポート課題の評価基準（ルーブリック）の公開について',
+        'title': 'レポート課題の評価基準の公開について',
         'posted_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
         'context_name': '電磁気学',
         'course_id': 994,
@@ -140,9 +150,9 @@ class DummyDataHelper {
     // ----------------------------------------------------
     if (type == 'MODULES') {
       String courseName = "講義";
-      if (courseId == 991) courseName = "材料力学";
-      if (courseId == 992) courseName = "制御工学";
-      if (courseId == 993) courseName = "熱力学";
+      if (courseId == 991) courseName = "力学第1";
+      if (courseId == 992) courseName = "機械工学実験";
+      if (courseId == 993) courseName = "熱力学基礎";
       if (courseId == 994) courseName = "電磁気学";
       if (courseId == 995) courseName = "流体力学";
       if (courseId == 996) courseName = "解析力学";

@@ -504,104 +504,104 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     // ─── 🟢 修正：見た目の美しさはそのままに、タップ判定をドカンと拡大 ───
                     // ─── 🟢 修正：4色（青・緑・黒・白）の拡張型カラーインジケータードット ───
                     // ─── 🟢 修正：5色（青・緑・紫・黒・白）対応型カラーインジケータードットバー ───
-                    // Padding(
-                    //   padding: const EdgeInsets.only(bottom: 24.0),
-                    //   child: Row(
-                    //     mainAxisAlignment: MainAxisAlignment.center,
-                    //     children: [
-                    //       // 🔵 青ドット
-                    //       GestureDetector(
-                    //         behavior: HitTestBehavior.opaque,
-                    //         onTap: () => _switchThemeMode('blue'),
-                    //         child: Padding(
-                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0), // 5色化に伴いクッション幅を最適化
-                    //           child: AnimatedContainer(
-                    //             duration: const Duration(milliseconds: 180),
-                    //             curve: Curves.easeOutCubic,
-                    //             width: _selectedThemeMode == 'blue' ? 20 : 9,
-                    //             height: _selectedThemeMode == 'blue' ? 20 : 9,
-                    //             decoration: const BoxDecoration(color: Color(0xFF174a69), shape: BoxShape.circle),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //
-                    //       // 🟢 緑ドット
-                    //       GestureDetector(
-                    //         behavior: HitTestBehavior.opaque,
-                    //         onTap: () => _switchThemeMode('green'),
-                    //         child: Padding(
-                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
-                    //           child: AnimatedContainer(
-                    //             duration: const Duration(milliseconds: 180),
-                    //             curve: Curves.easeOutCubic,
-                    //             width: _selectedThemeMode == 'green' ? 20 : 9,
-                    //             height: _selectedThemeMode == 'green' ? 20 : 9,
-                    //             decoration: const BoxDecoration(color: Color(0xFF455451), shape: BoxShape.circle),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //
-                    //       // 🟣 紫ドット
-                    //       GestureDetector(
-                    //         behavior: HitTestBehavior.opaque,
-                    //         onTap: () => _switchThemeMode('purple'),
-                    //         child: Padding(
-                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
-                    //           child: AnimatedContainer(
-                    //             duration: const Duration(milliseconds: 180),
-                    //             curve: Curves.easeOutCubic,
-                    //             width: _selectedThemeMode == 'purple' ? 20 : 9,
-                    //             height: _selectedThemeMode == 'purple' ? 20 : 9,
-                    //             decoration: const BoxDecoration(
-                    //               color: Color(0xFF9E86EF), // 💡 パステルネオンパープル
-                    //               shape: BoxShape.circle,
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //
-                    //       // ⚫ 黒ドット
-                    //       GestureDetector(
-                    //         behavior: HitTestBehavior.opaque,
-                    //         onTap: () => _switchThemeMode('black'),
-                    //         child: Padding(
-                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
-                    //           child: AnimatedContainer(
-                    //             duration: const Duration(milliseconds: 180),
-                    //             curve: Curves.easeOutCubic,
-                    //             width: _selectedThemeMode == 'black' ? 20 : 9,
-                    //             height: _selectedThemeMode == 'black' ? 20 : 9,
-                    //             decoration: BoxDecoration(
-                    //               color: const Color(0xFF1A1A1A),
-                    //               shape: BoxShape.circle,
-                    //               border: Border.all(color: Colors.white24, width: 0.5),
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //
-                    //       // ⚪ 白ドット
-                    //       GestureDetector(
-                    //         behavior: HitTestBehavior.opaque,
-                    //         onTap: () => _switchThemeMode('white'),
-                    //         child: Padding(
-                    //           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
-                    //           child: AnimatedContainer(
-                    //             duration: const Duration(milliseconds: 180),
-                    //             curve: Curves.easeOutCubic,
-                    //             width: _selectedThemeMode == 'white' ? 20 : 9,
-                    //             height: _selectedThemeMode == 'white' ? 20 : 9,
-                    //             decoration: BoxDecoration(
-                    //               color: const Color(0xFFE5E5E5),
-                    //               shape: BoxShape.circle,
-                    //               border: Border.all(color: Colors.black12, width: 0.5),
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //     ],
-                    //   ),
-                    // ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 24.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // 🔵 青ドット
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _switchThemeMode('blue'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0), // 5色化に伴いクッション幅を最適化
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                width: _selectedThemeMode == 'blue' ? 20 : 9,
+                                height: _selectedThemeMode == 'blue' ? 20 : 9,
+                                decoration: const BoxDecoration(color: Color(0xFF174a69), shape: BoxShape.circle),
+                              ),
+                            ),
+                          ),
+
+                          // 🟢 緑ドット
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _switchThemeMode('green'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                width: _selectedThemeMode == 'green' ? 20 : 9,
+                                height: _selectedThemeMode == 'green' ? 20 : 9,
+                                decoration: const BoxDecoration(color: Color(0xFF455451), shape: BoxShape.circle),
+                              ),
+                            ),
+                          ),
+
+                          // 🟣 紫ドット
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _switchThemeMode('purple'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                width: _selectedThemeMode == 'purple' ? 20 : 9,
+                                height: _selectedThemeMode == 'purple' ? 20 : 9,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF9E86EF), // 💡 パステルネオンパープル
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // ⚫ 黒ドット
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _switchThemeMode('black'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                width: _selectedThemeMode == 'black' ? 20 : 9,
+                                height: _selectedThemeMode == 'black' ? 20 : 9,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1A1A1A),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white24, width: 0.5),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // ⚪ 白ドット
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _switchThemeMode('white'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                width: _selectedThemeMode == 'white' ? 20 : 9,
+                                height: _selectedThemeMode == 'white' ? 20 : 9,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE5E5E5),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.black12, width: 0.5),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
                     // カレンダー同期ウィジェット（ここへそのまま直結）
                     Padding(
