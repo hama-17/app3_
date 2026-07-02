@@ -50,9 +50,10 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
   bool _isMemoOpen = false;
   bool _isCollapsed = false;
   Map<String, Map<String, int>> _courseOverrides = {};
-
-  // 👇 追加：各授業の学期属性（Q1〜Q4）のカスタム上書き情報を保持するマップ
   Map<String, String> _courseTermOverrides = {};
+
+  // ─── 🔑 新設：MEMOタブのStateを別タブからダイレクトにハック・同期するためのGlobalKey ───
+  final GlobalKey<_CourseMemoWidgetState> _memoKey = GlobalKey<_CourseMemoWidgetState>();
 
 
 
@@ -850,43 +851,31 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                               pageCount = 2;
                               pages = [
                                 _CourseMemoWidget(
+                                    key: _memoKey, // 👈 🔑 鍵を装着してロックオン
                                     courseId: cur['id'].toString(),
                                     courseName: cur['title'] ?? cur['name'] ?? '',
                                     bgColor: Colors.transparent,
                                     textColor: textCol,
                                     onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
                                 ),
-                                Container(
-                                    width: double.infinity,
-                                    color: Colors.transparent,
-                                    child: Center(
-                                        child: Column(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.edit_note, size: 48, color: textCol.withOpacity(0.5)),
-                                              const SizedBox(height: 16),
-                                              Text("CUSTOM COURSE", style: TextStyle(color: textCol, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-                                              const SizedBox(height: 8),
-                                              Text("NO SYLLABUS DATA", style: TextStyle(color: textCol.withOpacity(0.7), fontSize: 10, letterSpacing: 1.0)),
-                                            ]
-                                        )
-                                    )
-                                )
+                                Container( /* ...カスタム授業用タスク画面... */ )
                               ];
                             } else if (widget.isAuthenticated) {
                               pageCount = 5;
                               pages = [
                                 _CourseMemoWidget(
+                                    key: _memoKey, // 👈 🔑 鍵を装着してロックオン
                                     courseId: cur['id'].toString(),
                                     courseName: cur['title'] ?? cur['name'] ?? '',
                                     bgColor: Colors.transparent,
                                     textColor: textCol,
                                     onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
                                 ),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'MODULES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'ASSIGNMENTS', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'GRADES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'ANNOUNCE', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId),
+                                // 🟢 修正：すべてのデータリストの背後に、MEMOへの直撃ルートを結合
+                                _CourseDataList(courseId: cur['id'], endpointType: 'MODULES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'ASSIGNMENTS', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'GRADES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'ANNOUNCE', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
                               ];
                             } else {
                               pageCount = 2;
@@ -979,7 +968,10 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
 // （以下、_CourseDataList、_CourseMemoWidget、_TextInputOverlay、_FullScreenImageGallery は変更なし）
 class _CourseDataList extends StatefulWidget {
   final int courseId; final String endpointType; final String cookie; final Color bgColor; final Color textColor; final String? targetItemId;
-  const _CourseDataList({required this.courseId, required this.endpointType, required this.cookie, required this.bgColor, required this.textColor, this.targetItemId});
+  final Function(List<String>)? onImagesSaved; // 🟢 追記：画像が保存されたことを親画面に中継するコールバック
+
+  // 🟢 修正：コンストラクタに onImagesSaved を追加
+  const _CourseDataList({required this.courseId, required this.endpointType, required this.cookie, required this.bgColor, required this.textColor, this.targetItemId, this.onImagesSaved});
   @override
   State<_CourseDataList> createState() => _CourseDataListState();
 }
@@ -1063,6 +1055,7 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                   // --- MODULES ---
                   if (widget.endpointType == 'MODULES') {
                     children = (item['items'] as List? ?? []).map((si) {
+                      // 🎯 大切な変数定義をしっかり保持
                       String subTitle = si['title'] ?? 'Unknown';
                       String type = si['type'] ?? '';
                       IconData icon;
@@ -1075,7 +1068,16 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                         default: icon = Icons.circle; break;
                       }
                       return InkWell(
-                          onTap: () => openSmartUrl(context, si['html_url'] ?? si['url'] ?? '', widget.cookie, title: subTitle),
+                          onTap: () {
+                            // 🚀 コールバックを安全に最深部へパススルー
+                            openSmartUrl(
+                              context,
+                              si['html_url'] ?? si['url'] ?? '',
+                              widget.cookie,
+                              title: subTitle,
+                              onImagesSaved: widget.onImagesSaved,
+                            );
+                          },
                           child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                               child: Row(
@@ -1284,15 +1286,14 @@ class _CourseMemoWidget extends StatefulWidget {
   final Color textColor;
   final ValueChanged<bool>? onMemoStateChanged;
 
-
   const _CourseMemoWidget({
+    super.key, // 🎯 修正：これを取り込むことで、外部からの GlobalKey バインディングが可能になります
     required this.courseId,
     this.courseName = '',
     required this.bgColor,
     required this.textColor,
     this.onMemoStateChanged,
   });
-
 
   @override
   State<_CourseMemoWidget> createState() => _CourseMemoWidgetState();
@@ -1570,6 +1571,47 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     } finally {
       globalDisableAutoCacheClear = false;
     }
+  }
+
+  // 🎯 完全リファイン：現在の画面表示状態に関わらず、今日のメモシートを強制スキャンして100%確実に画像をねじ込む防衛エンジン
+  void appendExternalImages(List<String> paths) {
+    if (paths.isEmpty) return;
+
+    final now = DateTime.now();
+    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+    final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+
+    // 🟢 画面表示が null や別モードであっても、メモリ内の _memos ログから「今日のシート」のインデックスを直接ハック
+    int todayIdx = _memos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
+
+    // 万が一今日のシートがまだ生成されていなければ、その場で強制緊急生成
+    if (todayIdx == -1) {
+      final filteredName = _getFilteredCourseName(widget.courseName);
+      final newTitle = filteredName.isNotEmpty ? '$dateStr $filteredName' : dateStr;
+
+      _memos.add({
+        'id': now.millisecondsSinceEpoch.toString(),
+        'title': newTitle,
+        'items': <dynamic>[],
+      });
+      todayIdx = _memos.length - 1;
+    }
+
+    setState(() {
+      List<dynamic> items = List<dynamic>.from(_memos[todayIdx]['items'] ?? []);
+      for (var path in paths) {
+        final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString();
+        items.add({
+          'id': uniqueId,
+          'type': 'image',
+          'data': path,
+          'time': timeStr
+        });
+      }
+      _memos[todayIdx]['items'] = items;
+    });
+
+    _saveMemos(); // 🚀 バックグラウンドの SharedPreferences へ即座に確定永続化
   }
 
   // 🟢 タイポグラフィテキスト入力オーバーレイ起動

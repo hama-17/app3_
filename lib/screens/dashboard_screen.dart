@@ -379,16 +379,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     try { _cameraList = await availableCameras(); } catch (_) {}
   }
 
+  // 🟢 修正確定版：Androidの画質クランプバグを完全パージし、センサー本来の最高画素数を一撃解放
   Future<void> _initInlineCamera() async {
     if (_isCamInitialized || _isCamInitializing || _cameraList.isEmpty) return;
 
     _isCamInitializing = true;
     try {
+      // 💡 決定打：フォーマット指定（ImageFormatGroup）を完全に排除。
+      // 指定を無くしてOSネイティブ（null）に委ねることで、AndroidのCamera2 APIが
+      // 「動画ストリームからの切り出し」ではなく「静止画専用の最大高画素センサー出力」をストレートに掴み取れるようになります。
       _cameraController = CameraController(
         _cameraList[_selectedCamIdx],
-        ResolutionPreset.max, // 🟢 最高画質に完全復活！
+        ResolutionPreset.max, // 🎯 端末が物理的にサポートする絶対的な最大解像度を要求
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        // ⚠️ imageFormatGroup は絶対に記述しない（バグの引き金になるため完全削除）
       );
 
       await _cameraController!.initialize();
@@ -3315,6 +3319,45 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                         fontWeight: FontWeight.w200, // スタイリッシュな極細字
                                         letterSpacing: - 0.4,          // テック感を出す広めのカーニング
                                       ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            // 🟢 新設：k-supportへのミニマルなウェブビュー誘導インジケータ
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                // 🎯 ユーザー指定枠：ここにお好みのURLをドッキングしてください
+                                const String kSupportUrl = "https://keiouniversity.my.site.com/students/s/";
+
+                                // 既存のスマートWebViewインフラへセッションクッキーを乗せて射出
+                                openSmartUrl(
+                                    context,
+                                    kSupportUrl,
+                                    widget.cookie,
+                                    title: "k-support"
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 16.0), // ゆったりとした押しやすい座席
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      "k-support",
+                                      style: TextStyle(
+                                        color: AppTheme.textMain(context),
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w200, // ミニマルな極細ウェイトを継承
+                                        letterSpacing: -0.4,          // タイトなカーニングでテック感を統一
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.arrow_outward_rounded, // 外部ポータルへの接続を示すインダストリアルな斜め矢印
+                                      color: AppTheme.textMain(context).withOpacity(0.6),
+                                      size: 22,
                                     ),
                                   ],
                                 ),
