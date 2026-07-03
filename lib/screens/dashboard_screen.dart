@@ -373,6 +373,62 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   DateTime? _lastFetchTime;
 
 
+  // 🎯 新設：課題の親授業IDを自動検知し、裏のローカルDBを直撃してスクショを確実に講義メモへねじ込むインジェクター
+  // 🎯 完全修復：届いたパケットの中にテキストメモが混ざっていたら、正確に type: 'text' へ分離するデコーダー
+  Function(List<String>) _createImgSaverForCourse(String courseId) {
+    return (paths) async {
+      if (paths.isEmpty) return;
+      final prefs = await SharedPreferences.getInstance();
+      final String dbKey = 'course_memos_v2_$courseId';
+      final String? dbData = prefs.getString(dbKey);
+
+      List<Map<String, dynamic>> loadedMemos = [];
+      if (dbData != null) {
+        try {
+          final List<dynamic> decoded = jsonDecode(dbData);
+          loadedMemos = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        } catch (_) {}
+      }
+
+      final now = DateTime.now();
+      final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+      final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+
+      int todayIdx = loadedMemos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
+
+      if (todayIdx == -1) {
+        final currentCourse = widget.allCourses.firstWhere((c) => c['id'].toString() == courseId, orElse: () => {});
+        final cleanName = CourseTitleParser.getCleanTitle(currentCourse['name'] ?? '');
+        final newTitle = cleanName.isNotEmpty ? '$dateStr $cleanName' : dateStr;
+
+        loadedMemos.add({
+          'id': now.millisecondsSinceEpoch.toString(),
+          'title': newTitle,
+          'items': <dynamic>[],
+        });
+        todayIdx = loadedMemos.length - 1;
+      }
+
+      List<dynamic> dbItems = List<dynamic>.from(loadedMemos[todayIdx]['items'] ?? []);
+      for (var path in paths) {
+        final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString();
+
+        // ─── 🟢 修正：テキストメモの識別子（TEXT_MEMO:）を見抜き、type: 'text' として正確にドッキング ───
+        if (path.startsWith("TEXT_MEMO:")) {
+          final actualText = path.substring(10); // 「TEXT_MEMO:」の10文字を削って純粋な本文を取り出す
+          dbItems.add({'id': uniqueId, 'type': 'text', 'data': actualText, 'time': timeStr});
+        } else {
+          dbItems.add({'id': uniqueId, 'type': 'image', 'data': path, 'time': timeStr});
+        }
+      }
+      loadedMemos[todayIdx]['items'] = dbItems;
+
+      await prefs.setString(dbKey, jsonEncode(loadedMemos));
+      _loadCustomData();
+    };
+  }
+
+
 
   // 🟢 独自カメラのオンデマンドライフサイクル制御
   Future<void> _prepareAvailableCameras() async {
@@ -445,16 +501,18 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   // 🟢 追加：永続化コピーやGal登録、授業メモ追加などの重いI/Oを「裏」で完全に非同期実行するメソッド
   // 🟢 修正：パスを外部から固定で受け取り、メインスレッドを1ミリもブロックしない非同期物理保存
+  // 🟢 修正：インラインカメラ（音あり通常撮影）のバックグラウンドタスク
   Future<void> _performBackgroundSaveTasks(String tmpPath, String permanentPath) async {
     try {
       await File(tmpPath).copy(permanentPath);
-      await Gal.putImage(permanentPath);
+      // 🎯 修正：アルバム名を追加
+      await Gal.putImage(permanentPath, album: 'dot archive');
     } catch (e) {
       debugPrint("Background save error: $e");
     }
   }
 
-  // 🟢 修正：無音保存側も同様にディスク書き込みとGal登録のみに純化
+  // 🟢 修正：iOSカメラ（無音撮影）のバックグラウンドタスク
   void _performBackgroundSilentSave(ui.Image image, String permanentPath) {
     Future(() async {
       try {
@@ -462,7 +520,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         if (byteData == null) return;
 
         await File(permanentPath).writeAsBytes(byteData.buffer.asUint8List());
-        await Gal.putImage(permanentPath);
+        // 🎯 修正：アルバム名を追加
+        await Gal.putImage(permanentPath, album: 'dot archive');
         debugPrint("iOS Inline 無音バックグラウンド保存完了");
       } catch (e) {
         debugPrint("Background silent save error: $e");
@@ -2069,7 +2128,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       });
     });
 
-    // 🟢 タイムライン制御用に遷移アニメーションの時間（500ms）を変数化
+    // タイムライン制御用に遷移アニメーションの時間（500ms）を変数化
     const int pushDurationMs = 500;
 
     Navigator.push(context, PageRouteBuilder(
@@ -2089,6 +2148,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           ));
         }
     )).then((_) {
+      // 🎯 【超重要・大逆転プロセッサ】
+      // 詳細画面から戻ってきた瞬間に、ダッシュボード側の最新メモ State を強制リロードさせて画面を完全動転させます。
+      // これにより、SharedPreferences のメモリ書き換え競合を物理的に100%回避します！
+      _loadCustomData();
       if (mounted) {
         setState(() {});
       }
@@ -2851,7 +2914,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   } else {
                     String targetUrl = task['html_url'] ?? task['url'] ?? '';
                     if (targetUrl.isNotEmpty) {
-                      openSmartUrl(context, targetUrl, widget.cookie, title: task['name'] ?? 'Task');
+                      // 🎯 修正：onImagesSaved に専用インジェクターを結合！
+                      openSmartUrl(context, targetUrl, widget.cookie, title: task['name'] ?? 'Task', onImagesSaved: _createImgSaverForCourse(task['course_id'].toString()));
                     } else {
                       int cIdx = _courseIndexMap[task['course_id']] ?? -1;
                       if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: task['id'].toString());
@@ -4313,7 +4377,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                               _showCompleteCustomTaskDialog(item['taskId']);
                                             } else {
                                               String url = item['targetUrl'] ?? '';
-                                              if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: item['title']);
+                                              // 🎯 修正：onImagesSaved に専用インジェクターを結合！
+                                              if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: item['title'], onImagesSaved: _createImgSaverForCourse(item['courseId'].toString()));
                                               else {
                                                 int cIdx = _courseIndexMap[item['courseId']] ?? -1;
                                                 if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: item['taskId']);
@@ -4532,7 +4597,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   if (event['courseId'] == 'custom_t') _showCompleteCustomTaskDialog(event['taskId']);
                                   else {
                                     String url = event['targetUrl'] ?? '';
-                                    if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: event['title']);
+                                    // 🎯 修正：onImagesSaved に専用インジェクターを結合！
+                                    if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: event['title'], onImagesSaved: _createImgSaverForCourse(event['courseId'].toString()));
                                     else {
                                       int cIdx = _courseIndexMap[event['courseId']] ?? -1;
                                       if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: event['taskId']);
@@ -4708,7 +4774,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                           _showCompleteCustomTaskDialog(c['taskId']);
                                         } else {
                                           String url = c['targetUrl'] ?? '';
-                                          if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: c['title']);
+                                          // 🎯 修正：onImagesSaved に専用インジェクターを結合！
+                                          if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: c['title'], onImagesSaved: _createImgSaverForCourse(c['courseId'].toString()));
                                           else {
                                             int cIdx = _courseIndexMap[c['courseId']] ?? -1;
                                             if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: c['taskId']);

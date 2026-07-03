@@ -111,12 +111,18 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
 
         if (isSilentMode) {
           // 🔇 【ルートA】完全無音モード（描画キャプチャ ➔ 中身はPNGバイト）
-          final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.png'); // 🟢 PNGでバインド
+          // 📸 【ルートB】音あり最高物理画質モード / Androidルート（カメラ本来のJPEG出力）
+          final String permanentPath = join(memoImgDir.path, 'IMG_$timeStamp.jpg');
 
-          final RenderRepaintBoundary boundary = _previewContainerKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-          final ui.Image image = await boundary.toImage(pixelRatio: 4.0);
+          final XFile rawImage = await _controller!.takePicture();
+          await File(rawImage.path).copy(permanentPath);
 
-          _customBackgroundWriteTask(image, permanentPath);
+          try {
+            // ─── 🟢 修正：独立カメラ側の通常保存時にもアルバム『AXYZ』を指定 ───
+            await Gal.putImage(permanentPath, album: 'dot archive');
+          } catch (galleryError) {
+            debugPrint("スマホ本体への保存に失敗しました: $galleryError");
+          }
 
           if (mounted) {
             Navigator.pop(context, permanentPath);
@@ -149,6 +155,7 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
   }
 
   // 🟢 追記：重いエンコードとカメラロール保存をUIスレッドの裏で完全非同期処理するエンジン
+  // 🟢 追記：重いエンコードとカメラロール保存をUIスレッドの裏で完全非同期処理するエンジン
   void _customBackgroundWriteTask(ui.Image image, String permanentPath) {
     Future(() async {
       try {
@@ -156,7 +163,10 @@ class _CustomCameraScreenState extends State<CustomCameraScreen> {
         if (byteData == null) return;
 
         await File(permanentPath).writeAsBytes(byteData.buffer.asUint8List());
-        await Gal.putImage(permanentPath);
+
+        // ─── 🟢 修正：iOS無音撮影側のバックグラウンド保存時にもアルバム『AXYZ』を指定 ───
+        await Gal.putImage(permanentPath, album: 'dot archive');
+
         debugPrint("iOS 無音バックグラウンド保存完了: $permanentPath");
       } catch (e) {
         debugPrint("Background write error: $e");

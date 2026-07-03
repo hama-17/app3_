@@ -20,6 +20,8 @@
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
         android:usesCleartextTraffic="true">
+        <!-- 🟢 追記：Android 10等の環境でカスタムフォルダへのレガシー自由書き込みを一時的に許可するシールド -->
+        android:requestLegacyExternalStorage="true">
 
         <activity
             android:name=".MainActivity"

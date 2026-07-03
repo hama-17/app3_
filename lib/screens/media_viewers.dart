@@ -15,12 +15,12 @@ import 'dart:math' as math;
 import 'package:flutter/rendering.dart';
 import 'package:gal/gal.dart';
 
-// ─── 🛠️ lib/screens/media_viewers.dart 上部（InAppBrowserScreen）完全修正版 ───
-
 class InAppBrowserScreen extends StatefulWidget {
   final String url;
   final String cookie;
-  const InAppBrowserScreen({super.key, required this.url, required this.cookie});
+  final Function(List<String>)? onImagesSaved; // 🟢 追記：ブラウザ経由時もイベントを逆流させるための中継皿を新設
+
+  const InAppBrowserScreen({super.key, required this.url, required this.cookie, this.onImagesSaved}); // 🟢 修正
   @override
   State<InAppBrowserScreen> createState() => _InAppBrowserScreenState();
 }
@@ -32,25 +32,21 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   @override
   void initState() {
     super.initState();
-    // 起動の瞬間に、共通ブラウザの深層ストレージへクッキーを直接流し込む
     _injectGlobalCookies();
   }
 
-  // 🟢 新設：別ドメイン（k-support等）へ進んでもセッションを引き継がせる強固なクッキーインプラント
   Future<void> _injectGlobalCookies() async {
     if (widget.cookie.isEmpty) return;
     try {
       final cookieManager = CookieManager.instance();
       final uri = Uri.parse(widget.url);
 
-      // 学校関係の広域共通ドメイン（.keio.jp など）を安全に抽出
       final hostParts = uri.host.split('.');
       String domain = uri.host;
       if (hostParts.length >= 3) {
         domain = ".${hostParts.sublist(hostParts.length - 3).join('.')}";
       }
 
-      // 生のクッキー結合文字列をパーツごとに分解してストアに完全同期
       for (var cookiePart in widget.cookie.split(';')) {
         final kv = cookiePart.split('=');
         if (kv.length >= 2) {
@@ -67,17 +63,13 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
           );
         }
       }
-      debugPrint("🍪 [WebView] クッキーのディープインプラントに成功しました: $domain");
     } catch (e) {
       debugPrint("❌ クッキーのストア注入に失敗: $e");
     }
   }
 
-  // 🟢 修正版：Office系・画像・圧縮ファイルを100%見抜いてPDF誤認を阻止する防衛ロジック
   bool _checkIsPdf(String urlStr) {
     final urlLower = urlStr.toLowerCase();
-
-    // 🛑 決定打：PDF以外の明確な拡張子やキーワードが1文字でもあれば、絶対にPDF判定にしない
     bool isNotPdf = urlLower.contains('.doc') || urlLower.contains('.docx') ||
         urlLower.contains('.xls') || urlLower.contains('.xlsx') ||
         urlLower.contains('.ppt') || urlLower.contains('.pptx') ||
@@ -87,16 +79,12 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
         urlLower.contains('.mp3') || urlLower.contains('.wav') || urlLower.contains('.m4a') ||
         urlLower.contains('isvideo=1');
 
-    if (isNotPdf) return false; // ⚡Office系やメディアファイルなら即座にリジェクト（拉致しない）
+    if (isNotPdf) return false;
 
-    // 以下、純粋なPDFまたは拡張子無しのCanvasファイルを安全にサルベージ
     if (urlLower.contains('.pdf') || urlLower.contains('response-content-type=application/pdf')) {
       return true;
     }
-
     if (urlStr.contains('/files/')) {
-      // 上記の包括的ブラックリストを通過しているため、
-      // ここを通過するのは「URLに拡張子が明記されていないCanvas固有のPDF資料」に100%限定されます
       return true;
     }
     return false;
@@ -119,7 +107,13 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
     if (context.mounted) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => PdfViewerScreen(url: downloadUrl, cookie: widget.cookie)),
+        MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: downloadUrl,
+              cookie: widget.cookie,
+              onImagesSaved: widget.onImagesSaved, // 🎯 徹底修復：千切れていたコールバックをここでPDFビューアへパススルー
+            )
+        ),
       );
     }
   }
@@ -176,8 +170,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                               },
                               initialUrlRequest: URLRequest(
                                 url: WebUri(widget.url),
-                                // 💡 グローバルCookieマネージャー側に事前インプラントしたため、
-                                // ここでの限定的な個別ヘッダー送信は安全に削除（自動で背面のストアから引き継がれます）
                               ),
                               initialSettings: InAppWebViewSettings(
                                 javaScriptEnabled: true,
@@ -189,12 +181,8 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                                 allowsInlineMediaPlayback: true,
                                 useOnDownloadStart: true,
                                 javaScriptCanOpenWindowsAutomatically: true,
-                                // 🎯 修正決断点：マルチウィンドウ（新タブ）要求を『false』に変更！
-                                // これにより、target="_blank" のリンクが強制的に「現在のWebView内の上書き遷移」に統合され、
-                                // 虚空に消えていたポータルの罠リンクたちが100%全開通します。
                                 supportMultipleWindows: false,
                               ),
-
                               onLoadStop: (controller, url) async {
                                 await controller.evaluateJavascript(source: """
                           window.addEventListener('click', function(e) {
@@ -210,12 +198,10 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                           }, true);
                         """);
                               },
-
                               onScrollChanged: (c, x, y) {
                                 if (y <= 0 && !_isTop) setState(() => _isTop = true);
                                 else if (y > 5 && _isTop) setState(() => _isTop = false);
                               },
-
                               onLoadStart: (controller, url) async {
                                 if (url != null) {
                                   final urlStr = url.toString();
@@ -225,7 +211,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                                   }
                                 }
                               },
-
                               shouldOverrideUrlLoading: (c, nav) async {
                                 final uri = nav.request.url;
                                 if (uri != null) {
@@ -238,7 +223,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                                 }
                                 return NavigationActionPolicy.ALLOW;
                               },
-
                               onDownloadStartRequest: (c, req) async {
                                 final urlStr = req.url.toString();
                                 if (_checkIsPdf(urlStr)) {
@@ -252,7 +236,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                               }
                           )
                       ),
-
                       AnimatedPositioned(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOutCubic,
@@ -275,12 +258,6 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
   }
 }
 
-// 🟢 修正版 PdfViewerScreen クラス（media_viewers.dart の中身と差し替えてください）
-
-// ... existing code ...
-
-// ─── 🎨 手書き・マーカーデータを一元管理するデータモデル ───
-// ─── 🎨 手書き・マーカーデータを一元管理するデータモデル ───
 class StrokePoint {
   final double rx;
   final double ry;
@@ -298,7 +275,7 @@ class DrawingStroke {
 class PdfViewerScreen extends StatefulWidget {
   final String url;
   final String cookie;
-  final Function(List<String>)? onImagesSaved; // 🟢 親画面（講義メモ）へ直接射撃するためのコールバック
+  final Function(List<String>)? onImagesSaved;
 
   const PdfViewerScreen({super.key, required this.url, required this.cookie, this.onImagesSaved});
   @override
@@ -312,11 +289,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   String? _resolvedUrl;
   Map<String, String>? _resolvedHeaders;
   bool _isResolving = true;
-
-  // ─── 🔑 新設：ローカル物理パスをホールドする安全なストレージ変数 ───
   String? _localPdfPath;
 
-  // ─── 📸 部分スクショ・トリミング用ステート ───
   final GlobalKey _pdfCaptureKey = GlobalKey();
   ui.Image? _capturedImage;
   bool _isCropMode = false;
@@ -326,7 +300,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   double _cropTopY = 0.15;
   double _cropBottomY = 0.85;
 
-  // ─── 🔍 2本指ズーム＆パン操作用ステート ───
   double _cropZoom = 1.0;
   Offset _cropOffset = Offset.zero;
   double _baseCropZoom = 1.0;
@@ -334,7 +307,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   bool _isPinching = false;
   Offset _baseFocalPoint = Offset.zero;
 
-  // ─── 🎨 手書きペイント・ Undo/Redo ステート ───
   final List<DrawingStroke> _strokes = [];
   final List<DrawingStroke> _redoStrokes = [];
   Color _selectedColor = Colors.red;
@@ -343,7 +315,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   String? _activeBar;
   bool _blockDrawing = false;
 
-  // ─── 🎬 右下吸い込みスライド保存アニメーションコア ───
+  // ─── 📝 新設：テキストメモ専用のオーバーレイ管理ステート ───
+  bool _isTextMemoMode = false;
+  final TextEditingController _textMemoController = TextEditingController();
+  final FocusNode _textMemoFocusNode = FocusNode();
+  String _tempTextMemo = ""; // 🟢 新設：テキストを一時的に仮ホールドしておくためのスタック変数
+
   AnimationController? _saveAnimController;
   Animation<double>? _saveScaleAnim;
   Animation<double>? _saveSlideAnim;
@@ -351,7 +328,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _resolvePdfUrl(); // 🚀 内部でオンデマンド物理ダウンロードを実行
+    _resolvePdfUrl();
     pruneExpiredPdfCache();
 
     _saveAnimController = AnimationController(
@@ -369,7 +346,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   @override
   void dispose() {
     _saveAnimController?.dispose();
-    // 💡 剛性ハック：閲覧終了時に一時フォルダに生成されたPDFの実ファイルを綺麗に物理抹殺
     if (_localPdfPath != null) {
       try {
         final file = File(_localPdfPath!);
@@ -379,46 +355,40 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
     super.dispose();
   }
 
-  // 🎯 完全リファイン：Cookie付きで安全に一発全ダウンロードし、AWSリダイレクトのCookieエラーを物理無効化するエンジン
   Future<void> _resolvePdfUrl() async {
-    try {
-      final String currentUrl = widget.url;
+    String currentUrl = widget.url;
+    Map<String, String>? currentHeaders = {'Cookie': widget.cookie};
 
-      // http.get は標準挙動でリダイレクト先（AWS）へジャンプする際、
-      // 元ドメインの Cookie を自動で安全に剥がしてくれるため、AWSの400エラーを100%回避できます！
-      final response = await http.get(
-        Uri.parse(currentUrl),
-        headers: widget.cookie.isNotEmpty ? {'Cookie': widget.cookie} : {},
-      ).timeout(const Duration(seconds: 15));
+    final lowerUrl = currentUrl.toLowerCase();
+    if (lowerUrl.contains('amazonaws.com') || lowerUrl.contains('sign=')) {
+      currentHeaders = null;
+    } else {
+      try {
+        final client = http.Client();
+        final request = http.Request('GET', Uri.parse(currentUrl))
+          ..headers['Cookie'] = widget.cookie
+          ..followRedirects = false;
 
-      if (response.statusCode == 200) {
-        final tempDir = await getTemporaryDirectory();
-        final String filePath = '${tempDir.path}/viewing_doc_${DateTime.now().millisecondsSinceEpoch}.pdf';
-        final file = File(filePath);
-        await file.writeAsBytes(response.bodyBytes);
+        final response = await client.send(request).timeout(const Duration(seconds: 5));
 
-        if (mounted) {
-          setState(() {
-            _localPdfPath = filePath; // 物理パスを確定マウント
-            _isResolving = false;
-          });
+        if ((response.statusCode == 301 || response.statusCode == 302) && response.headers['location'] != null) {
+          currentUrl = response.headers['location']!;
+          currentHeaders = null;
         }
-      } else {
-        throw Exception("HTTP ${response.statusCode}");
-      }
-    } catch (e) {
-      debugPrint("🎯 ローカル物理ダウンロード不発、従来のオンラインURL直読みに緊急避難: $e");
-      if (mounted) {
-        setState(() {
-          _resolvedUrl = widget.url;
-          _resolvedHeaders = widget.cookie.isNotEmpty ? {'Cookie': widget.cookie} : {};
-          _isResolving = false;
-        });
+        client.close();
+      } catch (e) {
+        debugPrint("PDF Pre-flight Redirect Resolve Error: $e");
       }
     }
+
+    if (mounted) {
+      setState(() {
+        _resolvedUrl = currentUrl;
+        _resolvedHeaders = currentHeaders;
+        _isResolving = false;
+      });
+    }
   }
-
-
 
   Future<void> _triggerPdfCapture() async {
     if (_isResolving) return;
@@ -470,6 +440,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
     try {
       final double srcW = _capturedImage!.width.toDouble();
       final double srcH = _capturedImage!.height.toDouble();
+
+      // ─── 🟢 追記：プレビュー時と解像度の比率を完全に一致させるため、実際の描画論理幅(drawW)を正確に再現 ───
+      final double boxW = MediaQuery.of(context).size.width;
+      final double statusBarHeight = MediaQuery.of(context).padding.top;
+      final double boxH = MediaQuery.of(context).size.height - statusBarHeight - MediaQuery.of(context).padding.bottom - 185.0;
+
+      double drawW, drawH;
+      if ((srcW / srcH) > (boxW / boxH)) {
+        drawW = boxW;
+        drawH = boxW / (srcW / srcH);
+      } else {
+        drawH = boxH;
+        drawW = boxH * (srcW / srcH);
+      }
+
       final double topPixel = srcH * _cropTopY;
       final double bottomPixel = srcH * _cropBottomY;
       final double targetHeight = bottomPixel - topPixel;
@@ -479,7 +464,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
       canvas.drawImage(_capturedImage!, Offset.zero, Paint());
-      _drawStrokesOnCanvas(canvas, srcW, srcH, srcW);
+
+      // 🎯 修正：第4引数を srcW から、今計算した画面上の論理幅である drawW へ変更！
+      _drawStrokesOnCanvas(canvas, srcW, srcH, drawW);
 
       final picture = recorder.endRecording();
       final compositedImage = await picture.toImage(srcW.toInt(), srcH.toInt());
@@ -529,6 +516,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
     try {
       final double srcW = _capturedImage!.width.toDouble();
       final double srcH = _capturedImage!.height.toDouble();
+
+      // ─── 🟢 追記：プレビュー時と解像度の比率を完全に一致させるため、実際の描画論理幅(drawW)を正確に再現 ───
+      final double boxW = MediaQuery.of(context).size.width;
+      final double statusBarHeight = MediaQuery.of(context).padding.top;
+      final double boxH = MediaQuery.of(context).size.height - statusBarHeight - MediaQuery.of(context).padding.bottom - 185.0;
+
+      double drawW, drawH;
+      if ((srcW / srcH) > (boxW / boxH)) {
+        drawW = boxW;
+        drawH = boxW / (srcW / srcH);
+      } else {
+        drawH = boxH;
+        drawW = boxH * (srcW / srcH);
+      }
+
       final double topPixel = srcH * _cropTopY;
       final double bottomPixel = srcH * _cropBottomY;
       final double targetHeight = bottomPixel - topPixel;
@@ -538,7 +540,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
       canvas.drawImage(_capturedImage!, Offset.zero, Paint());
-      _drawStrokesOnCanvas(canvas, srcW, srcH, srcW);
+
+      // 🎯 修正：第4引数を srcW から、今計算した画面上の論理幅である drawW へ変更！
+      _drawStrokesOnCanvas(canvas, srcW, srcH, drawW);
 
       final picture = recorder.endRecording();
       final compositedImage = await picture.toImage(srcW.toInt(), srcH.toInt());
@@ -558,19 +562,38 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
 
       if (byteData != null) {
         final Uint8List pngBytes = byteData.buffer.asUint8List();
-        final tempDir = await getTemporaryDirectory();
-        final String filePath = '${tempDir.path}/CROP_${DateTime.now().millisecondsSinceEpoch}.png';
+
+        final docDir = await getApplicationDocumentsDirectory();
+        final String memoDirPath = '${docDir.path}/memo_images';
+        final memoDir = Directory(memoDirPath);
+        if (!await memoDir.exists()) {
+          await memoDir.create(recursive: true);
+        }
+
+        final String timeStamp = DateTime.now().millisecondsSinceEpoch.toString();
+        final String filePath = '$memoDirPath/IMG_$timeStamp.jpg';
+
         final file = File(filePath);
         await file.writeAsBytes(pngBytes);
 
-        await Gal.putImage(filePath);
-
-        // 🎯 決定打：保存に成功した瞬間に、裏で待機している今日の講義メモへパスを直接射撃
-        widget.onImagesSaved?.call([filePath]);
-
+        // 1. アルバム『AXYZ』への保存処理
         try {
-          if (file.existsSync()) file.deleteSync();
-        } catch (_) {}
+          await Gal.requestAccess(toAlbum: true);
+          await Gal.putImage(filePath, album: 'dot archive');
+          debugPrint("AXYZ アルバムへのPDFスクショ保存に成功しました");
+        } catch (albumError) {
+          debugPrint("アルバム保存でエラーが発生: $albumError");
+          await Gal.putImage(filePath); // フォールバック
+        }
+
+        // ─── 🎯 【重要】ここが2回記述されていないか確認してください ───
+        // 画像パスと、もしあれば仮保存テキストをパッキングして「1回だけ」親に射撃します
+        final List<String> payload = [filePath];
+        if (_tempTextMemo.isNotEmpty) {
+          payload.add("TEXT_MEMO:$_tempTextMemo");
+        }
+        widget.onImagesSaved?.call(payload);
+        // ───────────────────────────────────────────────────────────
 
         await _saveAnimController!.forward();
       }
@@ -582,9 +605,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
           _isSavingCrop = false;
           _isCropMode = false;
           _capturedImage = null;
+          // ─── 🟢 保存処理通過時も、すべてのキャッシュ・テキストコンソールを完全に初期化 ───
           _strokes.clear();
           _redoStrokes.clear();
+          _tempTextMemo = "";
         });
+        _textMemoController.clear();
         _saveAnimController!.reset();
       }
     }
@@ -602,7 +628,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
             backgroundColor: AppTheme.bg(context),
             body: Stack(
                 children: [
-                  // --- 1. PDF ビューア本体 ---
                   AnimatedPositioned(
                       duration: const Duration(milliseconds: 300),
                       curve: Curves.easeOutCubic,
@@ -618,19 +643,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                               ? Center(child: CircularProgressIndicator(color: AppTheme.textMain(context)))
                               : RepaintBoundary(
                             key: _pdfCaptureKey,
-                            // 🎯 核心：ローカルの物理ファイルが準備できていれば 100%安全な fromPath からぬるぬる起動！
-                            child: _localPdfPath != null
-                                ? PDF(
-                                swipeHorizontal: false,
-                                autoSpacing: false,
-                                pageFling: false,
-                                pageSnap: false,
-                                fitEachPage: true,
-                                onPageChanged: (p, t) {
-                                  if (p == 0 && !_isTop) setState(() => _isTop = true);
-                                }
-                            ).fromPath(_localPdfPath!)
-                                : PDF(
+                            child: PDF(
                                 swipeHorizontal: false,
                                 autoSpacing: false,
                                 pageFling: false,
@@ -649,7 +662,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                       )
                   ),
 
-                  // 左上の黒い円形ボタン：部分スクショ
                   AnimatedPositioned(
                       duration: const Duration(milliseconds: 300),
                       curve: Curves.easeOutCubic,
@@ -664,7 +676,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                       )
                   ),
 
-                  // 右上の黒い円形ボタン（共有）
                   AnimatedPositioned(
                       duration: const Duration(milliseconds: 300),
                       curve: Curves.easeOutCubic,
@@ -719,7 +730,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                       )
                   ),
 
-                  // ─── 📸 最前面オーバーレイ：新インダストリアル・トリミングUI ───
                   if (_isCropMode && _capturedImage != null)
                     Positioned.fill(
                       child: Container(
@@ -735,9 +745,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                     IconButton(
                                       icon: const Icon(Icons.close, color: Colors.white, size: 26),
                                       onPressed: () => setState(() {
+                                        // ─── 🟢 徹底排除：スクショ画面を閉じた瞬間に、すべての書きかけデータをメモリから完全抹殺 ───
                                         _isCropMode = false;
                                         _strokes.clear();
                                         _redoStrokes.clear();
+                                        _tempTextMemo = "";
+                                        _textMemoController.clear();
                                       }),
                                     ),
                                     Row(
@@ -1005,6 +1018,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                                   child: RawImage(image: _capturedImage, fit: BoxFit.contain),
                                                 ),
                                               ),
+                                              Center(
+                                                child: SizedBox(
+                                                  width: drawW, height: drawH,
+                                                  child: CustomPaint(
+                                                    painter: _PreviewStrokePainter(strokes: _strokes),
+                                                  ),
+                                                ),
+                                              ),
                                               Positioned(
                                                 left: left, top: top, width: drawW, height: drawH * _cropTopY,
                                                 child: Container(color: Colors.black.withOpacity(0.75)),
@@ -1033,22 +1054,20 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
 
                               Container(
                                 height: 90,
-                                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                                padding: const EdgeInsets.symmetric(horizontal: 16.0),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
+                                    // ─── ◀️ 左翼：手書きえんぴつボタン（消失ガード版） ───
                                     AnimatedContainer(
                                       duration: const Duration(milliseconds: 240),
                                       curve: Curves.easeOutCubic,
                                       height: 48,
-                                      width: _isPenMode ? 220 : 48,
+                                      width: _isPenMode ? 200 : 48,
                                       decoration: BoxDecoration(
                                         color: _isPenMode ? Colors.white : Colors.transparent,
                                         borderRadius: BorderRadius.circular(24),
-                                        border: Border.all(
-                                          color: Colors.white,
-                                          width: _isPenMode ? 0.0 : 1.5,
-                                        ),
+                                        border: Border.all(color: Colors.white, width: _isPenMode ? 0.0 : 1.5),
                                       ),
                                       child: ClipRRect(
                                         borderRadius: BorderRadius.circular(24),
@@ -1056,8 +1075,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                           scrollDirection: Axis.horizontal,
                                           physics: const NeverScrollableScrollPhysics(),
                                           child: SizedBox(
-                                            width: 220,
-                                            height: 48,
+                                            width: 200, height: 48,
                                             child: Row(
                                               mainAxisAlignment: MainAxisAlignment.start,
                                               children: [
@@ -1075,7 +1093,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                                     width: 44, height: 48,
                                                     color: Colors.transparent,
                                                     child: Icon(
-                                                      Icons.edit_outlined,
+                                                      _isPenMode ? Icons.close_rounded : Icons.edit_outlined,
                                                       color: _isPenMode ? Colors.black : Colors.white,
                                                       size: 21,
                                                     ),
@@ -1099,24 +1117,189 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                         ),
                                       ),
                                     ),
-                                    const Spacer(),
 
+                                    // ─── 🟢 中央翼：干渉しない最大幅を自動確保する、テキスト仮保存連動カプセル ───
+                                    // ─── 🟢 中央翼：最大幅自動確保 ＆ 背景色固定・入力時白枠スイッチ型カプセル ───
+                                    if (!_isPenMode) ...[
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              _textMemoController.text = _tempTextMemo;
+                                              _isTextMemoMode = true;
+                                            });
+                                            _textMemoFocusNode.requestFocus();
+                                          },
+                                          child: Container(
+                                            height: 48,
+                                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.12), // 🎯 要望：背景色は一切変えずにプレーンな灰色で固定
+                                              borderRadius: BorderRadius.circular(24),
+                                              // 🎯 要望：文字が仮保存されている時だけ、枠線を「白」にして入力済みであることを明示
+                                              border: Border.all(
+                                                color: _tempTextMemo.isNotEmpty ? Colors.white : Colors.transparent,
+                                                width: _tempTextMemo.isNotEmpty ? 1.5 : 0.0,
+                                              ),
+                                            ),
+                                            alignment: Alignment.centerLeft,
+                                            child: _tempTextMemo.isNotEmpty
+                                                ? Text(
+                                              _tempTextMemo, // 🎯 テキストは引き続きそのまま表示
+                                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w400),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            )
+                                                : Text(
+                                              "メモを追加",
+                                              style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                    ] else
+                                      const Spacer(),
+
+                                    // ─── ▶️ 右翼：白のSAVEボタン（一括保存コア） ───
                                     _isSavingCrop
-                                        ? const CircularProgressIndicator(color: Colors.white)
+                                        ? const SizedBox(width: 105, height: 48, child: Center(child: CircularProgressIndicator(color: Colors.white)))
                                         : GestureDetector(
                                       onTap: _executeCroppedSave,
                                       child: Container(
                                         height: 48,
-                                        padding: const EdgeInsets.symmetric(horizontal: 28),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(24),
-                                        ),
+                                        width: 105,
+                                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
                                         alignment: Alignment.center,
                                         child: const Text(
                                           "SAVE",
                                           style: TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                                         ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  // ─── 📝 最前面オーバーレイ：それ以外を完全非表示にしてキーボード直上で文字を編むコンソールユニット ───
+                  // ─── 📝 最前面オーバーレイ：キーボード直上にジャストフィットする特化型コンソール ───
+                  // ─── 📝 最前面オーバーレイ：トリミング後プレビュー ＆ テキスト破棄リセット機能搭載型 ───
+                  // ─── 📝 最前面オーバーレイ：トリミング追従最大化表示 ＆ 右下固定チェックボタン仕様 ───
+                  // ─── 📝 最前面オーバーレイ：手書き完全追従プレビュー ＆ 入力欄沈み込みバグ完全修正コンソール ───
+                  if (_isTextMemoMode && _capturedImage != null)
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.black.withOpacity(0.95),
+                        child: SafeArea(
+                          child: Column(
+                            children: [
+                              // ① 上部：限界最大サイズプレビューの中に、画像と完全に同期した手書き線をオーバーレイ表示
+                              Expanded(
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(32.0),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: FittedBox(
+                                        fit: BoxFit.contain,
+                                        child: Align(
+                                          alignment: Alignment(0, -1.0 + (_cropTopY + _cropBottomY)),
+                                          heightFactor: _cropBottomY - _cropTopY,
+                                          child: Stack( // 🎯 要望：手書きを画像の上に重ねてテキスト入力時も常時見えるように連動
+                                            children: [
+                                              RawImage(image: _capturedImage),
+                                              Positioned.fill(
+                                                child: CustomPaint(
+                                                  painter: _PreviewStrokePainter(strokes: _strokes),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              // ② 下部：1行目の沈み込みを完全修正し、チェック円を右下に完全ホールドする入力セクター
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16.0, left: 16, right: 16),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 破棄用のプレーンな×ボタン（テキストリセット機能付き）
+                                    GestureDetector(
+                                      onTap: () {
+                                        _textMemoController.clear();
+                                        setState(() {
+                                          _tempTextMemo = "";
+                                          _isTextMemoMode = false;
+                                        });
+                                        _textMemoFocusNode.unfocus();
+                                      },
+                                      child: const Padding(
+                                        padding: EdgeInsets.only(left: 6, bottom: 10),
+                                        child: Icon(Icons.close_rounded, color: Colors.white, size: 24),
+                                      ),
+                                    ),
+
+                                    // 入力コンソールシェル（バグを根治するため内部を強固なStack構造に換装）
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.panel(context),
+                                        borderRadius: BorderRadius.circular(30),
+                                      ),
+                                      child: Stack(
+                                        alignment: Alignment.bottomRight, // 🎯 要望：チェックマークを常に右下に配置するアンカー
+                                        children: [
+                                          // テキスト入力フィールド本体
+                                          Padding(
+                                            // 右側にチェック円ボタン（38px）＋余白分の座席シート（計62px）をあらかじめ確保
+                                            padding: const EdgeInsets.fromLTRB(20, 12, 62, 12),
+                                            child: TextField(
+                                              controller: _textMemoController,
+                                              focusNode: _textMemoFocusNode,
+                                              maxLines: null,
+                                              cursorColor: Colors.white,
+                                              style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
+                                              decoration: InputDecoration(
+                                                hintText: "ノートにテキストメモを追加...",
+                                                hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 15),
+                                                border: InputBorder.none,
+                                                isDense: true,
+                                                // 🎯 決定打：垂直方向のパディングを均等に与えることで、1行目の沈み込み・下にずれるバグを完全パージ！
+                                                contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
+                                              ),
+                                            ),
+                                          ),
+
+                                          // 右下固定式の白い円のチェックマークボタン
+                                          Positioned(
+                                            right: 12,
+                                            bottom: 12, // 入力欄が縦にどれだけ伸びても、常に右下12pxの位置に完全へばりつきます
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  _tempTextMemo = _textMemoController.text.trim();
+                                                  _isTextMemoMode = false;
+                                                });
+                                                _textMemoFocusNode.unfocus();
+                                              },
+                                              child: Container(
+                                                width: 38, height: 38,
+                                                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                                child: const Icon(Icons.check_rounded, color: Colors.black, size: 22),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ],
@@ -1181,7 +1364,6 @@ class _PreviewStrokePainter extends CustomPainter {
       final path = Path();
       path.moveTo(stroke.points[0].rx * size.width, stroke.points[0].ry * size.height);
 
-      // 🎯 修正：stroke.length を stroke.points.length へ修復！
       for (int i = 1; i < stroke.points.length; i++) {
         path.lineTo(stroke.points[i].rx * size.width, stroke.points[i].ry * size.height);
       }
@@ -1192,10 +1374,6 @@ class _PreviewStrokePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _PreviewStrokePainter old) => true;
 }
-
-// ... existing code ...
-
-
 
 class VideoViewerScreen extends StatefulWidget {
   final String url;
@@ -1217,7 +1395,6 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 🟢 追記：テーマ判定とオーバースタイルの動的生成
     bool isDark = Theme.of(context).brightness == Brightness.dark;
     SystemUiOverlayStyle overlayStyle = isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
 
@@ -1226,61 +1403,59 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
     return AnnotatedRegion<SystemUiOverlayStyle>(
         value: overlayStyle,
         child: PopScope(
-        canPop: false,
-        onPopInvoked: (didPop) async {
-          if (didPop) return;
-          if (_webViewController != null && await _webViewController!.canGoBack()) {
-            _webViewController!.goBack();
-          } else {
-            if (context.mounted) Navigator.pop(context);
-          }
-        },
-        child: Scaffold(
-          backgroundColor: AppTheme.bg(context),
-          body: Stack(
-            children: [
-              AnimatedPositioned(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOutCubic,
-                top: _isTop ? statusBarHeight : 0,
-                bottom: _isTop ? -statusBarHeight : 0,
-                left: 0,
-                right: 0,
-                child: Listener(
-                  onPointerMove: (e) {
-                    if (e.delta.dy < -5 && _isTop) setState(() => _isTop = false);
-                    else if (e.delta.dy > 5 && !_isTop) setState(() => _isTop = true);
-                  },
-                  child: InAppWebView(
-                    onWebViewCreated: (controller) => _webViewController = controller,
-                    initialUrlRequest: URLRequest(
-                      url: WebUri(widget.url),
-                      headers: {'Cookie': widget.cookie},
+            canPop: false,
+            onPopInvoked: (didPop) async {
+              if (didPop) return;
+              if (_webViewController != null && await _webViewController!.canGoBack()) {
+                _webViewController!.goBack();
+              } else {
+                if (context.mounted) Navigator.pop(context);
+              }
+            },
+            child: Scaffold(
+              backgroundColor: AppTheme.bg(context),
+              body: Stack(
+                children: [
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                    top: _isTop ? statusBarHeight : 0,
+                    bottom: _isTop ? -statusBarHeight : 0,
+                    left: 0,
+                    right: 0,
+                    child: Listener(
+                      onPointerMove: (e) {
+                        if (e.delta.dy < -5 && _isTop) setState(() => _isTop = false);
+                        else if (e.delta.dy > 5 && !_isTop) setState(() => _isTop = true);
+                      },
+                      child: InAppWebView(
+                        onWebViewCreated: (controller) => _webViewController = controller,
+                        initialUrlRequest: URLRequest(
+                          url: WebUri(widget.url),
+                          headers: {'Cookie': widget.cookie},
+                        ),
+                        initialSettings: InAppWebViewSettings(
+                          javaScriptEnabled: true,
+                          domStorageEnabled: true,
+                          sharedCookiesEnabled: true,
+                          thirdPartyCookiesEnabled: true,
+                          mediaPlaybackRequiresUserGesture: true,
+                          allowsInlineMediaPlayback: true,
+                        ),
+                        onScrollChanged: (c, x, y) {
+                          if (y <= 0 && !_isTop) setState(() => _isTop = true);
+                          else if (y > 5 && _isTop) setState(() => _isTop = false);
+                        },
+                      ),
                     ),
-                    initialSettings: InAppWebViewSettings(
-                      javaScriptEnabled: true,
-                      domStorageEnabled: true,
-                      sharedCookiesEnabled: true,
-                      thirdPartyCookiesEnabled: true,
-                      mediaPlaybackRequiresUserGesture: true,
-                      allowsInlineMediaPlayback: true,
-                    ),
-                    onScrollChanged: (c, x, y) {
-                      if (y <= 0 && !_isTop) setState(() => _isTop = true);
-                      else if (y > 5 && _isTop) setState(() => _isTop = false);
-                    },
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        )
-    ));
+            )
+        ));
   }
 }
 
-// 🎯 完全版：判定フラグの定義と全条件分岐を完全修復した水際エンジン
-// 🎯 完全版：大切な認証クエリパラメータ（verifier等）を1ミリも破壊せず安全にルーティングする決定版水際エンジン
 Future<void> openSmartUrl(BuildContext context, String url, String cookie, {String? title, Function(List<String>)? onImagesSaved}) async {
   try {
     String fullUrl = url.startsWith('/') ? '$canvasBaseUrl$url' : url;
@@ -1288,61 +1463,46 @@ Future<void> openSmartUrl(BuildContext context, String url, String cookie, {Stri
 
     String checkStr = (fullUrl + (title ?? '')).toLowerCase();
 
-    bool isOfficeOrMedia = checkStr.contains('.mp4') || checkStr.contains('.mov') || checkStr.contains('.webm') ||
+    bool isMediaOrDoc = checkStr.contains('.mp4') || checkStr.contains('.mov') || checkStr.contains('.webm') ||
         checkStr.contains('.pptx') || checkStr.contains('.ppt') ||
         checkStr.contains('.docx') || checkStr.contains('.doc') ||
-        checkStr.contains('.xlsx') || checkStr.contains('.xls') ||
-        checkStr.contains('.mp3')  || checkStr.contains('.m4a') ||
-        checkStr.contains('.zip')  || checkStr.contains('.rar');
+        checkStr.contains('.xlsx') || checkStr.contains('.xls');
 
-    bool isExplicitPdf = checkStr.contains('.pdf') || checkStr.contains('response-content-type=application/pdf');
-
-    if (isOfficeOrMedia) {
+    if (isMediaOrDoc) {
       String safeUrl = fullUrl.replaceAll(RegExp(r'[?&]download_frd=1'), '');
       if (safeUrl.endsWith('/download')) {
         safeUrl = safeUrl.substring(0, safeUrl.length - 9);
       }
       Navigator.push(context, MaterialPageRoute(builder: (_) => VideoViewerScreen(url: safeUrl, cookie: cookie)));
     }
-    else if (isExplicitPdf || (fullUrl.contains('download_frd=1') && !isOfficeOrMedia)) {
-      // 🎯 修正：安易な split を完全廃止。Uri インジェクションを用いて認証クエリを 100% 無傷でホールド
+    else if (fullUrl.toLowerCase().contains('.pdf') || fullUrl.contains('download_frd=1')) {
       if (fullUrl.contains('/files/') && !fullUrl.contains('download')) {
-        try {
-          final uri = Uri.parse(fullUrl);
-          if (!uri.path.endsWith('/download')) {
-            final String newPath = "${uri.path}/download";
-            final Map<String, String> newQueryParams = Map<String, String>.from(uri.queryParameters);
-            newQueryParams['download_frd'] = '1';
-            fullUrl = uri.replace(path: newPath, queryParameters: newQueryParams).toString();
-          }
-        } catch (_) {}
+        fullUrl = "${fullUrl.split('?').first}/download?download_frd=1";
       }
       Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: fullUrl, cookie: cookie, onImagesSaved: onImagesSaved)));
     }
     else {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => InAppBrowserScreen(url: fullUrl, cookie: cookie)));
+      // 🎯 徹底修復：ここ！！ブラウザ経由で資料を開く際にもコールバックを渡さないと電気信号が完全に途切れます
+      Navigator.push(context, MaterialPageRoute(builder: (_) => InAppBrowserScreen(url: fullUrl, cookie: cookie, onImagesSaved: onImagesSaved)));
     }
   } catch (e) {
     debugPrint("openSmartUrl Routing Error: $e");
   }
 }
-// 🟢 24時間以上経過した古いPDFファイルだけをバックグラウンドで自動抹殺するヘルパー
+
 Future<void> pruneExpiredPdfCache() async {
   try {
     final tempDir = await getTemporaryDirectory();
     final dir = Directory(tempDir.path);
 
     if (await dir.exists()) {
-      // 一時フォルダ内のファイルを全スキャン
       final List<FileSystemEntity> files = dir.listSync();
       final now = DateTime.now();
 
       for (var file in files) {
-        // PDFファイル（キャッシュや前回生成した共有用PDF）を対象にする
         if (file is File && file.path.toLowerCase().endsWith('.pdf')) {
           final lastModified = await file.lastModified();
 
-          // 🟢 最終更新から24時間（1日）以上が経過しているか判定
           if (now.difference(lastModified).inHours >= 24) {
             await file.delete();
             debugPrint("🗑️ 24時間が経過した古いキャッシュをパージしました: ${file.path}");
@@ -1354,7 +1514,5 @@ Future<void> pruneExpiredPdfCache() async {
     debugPrint("PDFパージエラー: $e");
   }
 }
-
-
 
 

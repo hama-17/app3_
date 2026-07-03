@@ -77,6 +77,65 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
     widget.onScheduleOverrideChanged?.call(); // ホーム画面の時間割フィルターを即座に再適用させる
   }
 
+  // 🎯 新設：タブの初期化状態を完全超越し、裏側のローカルDBを直接ハックして確実にスクショをインプラントする統括エンジン
+  void _handleExternalImagesSaved(String courseId, List<String> paths) async {
+    if (paths.isEmpty) return;
+
+    // 🟢 ① もしすでにメモタブが初期化・マウント済みなら、State経由でUIを即座にダイレクト更新
+    if (_memoKey.currentState != null && _memoKey.currentState!.mounted) {
+      _memoKey.currentState!.appendExternalImages(paths);
+      return;
+    }
+
+    // 🟢 ② 他のタブにいてメモが未初期化（null）の場合は、SharedPreferences内の該当講義ログを直接書き換え
+    final prefs = await SharedPreferences.getInstance();
+    final String key = 'course_memos_v2_$courseId';
+    final String? data = prefs.getString(key);
+
+    List<Map<String, dynamic>> loadedMemos = [];
+    if (data != null) {
+      try {
+        loadedMemos = List<Map<String, dynamic>>.from(jsonDecode(data));
+      } catch (_) {}
+    }
+
+    final now = DateTime.now();
+    final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+    final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+
+    int todayIdx = loadedMemos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
+
+    // 今日用のメモシートがなければその場でバックグラウンド強制創出
+    if (todayIdx == -1) {
+      final currentCourse = widget.courses.firstWhere((c) => c['id'].toString() == courseId, orElse: () => {});
+      final cleanName = CourseTitleParser.getCleanTitle(currentCourse['name'] ?? '');
+      final newTitle = cleanName.isNotEmpty ? '$dateStr $cleanName' : dateStr;
+
+      loadedMemos.add({
+        'id': now.millisecondsSinceEpoch.toString(),
+        'title': newTitle,
+        'items': <dynamic>[],
+      });
+      todayIdx = loadedMemos.length - 1;
+    }
+
+    // 画像データをタイムラインへパッキング
+    List<dynamic> items = List<dynamic>.from(loadedMemos[todayIdx]['items'] ?? []);
+    for (var path in paths) {
+      final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString();
+      items.add({
+        'id': uniqueId,
+        'type': 'image',
+        'data': path,
+        'time': timeStr
+      });
+    }
+    loadedMemos[todayIdx]['items'] = items;
+
+    // SharedPreferencesデータベースへ即時確定コミット
+    await prefs.setString(key, jsonEncode(loadedMemos));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -861,21 +920,81 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                 Container( /* ...カスタム授業用タスク画面... */ )
                               ];
                             } else if (widget.isAuthenticated) {
+                              // ─── 🟢 集中中継ユニット：裏のDB書き込みと同時に、メモリキャッシュのタイムラグを完全パージ ───
+                              final Function(List<String>) imgSaverUnit = (paths) async {
+                                if (paths.isEmpty) return;
+
+                                final activeCourse = widget.courses[_currentIndex];
+                                final activeCourseId = activeCourse['id'];
+
+                                final prefs = await SharedPreferences.getInstance();
+                                final String dbKey = 'course_memos_v2_$activeCourseId';
+                                final String? dbData = prefs.getString(dbKey);
+
+                                List<Map<String, dynamic>> loadedMemos = [];
+                                if (dbData != null) {
+                                  try {
+                                    final List<dynamic> decoded = jsonDecode(dbData);
+                                    loadedMemos = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+                                  } catch (_) {}
+                                }
+
+                                final now = DateTime.now();
+                                final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
+                                final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
+
+                                int todayIdx = loadedMemos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
+
+                                if (todayIdx == -1) {
+                                  final cleanName = CourseTitleParser.getCleanTitle(activeCourse['name'] ?? '');
+                                  final newTitle = cleanName.isNotEmpty ? '$dateStr $cleanName' : dateStr;
+
+                                  loadedMemos.add({
+                                    'id': now.millisecondsSinceEpoch.toString(),
+                                    'title': newTitle,
+                                    'items': <dynamic>[],
+                                  });
+                                  todayIdx = loadedMemos.length - 1;
+                                }
+
+                                List<dynamic> dbItems = List<dynamic>.from(loadedMemos[todayIdx]['items'] ?? []);
+                                for (var path in paths) {
+                                  final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString();
+
+                                  // ─── 🟢 修正：DB（ローカルストレージ）への書き込み時にテキストを正確にフィルタリング ───
+                                  if (path.startsWith("TEXT_MEMO:")) {
+                                    final actualText = path.substring(10);
+                                    dbItems.add({'id': uniqueId, 'type': 'text', 'data': actualText, 'time': timeStr});
+                                  } else {
+                                    dbItems.add({'id': uniqueId, 'type': 'image', 'data': path, 'time': timeStr});
+                                  }
+                                }
+                                loadedMemos[todayIdx]['items'] = dbItems;
+
+                                await prefs.setString(dbKey, jsonEncode(loadedMemos));
+
+                                // 🎯 決定打：PDFビューアを「閉じて詳細画面へ戻った時」に、メモリ上で居眠りしている
+                                // 古い配列キャッシュを叩き起こし、最新のSharedPreferencesから100%強制ロードをかける能動システム！
+                                if (_memoKey.currentState != null && _memoKey.currentState!.mounted) {
+                                  // 外部追加の着信トリガーを投下し、メモリ上の _memos と UI を一気呵成に同期リフレッシュします
+                                  _memoKey.currentState!.appendExternalImages(paths);
+                                }
+                              };
+
                               pageCount = 5;
                               pages = [
                                 _CourseMemoWidget(
-                                    key: _memoKey, // 👈 🔑 鍵を装着してロックオン
+                                    key: _memoKey, // 🔑 メモウィジェットを外殻から遠隔ハックする鍵
                                     courseId: cur['id'].toString(),
                                     courseName: cur['title'] ?? cur['name'] ?? '',
                                     bgColor: Colors.transparent,
                                     textColor: textCol,
                                     onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
                                 ),
-                                // 🟢 修正：すべてのデータリストの背後に、MEMOへの直撃ルートを結合
-                                _CourseDataList(courseId: cur['id'], endpointType: 'MODULES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'ASSIGNMENTS', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'GRADES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
-                                _CourseDataList(courseId: cur['id'], endpointType: 'ANNOUNCE', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: (paths) => _memoKey.currentState?.appendExternalImages(paths)),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'MODULES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: imgSaverUnit),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'ASSIGNMENTS', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: imgSaverUnit),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'GRADES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: imgSaverUnit),
+                                _CourseDataList(courseId: cur['id'], endpointType: 'ANNOUNCE', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: imgSaverUnit),
                               ];
                             } else {
                               pageCount = 2;
@@ -1167,7 +1286,14 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                               child: Align(
                                   alignment: Alignment.centerLeft,
                                   child: TextButton.icon(
-                                      onPressed: () => openSmartUrl(context, targetUrl, widget.cookie, title: title),
+                                    // 🎯 修正：完全に抜け落ちていた onImagesSaved 引数をここに完璧にマウント！！
+                                      onPressed: () => openSmartUrl(
+                                        context,
+                                        targetUrl,
+                                        widget.cookie,
+                                        title: title,
+                                        onImagesSaved: widget.onImagesSaved, // 🟢 これを追記
+                                      ),
 
                                       label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.w500, letterSpacing: 1.0)),
                                       style: TextButton.styleFrom(
@@ -1574,6 +1700,9 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
   }
 
   // 🎯 完全リファイン：現在の画面表示状態に関わらず、今日のメモシートを強制スキャンして100%確実に画像をねじ込む防衛エンジン
+  // 🎯 完全修復：過去のコードの生き残りだった、存在しない変数『$cleanName』を『$filteredName』へ修正し内部爆死を完全シールド！
+  // 🎯 完全修復：今日初めてメモシートを作る瞬間に、存在しない変数『$cleanName』を呼び出して内部フリーズしていたバグを完全パージ！
+  // 🎯 完全修復：マウント済みの画面UIに対しても、テキストメモの合図を動的にパースしてタイムラインへ直撃結合
   void appendExternalImages(List<String> paths) {
     if (paths.isEmpty) return;
 
@@ -1581,10 +1710,8 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
     final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
     final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
 
-    // 🟢 画面表示が null や別モードであっても、メモリ内の _memos ログから「今日のシート」のインデックスを直接ハック
     int todayIdx = _memos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
 
-    // 万が一今日のシートがまだ生成されていなければ、その場で強制緊急生成
     if (todayIdx == -1) {
       final filteredName = _getFilteredCourseName(widget.courseName);
       final newTitle = filteredName.isNotEmpty ? '$dateStr $filteredName' : dateStr;
@@ -1601,17 +1728,19 @@ class _CourseMemoWidgetState extends State<_CourseMemoWidget> with AutomaticKeep
       List<dynamic> items = List<dynamic>.from(_memos[todayIdx]['items'] ?? []);
       for (var path in paths) {
         final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString();
-        items.add({
-          'id': uniqueId,
-          'type': 'image',
-          'data': path,
-          'time': timeStr
-        });
+
+        // ─── 🟢 修正：リアルタイムの画面同期パーツでも、テキストと画像を綺麗に識別して格納 ───
+        if (path.startsWith("TEXT_MEMO:")) {
+          final actualText = path.substring(10);
+          items.add({'id': uniqueId, 'type': 'text', 'data': actualText, 'time': timeStr});
+        } else {
+          items.add({'id': uniqueId, 'type': 'image', 'data': path, 'time': timeStr});
+        }
       }
       _memos[todayIdx]['items'] = items;
     });
 
-    _saveMemos(); // 🚀 バックグラウンドの SharedPreferences へ即座に確定永続化
+    _saveMemos();
   }
 
   // 🟢 タイポグラフィテキスト入力オーバーレイ起動
