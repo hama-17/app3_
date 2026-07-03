@@ -1153,7 +1153,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                             )
                                                 : Text(
                                               "メモを追加",
-                                              style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                                              style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 13, fontWeight: FontWeight.w400, letterSpacing: 0.5),
                                             ),
                                           ),
                                         ),
@@ -1174,7 +1174,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                         alignment: Alignment.center,
                                         child: const Text(
                                           "SAVE",
-                                          style: TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                                          style: TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.5),
                                         ),
                                       ),
                                     ),
@@ -1270,8 +1270,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                               cursorColor: Colors.white,
                                               style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
                                               decoration: InputDecoration(
-                                                hintText: "ノートにテキストメモを追加...",
-                                                hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 15),
+                                                hintText: "メモを追加",
+                                                hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontWeight: FontWeight.w400 , fontSize: 15),
                                                 border: InputBorder.none,
                                                 isDense: true,
                                                 // 🎯 決定打：垂直方向のパディングを均等に与えることで、1行目の沈み込み・下にずれるバグを完全パージ！

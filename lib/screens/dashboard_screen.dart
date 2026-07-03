@@ -985,6 +985,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   bool _hasApiError = false;
   bool _showCompletedTasks = false;
 
+  bool _showInitialLoginGuide = false;
+
 
 
 
@@ -1334,9 +1336,30 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
     _updateAlertAnimation();
 
+    _checkInitialLoginGuide();
+
     int initialPage = _findBestCourseIndex();
     _currentCourseIndex = initialPage;
     _coursesWidgetController = PageController(initialPage: initialPage, viewportFraction: 1.0);
+  }
+
+  Future<void> _checkInitialLoginGuide() async {
+    final prefs = await SharedPreferences.getInstance();
+    // すでにガイドを見た履歴がなく、かつ現在未認証（ログイン前）の場合のみポップアップを起動
+    if (!prefs.containsKey('has_shown_login_guide_v10') && !widget.isAuthenticated) {
+      setState(() {
+        _showInitialLoginGuide = true;
+      });
+    }
+  }
+
+  // ─── 🟢 新設：ユーザーが確認して閉じた際の永続フラグ書き込み ───
+  Future<void> _dismissLoginGuide() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('has_shown_login_guide_v10', true);
+    setState(() {
+      _showInitialLoginGuide = false;
+    });
   }
 
   @override void dispose() {
@@ -5607,6 +5630,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 return GestureDetector(
                   onTap: () {
                     if (!widget.isAuthenticated) {
+                      // ─── 🟢 追記：左下の赤いボタンを押してログインWebViewへ向かう瞬間に、ポップアップを勝手に消滅させる ───
+                      if (_showInitialLoginGuide) {
+                        _dismissLoginGuide(); // 裏側で SharedPreferences へ「閲覧済みフラグ」を書き込み、メモリを即時クリーンアップ
+                      }
                       widget.onLogin();
                     } else if (!isLoading) {
                       _fetchDataParallel();
@@ -5875,6 +5902,37 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     ),
                   ),
                 ),
+
+                if (_showInitialLoginGuide && _currentViewState == ViewState.home)
+                  Positioned(
+                    bottom: 84.0 + MediaQuery.of(context).padding.bottom, // 下部バーを綺麗に避ける配置
+                    left: leftSwipeOffset + 8.0,  // 🎯 修正：画面端との余白を 16.0 から「8.0」へ極小化
+                    right: -leftSwipeOffset + 8.0, // 🎯 修正：画面端との余白を 16.0 から「8.0」へ極小化
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 200),
+                      opacity: (_dragPosition < 0.0) ? (1.0 - _dragPosition.abs() * 2).clamp(0.0, 1.0) : 1.0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 13.0),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent, // 点滅するログイン球体と同じ赤
+                          borderRadius: BorderRadius.circular(100), // 🎯 修正：30から「100」へ引き上げ、縦幅の変動に関わらず両端が完璧な半円になる「完全カプセル型」を保証
+                        ),
+                        child: Center(
+                          child: Text(
+                            "セッションが切れ、ログアウト状態になると、\n 左下のログインボタンが赤く点滅します。\n ログインボタンをタップしてログインしてください。",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w400,
+                              height: 1.4,
+                              letterSpacing: -0.2,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
 
                 // 下部ナビゲーションユニット本体
                 Positioned(
