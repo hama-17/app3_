@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- アプリ全体の名前 -->
+    <string name="k.dot">k.dot</string>
+
+    <!-- 🟢 1. 課題ウィジェットのセット -->
+    <string name="widget_tasks_label">課題リスト</string> <!-- 👈 ここを好きな名前に調整！ -->
+    <string name="widget_tasks_desc">課題を一覧表示</string>
+
+    <!-- 🟢 2. 時間割ウィジェットのセット -->
+    <string name="widget_timetable_label">時間割</string> <!-- 👈 ここを好きな名前に調整！ -->
+    <string name="widget_timetable_desc">時間割と教室情報を表示</string>
+
+    <!-- 🟢 3. 総合（全部入り）ウィジェットのセット -->
+    <string name="widget_all_label">授業/課題/予定の時系列表示</string> <!-- 👈 ここを好きな名前に調整！ -->
+    <string name="widget_all_desc">授業予定と課題を時系列表示</string>
+</resources>

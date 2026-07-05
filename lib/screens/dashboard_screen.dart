@@ -3896,13 +3896,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         bool isVerticalScrolling = _courseScrollOffset > 4.0 || _tasksScrollOffset > 4.0;
         Duration animDuration = (isVerticalScrolling || isTransitioning) ? Duration.zero : const Duration(milliseconds: 300);
 
+        // ─── 🟢 修正：高速pop時のヘッダー消失バグを完全パージした防衛Hero ───
         return Hero(
           tag: heroTag,
+          placeholderBuilder: (context, dropAreaSize, child) {
+            // 🎯 決定打：遷移中も元のグラデーション構造をツリーに実在させ続けることで、
+            // コントローラーが迷子になって元画面を透明化フリーズさせるバグを物理的に根絶します。
+            return child;
+          },
           child: Material(
             type: MaterialType.transparency,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onHorizontalDragEnd: (details) {
+                // （...これより下の既存ロジックは一切変更なし維持）
                 if (_dragPosition > 0.5 && details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
                   setState(() { _isTimeVisible = details.primaryVelocity! > 0; });
                 }

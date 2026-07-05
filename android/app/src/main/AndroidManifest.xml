@@ -66,7 +66,8 @@
 
         <receiver android:name=".LiveNotificationReceiver" android:exported="false"/>
 
-        <receiver android:name="com.example.app3_kportal_2.TasksWidgetProvider" android:exported="true">
+        <receiver android:name="com.example.app3_kportal_2.TasksWidgetProvider" android:exported="true"
+            android:label="@string/widget_tasks_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -74,7 +75,8 @@
                 android:resource="@xml/widget_tasks_info" />
         </receiver>
 
-        <receiver android:name="com.example.app3_kportal_2.TodayWidgetProvider" android:exported="true">
+        <receiver android:name="com.example.app3_kportal_2.TodayWidgetProvider" android:exported="true"
+            android:label="@string/widget_all_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -82,7 +84,8 @@
                 android:resource="@xml/widget_today_info" />
         </receiver>
 
-        <receiver android:name="com.example.app3_kportal_2.TimetableWidgetProvider" android:exported="true">
+        <receiver android:name="com.example.app3_kportal_2.TimetableWidgetProvider" android:exported="true"
+            android:label="@string/widget_timetable_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
