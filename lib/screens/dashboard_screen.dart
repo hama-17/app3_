@@ -996,6 +996,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   bool _showInitialLoginGuide = false;
 
+  bool _isFirstLaunchLoop = true;
+
 
 
 
@@ -1033,18 +1035,25 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
 
   // ★ 修正：エラー時/ログアウト時、および読み込み時のアニメーションを自動制御
+  // ─── 🟢 修正：起動時のフライング赤点滅を封殺するアニメーションコントローラー ───
   void _updateAlertAnimation() {
     bool isLoading = _isLoadingAssignments || _isLoadingMessages;
 
-
-    if (!widget.isAuthenticated || _hasApiError) {
+    if (isLoading && !_hasApiError) {
+      if (_errorAnimController.isAnimating) { _errorAnimController.stop(); _errorAnimController.reset(); }
+      if (!_colorAnimController.isAnimating) _colorAnimController.repeat(reverse: true);
+      if (!_spinAnimController.isAnimating) _spinAnimController.repeat();
+    }
+    // ─── 🟢 追記：起動フェッチの最中は、一時的な認証ブレを無視して赤点滅の点火を物理ロック ───
+    else if (_isFirstLaunchLoop) {
+      if (_errorAnimController.isAnimating) { _errorAnimController.stop(); _errorAnimController.reset(); }
+      if (_colorAnimController.isAnimating) { _colorAnimController.stop(); _colorAnimController.reset(); }
+    }
+    else if (!widget.isAuthenticated || _hasApiError) {
+      // 全通信が終わり、名実ともにセッション切れが「確定」したときのみ赤点滅を解禁
       if (!_errorAnimController.isAnimating) _errorAnimController.repeat(reverse: true);
       if (_colorAnimController.isAnimating) { _colorAnimController.stop(); _colorAnimController.reset(); }
       if (_spinAnimController.isAnimating) { _spinAnimController.stop(); _spinAnimController.reset(); }
-    } else if (isLoading) {
-      if (_errorAnimController.isAnimating) { _errorAnimController.stop(); _errorAnimController.reset(); }
-      if (!_colorAnimController.isAnimating) _colorAnimController.repeat(reverse: true);
-      if (!_spinAnimController.isAnimating) _spinAnimController.repeat(); // ★ 追加：一方向に回転し続ける
     } else {
       if (_errorAnimController.isAnimating) { _errorAnimController.stop(); _errorAnimController.reset(); }
       if (_colorAnimController.isAnimating) { _colorAnimController.stop(); _colorAnimController.reset(); }
@@ -1601,31 +1610,37 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   // ★ 修正：RefreshIndicatorで待機できるよう Future を返す非同期関数に変更
   Future<void> _fetchDataParallel() async {
-    _lastFetchTime = DateTime.now(); // ⏱️ 🟢 追記：同期の瞬間の時刻をガチッと記録
+    _lastFetchTime = DateTime.now();
 
     if (mounted) {
       setState(() { _hasApiError = false; _isLoadingAssignments = true; _isLoadingMessages = true; });
       _updateAlertAnimation();
     }
-    // ...（以降の既存の通信処理はそのまま維持）
-    // 両方の通信が終わるまで待機する
+
+    // 3連並列ワーカーの一斉完了を安全に同時待機
     await Future.wait([
       _fetchAssignments(),
       _fetchMessages()
     ]);
 
-    // -------------------------------------------------------------------
-    // 🟢 追記：LMS通信（＆キャッシュ展開）が完全完了した瞬間にアラームを全一斉更新
-    // -------------------------------------------------------------------
     try {
       await LiveNotificationService.reScheduleLiveNotifications(
-        currentCourses: _displayCourses,     // 確定済みのスケジュール順授業リスト
-        currentAssignments: _assignments,   // 確定済みのソート済タスクリスト
+        currentCourses: _displayCourses,
+        currentAssignments: _assignments,
       );
       debugPrint("ライブカウントダウン通知のアラームを正常に再予約しました");
     } catch (e) {
       debugPrint("ライブ通知の予約中にエラーが発生しました: $e");
     }
+
+    // ─── 🟢 修正の決定打：通信が【本当に終了したこの瞬間】に初めてフラグを解放 ───
+    if (mounted) {
+      setState(() {
+        _isFirstLaunchLoop = false; // 🎯 ログイン/ログアウト状態が名実ともに100%確定
+      });
+      _updateAlertAnimation(); // 確定した新ステートをベースに、点滅アニメーションを安全に再ジャッジ
+    }
+
     _processWidgetRoute();
   }
 
@@ -1712,77 +1727,98 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
 
+  // ====================================================
+  // 🟢 修正①：起動時の空振りを100%救済するライフサイクル防衛ゲート
+  // ====================================================
+  @override
+  void didUpdateWidget(covariant DashboardPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // 配列の参照ブレだけでなく、要素数・認証変化・メモリの乾きを多角的に網羅スキャン
+    final bool isCoursesChanged = oldWidget.courses.length != widget.courses.length || oldWidget.courses != widget.courses;
+    final bool isAuthSignaled = !oldWidget.isAuthenticated && widget.isAuthenticated;
+    final bool isMemoryDry = _assignments.isEmpty && widget.courses.isNotEmpty;
+
+    if (isCoursesChanged || isAuthSignaled || isMemoryDry) {
+      _buildCourseIndexMap();
+      if (mounted) {
+        setState(() {
+          _generateWeeklySchedule();
+          _currentCourseIndex = _findBestCourseIndex();
+          if (_coursesWidgetController.hasClients) _coursesWidgetController.jumpToPage(_currentCourseIndex);
+        });
+      }
+      _fetchDataParallel(); // 本番の並列フェッチを確実に着火
+    }
+  }
+
+  // ====================================================
+  // ② 🟢 未提出課題の3連コンカレンシー・ワーカーフェッチ
+  // ====================================================
   Future<void> _fetchAssignments() async {
     try {
       final cached = await CacheManager.load('cached_assignments_v14_all_year');
       if (cached != null && mounted) {
-        setState(() {
-          _assignments = cached;
-        });
-
-        // ─── 🟢 追記：キャッシュがメモリに展開されたまさにこの瞬間、即座に指令をスキャンして開く！ ───
+        setState(() { _assignments = cached; });
         _processWidgetRoute();
       }
 
       if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
-      // (以下、LMSへのオンライン通信処理へと続く...)
-
-      // ★ 追加：テストログイン中は本番APIの走査をスキップして早期リターン
       if (widget.cookie == "dummy_test_session") {
         if (mounted) setState(() { _isLoadingAssignments = false; });
         return;
       }
 
-      List<dynamic> tasks = [];
-
-      // ★ 解決の鍵：Q1/Q2に関係なく、今年度のLMS授業をすべて抽出
       final thisYearCourses = widget.allCourses.where((c) {
         if (c['is_custom'] == true) return false;
         return _isCurrentYearCourse(c);
       }).toList();
 
-      for (var course in thisYearCourses) {
-        if (!mounted) return;
+      final List<dynamic> fetchedTasks = [];
+      int courseIndex = 0;
 
-        final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/assignments?per_page=40&include[]=submission');
-        if (uri == null) continue;
+      // 🎯 決定打：回線をパンクさせずに最大スループットを維持するスロット並列ワーカー
+      Future<void> runAssignmentWorker() async {
+        while (true) {
+          int myIdx = courseIndex++;
+          if (myIdx >= thisYearCourses.length) break; // 全科目終了でワーカー停止
 
-        final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 15));
+          final course = thisYearCourses[myIdx];
+          final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/assignments?per_page=40&include[]=submission');
+          if (uri == null) continue;
 
-        if (!mounted) return;
+          try {
+            // 同時接続数がクランプされているため、タイムアウトを安全に8秒に縮小
+            final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 8));
+            if (res.statusCode == 200) {
+              final List<dynamic> courseTasks = jsonDecode(res.body);
+              for (var task in courseTasks) {
+                task['context_name'] = course['name'];
+                task['course_id'] = course['id'];
+                task['original_due_at'] = task['due_at'];
 
-        if (res.statusCode == 200) {
-          for (var task in jsonDecode(res.body)) {
-
-            // ❌ 修正前: if (dueAtStr != null && dueAtStr.toString().isNotEmpty) {
-            // 🟢 修正後: 条件を撤廃し、期日未定の課題もすべてサルベージします
-            task['context_name'] = course['name'];
-            task['course_id'] = course['id'];
-
-            // 純正の期日をバックアップ
-            task['original_due_at'] = task['due_at'];
-
-            // 過去の上書き履歴があれば適用
-            final tId = task['id']?.toString();
-            if (tId != null && _taskDueOverrides.containsKey(tId)) {
-              task['due_at'] = _taskDueOverrides[tId];
+                final tId = task['id']?.toString();
+                if (tId != null && _taskDueOverrides.containsKey(tId)) {
+                  task['due_at'] = _taskDueOverrides[tId];
+                }
+                fetchedTasks.add(task);
+              }
             }
-            tasks.add(task);
+          } catch (e) {
+            debugPrint("科目 ${course['id']} 課題取得セッションラグ(自動回避): $e");
           }
-        } else if (res.statusCode == 403 || res.statusCode == 401) {
-          // 課題機能がオフの授業や過去の授業はスルーする
-          continue;
-        } else if (res.statusCode == 429) {
-          // リクエスト過多の場合は少し休む
-          await Future.delayed(const Duration(seconds: 2));
-          continue;
         }
-
-        await Future.delayed(const Duration(milliseconds: 150));
       }
 
+      // 🚀 3本の独立並列ワーカーを一斉に解き放つ（同時接続数を常に3本以下に完全拘束）
+      await Future.wait([
+        runAssignmentWorker(),
+        runAssignmentWorker(),
+        runAssignmentWorker(), // 🟢 3本目も正しく同じローカルワーカーを指定
+      ]);
+
       final Map<String, dynamic> uniqueTasks = {};
-      for (var task in tasks) { uniqueTasks[task['id']?.toString() ?? task.hashCode.toString()] = task; }
+      for (var task in fetchedTasks) { uniqueTasks[task['id']?.toString() ?? task.hashCode.toString()] = task; }
       List<dynamic> finalTasks = uniqueTasks.values.toList();
       finalTasks.addAll(_customTasks);
       finalTasks.sort((a, b) => (DateTime.tryParse(a['due_at'] ?? '') ?? DateTime.now()).compareTo(DateTime.tryParse(b['due_at'] ?? '') ?? DateTime.now()));
@@ -1792,7 +1828,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       CalendarSyncService.syncTasks(finalTasks);
 
       await WidgetUpdateService.updateHomeWidgets(tasks: finalTasks);
-
       _processWidgetRoute();
 
     } catch (e) {
@@ -1806,63 +1841,71 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     }
   }
 
+  // ====================================================
+  // ③ 🟢 お知らせの3連コンカレンシー・ワーカーフェッチ
+  // ====================================================
   Future<void> _fetchMessages() async {
     try {
       final cached = await CacheManager.load('cached_messages_v14_all_year');
       if (cached != null && mounted) {
-        setState(() {
-          _messages = cached;
-        });
+        setState(() { _messages = cached; });
       }
 
       if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
-
-      // ★ 追加：テストログイン中は本番APIの走査をスキップして早期リターン
       if (widget.cookie == "dummy_test_session") {
         if (mounted) setState(() { _isLoadingMessages = false; });
         return;
       }
-
-      List<dynamic> msgs = [];
 
       final thisYearCourses = widget.allCourses.where((c) {
         if (c['is_custom'] == true) return false;
         return _isCurrentYearCourse(c);
       }).toList();
 
-      for (var course in thisYearCourses) {
-        if (!mounted) return;
+      final List<dynamic> fetchedMsgs = [];
+      int courseIndex = 0;
 
-        final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/discussion_topics?only_announcements=true&per_page=15');
-        if (uri == null) continue;
+      // 🎯 お知らせ専用のスロット並列ワーカー
+      Future<void> runMessageWorker() async {
+        while (true) {
+          int myIdx = courseIndex++;
+          if (myIdx >= thisYearCourses.length) break;
 
-        final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 15));
+          final course = thisYearCourses[myIdx];
+          final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/discussion_topics?only_announcements=true&per_page=15');
+          if (uri == null) continue;
 
-        if (!mounted) return;
-
-        if (res.statusCode == 200) {
-          for (var m in jsonDecode(res.body)) {
-            m['context_name'] = course['name'];
-            m['course_id'] = course['id'];
-            msgs.add(m);
+          try {
+            final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 8));
+            if (res.statusCode == 200) {
+              final List<dynamic> courseMsgs = jsonDecode(res.body);
+              for (var m in courseMsgs) {
+                m['context_name'] = course['name'];
+                m['course_id'] = course['id'];
+                fetchedMsgs.add(m);
+              }
+            }
+          } catch (e) {
+            debugPrint("科目 ${course['id']} お知らせ取得セッションラグ(自動回避): $e");
           }
-        } else if (res.statusCode == 403 || res.statusCode == 401) {
-          continue;
-        } else if (res.statusCode == 429) {
-          await Future.delayed(const Duration(seconds: 2));
-          continue;
         }
-
-        await Future.delayed(const Duration(milliseconds: 150));
       }
 
-      msgs.sort((a, b) {
+      // 🚀 同じく3本の並列ワーカーで一斉掃討
+      await Future.wait([
+        runMessageWorker(),
+        runMessageWorker(),
+        runMessageWorker(),
+      ]);
+
+      fetchedMsgs.sort((a, b) {
         final da = DateTime.tryParse(a['posted_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
         final db = DateTime.tryParse(b['posted_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
         return db.compareTo(da);
       });
-      await CacheManager.save('cached_messages_v14_all_year', msgs);
-      if (mounted) setState(() { _messages = msgs; });
+
+      await CacheManager.save('cached_messages_v14_all_year', fetchedMsgs);
+      if (mounted) setState(() { _messages = fetchedMsgs; });
 
     } catch (e) {
       debugPrint("Dashboard._fetchMessages Error: $e");
@@ -2595,7 +2638,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
 
-  @override void didUpdateWidget(covariant DashboardPage oldWidget) { super.didUpdateWidget(oldWidget); if (oldWidget.courses != widget.courses) { _buildCourseIndexMap(); setState(() { _generateWeeklySchedule(); _currentCourseIndex = _findBestCourseIndex(); if (_coursesWidgetController.hasClients) _coursesWidgetController.jumpToPage(_currentCourseIndex); }); _fetchDataParallel(); } }
 
 
 
@@ -5751,18 +5793,27 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 bool isLoading = _isLoadingAssignments || _isLoadingMessages;
                 Color appBgColor = AppTheme.bg(context);
 
-                if (!widget.isAuthenticated || _hasApiError) {
-                  bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
-                  iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
-                } else if (isLoading) {
+                // 👇 ─── 🟢 ここから分岐条件をリバランス上書き ───
+                // ─── 🟢 修正：確定状態を判定に組み込んだ安心のスイッチ回路 ───
+                if (isLoading && !_hasApiError) {
+                  // 読み込み動作中は、常に同期マーク ＋ クールな白黒点滅で待機
                   bg = _colorAnimController.value == 0.0
                       ? baseBgColor
                       : (Color.lerp(Colors.black, Colors.white, _colorAnimController.value) ?? Colors.black);
                   iconData = Icons.sync;
+                } else if (_isFirstLaunchLoop) {
+                  // 🎯 起動処理が完全に落ち着く（確定する）までは、絶対に赤ルートに入らせずグレーの静寂を維持
+                  bg = baseBgColor;
+                  iconData = Icons.sync;
+                } else if (!widget.isAuthenticated || _hasApiError) {
+                  // 全通信が終わり、名実ともにログアウトが確定したときのみ真っ赤に変形
+                  bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
+                  iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
                 } else {
                   bg = baseBgColor;
                   iconData = Icons.sync;
                 }
+                // 👆 ─── 変更ここまで ───
 
                 Widget iconWidget = Icon(iconData, color: textColor);
                 if (isLoading) {

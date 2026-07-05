@@ -22,6 +22,7 @@ import '../utils/term_helper.dart'; // パスは適宜合わせてください
 import '../utils/dummy_data_helper.dart';
 import 'custom_camera_screen.dart';
 import 'dart:typed_data'; // 🟢 追記：これを入れることで Uint8List のエラーが消滅します
+import '../services/cache_manager.dart';
 
 //lib/screens/course_detail_screen.dartの中身です。
 
@@ -761,6 +762,9 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
           // -------------------------------------------------------------------
           // ★ スライドするタブ型メニュー
           // -------------------------------------------------------------------
+          // -------------------------------------------------------------------
+          // ★ スライドするタブ型メニュー
+          // -------------------------------------------------------------------
           Builder(
               builder: (context) {
                 int pageCount = 0;
@@ -771,14 +775,11 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                   pageCount = 2;
                   pageTitlesLong = ["MEMO", "TASKS"];
                   pageTitlesShort = ["MEMO", "TASKS"];
-                } else if (widget.isAuthenticated) {
+                } else {
+                  // 🟢 変更：未ログイン・ログアウト状態であっても、5つの情報セクターを常時フル解放
                   pageCount = 5;
                   pageTitlesLong = ["MEMO", "MODULES", "TASKS", "GRADES", "ANNOUNCE"];
                   pageTitlesShort = ["MEMO", "MODS", "TASKS", "GRADE", "ANN"];
-                } else {
-                  pageCount = 2;
-                  pageTitlesLong = ["MEMO", "LOGIN"];
-                  pageTitlesShort = ["MEMO", "LOGIN"];
                 }
 
                 int safeBottomIndex = _currentBottomIndex;
@@ -910,7 +911,7 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                               pageCount = 2;
                               pages = [
                                 _CourseMemoWidget(
-                                    key: _memoKey, // 👈 🔑 鍵を装着してロックオン
+                                    key: _memoKey,
                                     courseId: cur['id'].toString(),
                                     courseName: cur['title'] ?? cur['name'] ?? '',
                                     bgColor: Colors.transparent,
@@ -919,72 +920,33 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                 ),
                                 Container( /* ...カスタム授業用タスク画面... */ )
                               ];
-                            } else if (widget.isAuthenticated) {
-                              // ─── 🟢 集中中継ユニット：裏のDB書き込みと同時に、メモリキャッシュのタイムラグを完全パージ ───
+                            } else {
+                              // ─── 🟢 変更：isAuthenticated の分岐を撤廃し、常に5つのデータリストを展開 ───
                               final Function(List<String>) imgSaverUnit = (paths) async {
                                 if (paths.isEmpty) return;
-
                                 final activeCourse = widget.courses[_currentIndex];
                                 final activeCourseId = activeCourse['id'];
-
                                 final prefs = await SharedPreferences.getInstance();
                                 final String dbKey = 'course_memos_v2_$activeCourseId';
                                 final String? dbData = prefs.getString(dbKey);
-
                                 List<Map<String, dynamic>> loadedMemos = [];
-                                if (dbData != null) {
-                                  try {
-                                    final List<dynamic> decoded = jsonDecode(dbData);
-                                    loadedMemos = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
-                                  } catch (_) {}
-                                }
-
+                                if (dbData != null) { try { final List<dynamic> decoded = jsonDecode(dbData); loadedMemos = decoded.map((e) => Map<String, dynamic>.from(e)).toList(); } catch (_) {} }
                                 final now = DateTime.now();
                                 final dateStr = '${now.month.toString().padLeft(2,'0')}/${now.day.toString().padLeft(2,'0')}';
                                 final timeStr = "${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}";
-
                                 int todayIdx = loadedMemos.indexWhere((m) => m['title']?.toString().startsWith(dateStr) ?? false);
-
-                                if (todayIdx == -1) {
-                                  final cleanName = CourseTitleParser.getCleanTitle(activeCourse['name'] ?? '');
-                                  final newTitle = cleanName.isNotEmpty ? '$dateStr $cleanName' : dateStr;
-
-                                  loadedMemos.add({
-                                    'id': now.millisecondsSinceEpoch.toString(),
-                                    'title': newTitle,
-                                    'items': <dynamic>[],
-                                  });
-                                  todayIdx = loadedMemos.length - 1;
-                                }
-
+                                if (todayIdx == -1) { final cleanName = CourseTitleParser.getCleanTitle(activeCourse['name'] ?? ''); final newTitle = cleanName.isNotEmpty ? '$dateStr $cleanName' : dateStr; loadedMemos.add({'id': now.millisecondsSinceEpoch.toString(), 'title': newTitle, 'items': <dynamic>[],}); todayIdx = loadedMemos.length - 1; }
                                 List<dynamic> dbItems = List<dynamic>.from(loadedMemos[todayIdx]['items'] ?? []);
-                                for (var path in paths) {
-                                  final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString();
-
-                                  // ─── 🟢 修正：DB（ローカルストレージ）への書き込み時にテキストを正確にフィルタリング ───
-                                  if (path.startsWith("TEXT_MEMO:")) {
-                                    final actualText = path.substring(10);
-                                    dbItems.add({'id': uniqueId, 'type': 'text', 'data': actualText, 'time': timeStr});
-                                  } else {
-                                    dbItems.add({'id': uniqueId, 'type': 'image', 'data': path, 'time': timeStr});
-                                  }
-                                }
+                                for (var path in paths) { final uniqueId = (now.millisecondsSinceEpoch + paths.indexOf(path)).toString(); if (path.startsWith("TEXT_MEMO:")) { final actualText = path.substring(10); dbItems.add({'id': uniqueId, 'type': 'text', 'data': actualText, 'time': timeStr}); } else { dbItems.add({'id': uniqueId, 'type': 'image', 'data': path, 'time': timeStr}); } }
                                 loadedMemos[todayIdx]['items'] = dbItems;
-
                                 await prefs.setString(dbKey, jsonEncode(loadedMemos));
-
-                                // 🎯 決定打：PDFビューアを「閉じて詳細画面へ戻った時」に、メモリ上で居眠りしている
-                                // 古い配列キャッシュを叩き起こし、最新のSharedPreferencesから100%強制ロードをかける能動システム！
-                                if (_memoKey.currentState != null && _memoKey.currentState!.mounted) {
-                                  // 外部追加の着信トリガーを投下し、メモリ上の _memos と UI を一気呵成に同期リフレッシュします
-                                  _memoKey.currentState!.appendExternalImages(paths);
-                                }
+                                if (_memoKey.currentState != null && _memoKey.currentState!.mounted) { _memoKey.currentState!.appendExternalImages(paths); }
                               };
 
                               pageCount = 5;
                               pages = [
                                 _CourseMemoWidget(
-                                    key: _memoKey, // 🔑 メモウィジェットを外殻から遠隔ハックする鍵
+                                    key: _memoKey,
                                     courseId: cur['id'].toString(),
                                     courseName: cur['title'] ?? cur['name'] ?? '',
                                     bgColor: Colors.transparent,
@@ -995,40 +957,6 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
                                 _CourseDataList(courseId: cur['id'], endpointType: 'ASSIGNMENTS', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: imgSaverUnit),
                                 _CourseDataList(courseId: cur['id'], endpointType: 'GRADES', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, onImagesSaved: imgSaverUnit),
                                 _CourseDataList(courseId: cur['id'], endpointType: 'ANNOUNCE', cookie: widget.cookie, bgColor: Colors.transparent, textColor: textCol, targetItemId: widget.targetTaskId, onImagesSaved: imgSaverUnit),
-                              ];
-                            } else {
-                              pageCount = 2;
-                              pages = [
-                                _CourseMemoWidget(
-                                    courseId: cur['id'].toString(),
-                                    courseName: cur['title'] ?? cur['name'] ?? '',
-                                    bgColor: Colors.transparent,
-                                    textColor: textCol,
-                                    onMemoStateChanged: (isOpen) { if (mounted) setState(() => _isMemoOpen = isOpen); }
-                                ),
-                                Container(
-                                    width: double.infinity,
-                                    color: Colors.transparent,
-                                    child: Center(
-                                        child: Column(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-
-                                              GestureDetector(
-                                                onTap: () {
-                                                  Navigator.pop(context);
-                                                  widget.onLoginRequest();
-                                                },
-                                                child: Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                                                  decoration: BoxDecoration(color: textCol, borderRadius: BorderRadius.circular(30)),
-                                                  child: Text("LOGIN", style: TextStyle(color: color, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-                                                ),
-                                              )
-                                            ]
-                                        )
-                                    )
-                                )
                               ];
                             }
 
@@ -1085,22 +1013,24 @@ class _CourseDetailInteractivePageState extends State<CourseDetailInteractivePag
 }
 
 // （以下、_CourseDataList、_CourseMemoWidget、_TextInputOverlay、_FullScreenImageGallery は変更なし）
+// ─── 🟢 授業詳細画面（_CourseDataListState）のキャッシュ連動・爆速化修正版全文 ───
+
+// ─── 🟢 授業詳細画面（_CourseDataListState）の未ログイン完全対応・決定版 ───
+
 class _CourseDataList extends StatefulWidget {
   final int courseId; final String endpointType; final String cookie; final Color bgColor; final Color textColor; final String? targetItemId;
-  final Function(List<String>)? onImagesSaved; // 🟢 追記：画像が保存されたことを親画面に中継するコールバック
+  final Function(List<String>)? onImagesSaved;
 
-  // 🟢 修正：コンストラクタに onImagesSaved を追加
   const _CourseDataList({required this.courseId, required this.endpointType, required this.cookie, required this.bgColor, required this.textColor, this.targetItemId, this.onImagesSaved});
   @override
   State<_CourseDataList> createState() => _CourseDataListState();
 }
 
-
 class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive => true;
   List<dynamic> _data = [];
   bool _isLoading = true;
-  Set<String> _expandedItems = {}; // ★ 展開状態を記憶するセット
+  Set<String> _expandedItems = {};
 
   @override void initState() {
     super.initState();
@@ -1111,22 +1041,62 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
   @override void didUpdateWidget(covariant _CourseDataList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.courseId != widget.courseId) {
-      _expandedItems.clear(); // 授業が変わったらリセット
+      _expandedItems.clear();
       if (widget.targetItemId != null) _expandedItems.add(widget.targetItemId!);
       _fetch();
     }
   }
 
-  // lib/screens/course_detail_screen.dart 内の _CourseDataListState._fetch() メソッド
+  // 🎯 統括改造：起動時の「NO DATA」を永久パージするハイブリッド・フェッチ回路
   Future<void> _fetch() async {
-    setState(() => _isLoading = true);
+    // ─── 【第1層：ローカルキャッシュ領域からの超高速先行抽出セクター】 ───
+    try {
+      List<dynamic>? preLoadedData;
 
-    // ★ 修正：テストログイン中の場合はオンラインへのHTTP通信を遮断し、ダミーを流し込む
+      if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') {
+        final List<dynamic>? allTasksCache = await CacheManager.load('cached_assignments_v14_all_year');
+        if (allTasksCache != null) {
+          preLoadedData = allTasksCache.where((t) => t['course_id'] == widget.courseId).toList();
+        }
+      } else if (widget.endpointType == 'ANNOUNCE') {
+        final List<dynamic>? allMsgsCache = await CacheManager.load('cached_messages_v14_all_year');
+        if (allMsgsCache != null) {
+          preLoadedData = allMsgsCache.where((m) => m['course_id'] == widget.courseId).toList();
+        }
+      } else if (widget.endpointType == 'MODULES') {
+        preLoadedData = await CacheManager.load('course_modules_${widget.courseId}');
+      }
+
+      // キャッシュが見つかった場合は、ローディングを挟まず1フレーム目で即座に先行展開！
+      if (preLoadedData != null && preLoadedData.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _data = preLoadedData!;
+            _isLoading = false; // 先行してローディングのぐるぐるを解除
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("詳細画面キャッシュ先行抽出エラー(安全にスルー): $e");
+    }
+
+    if (_data.isEmpty) {
+      setState(() => _isLoading = true);
+    }
+
+    // ─── 🛡️ 決定打：未ログイン、またはログアウト時（Cookieが空）の防衛ゲート ───
+    // ここで安全に処理を確定早期リターン。下の本番HTTPリクエストを完全遮断し、
+    // 第1層でロードした「過去のログイン記録」を画面に100%美しく維持させます。
+    if (widget.cookie.isEmpty) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
+    // ★ 試運転ダミー環境時の高速シミュレート（既存ロジックを完全無傷で維持）
     if (widget.cookie == "dummy_test_session") {
-      await Future.delayed(const Duration(milliseconds: 300)); // リアルなロード感
+      await Future.delayed(const Duration(milliseconds: 300));
       if (mounted) {
         setState(() {
-          // 👇 ★ 変更：第二引数として「widget.courseId」を確実に流し込む！
           _data = DummyDataHelper.getDetails(widget.endpointType, widget.courseId);
           _isLoading = false;
         });
@@ -1134,14 +1104,34 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
       return;
     }
 
+    // ─── 【第2層：バックグラウンドでの本番オンライン非同期通信セクター】 ───
     String url = "";
-    // ...（以降の既存の本番用通信コードは一切変更なしでOKです）...
     if (widget.endpointType == 'MODULES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/modules?per_page=50&include[]=items';
-    // ... 以降、元の既存通信コードが続く
     else if (widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/assignments?per_page=50&order_by=due_at&include[]=submission';
     else url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/discussion_topics?only_announcements=true&per_page=20';
-    try { // 修正前： final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie});
-      final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 10)); if (res.statusCode == 200 && mounted) setState(() { _data = jsonDecode(res.body); _isLoading = false; }); } catch (_) { if (mounted) setState(() => _isLoading = false); }
+
+    try {
+      final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200 && mounted) {
+        final List<dynamic> freshData = jsonDecode(res.body);
+
+        setState(() {
+          _data = freshData;
+          _isLoading = false; // 読み込み完了
+        });
+
+        // 🟢 固有キャッシュ領域へのサイレント永続化保存（次回起動時のゼロレイテンシ用）
+        if (widget.endpointType == 'MODULES') {
+          await CacheManager.save('course_modules_${widget.courseId}', freshData);
+        }
+      }
+    } catch (e) {
+      debugPrint("詳細オンラインフェッチタイムアウトまたはエラー: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   @override
@@ -1157,7 +1147,19 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
             child: _isLoading
                 ? Center(child: CircularProgressIndicator(color: widget.textColor))
                 : _data.isEmpty
-                ? Center(child: Text("NO DATA / OFFLINE", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontWeight: FontWeight.w300)))
+                ? Center(
+              // ─── 🟢 変更：真の空データ（インストール直後）の表示に、未ログイン時の案内を添える ───
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text("NO DATA / OFFLINE", style: TextStyle(color: widget.textColor.withOpacity(0.5), fontWeight: FontWeight.w300)),
+                  if (widget.cookie.isEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text("過去の同期ログがありません。ログインすると取得されます。", style: TextStyle(color: widget.textColor.withOpacity(0.3), fontSize: 11, fontWeight: FontWeight.w300)),
+                  ]
+                ],
+              ),
+            )
                 : ListView.builder(
                 padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 24 + bottomPadding),
                 itemCount: _data.length,
@@ -1174,7 +1176,6 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                   // --- MODULES ---
                   if (widget.endpointType == 'MODULES') {
                     children = (item['items'] as List? ?? []).map((si) {
-                      // 🎯 大切な変数定義をしっかり保持
                       String subTitle = si['title'] ?? 'Unknown';
                       String type = si['type'] ?? '';
                       IconData icon;
@@ -1188,7 +1189,6 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                       }
                       return InkWell(
                           onTap: () {
-                            // 🚀 コールバックを安全に最深部へパススルー
                             openSmartUrl(
                               context,
                               si['html_url'] ?? si['url'] ?? '',
@@ -1286,15 +1286,13 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                               child: Align(
                                   alignment: Alignment.centerLeft,
                                   child: TextButton.icon(
-                                    // 🎯 修正：完全に抜け落ちていた onImagesSaved 引数をここに完璧にマウント！！
                                       onPressed: () => openSmartUrl(
                                         context,
                                         targetUrl,
                                         widget.cookie,
                                         title: title,
-                                        onImagesSaved: widget.onImagesSaved, // 🟢 これを追記
+                                        onImagesSaved: widget.onImagesSaved,
                                       ),
-
                                       label: Text("OPEN LINK", style: TextStyle(color: btnTextColor, fontWeight: FontWeight.w500, letterSpacing: 1.0)),
                                       style: TextButton.styleFrom(
                                           backgroundColor: btnBgColor,
@@ -1308,7 +1306,6 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                     }
                   }
 
-                  // ★ ヘッダーコンテンツの生成
                   Widget headerContent;
                   if ((widget.endpointType == 'ASSIGNMENTS' || widget.endpointType == 'GRADES') && isExpanded && largeDueStr.isNotEmpty) {
                     headerContent = Text(largeDueStr, style: TextStyle(color: widget.textColor, fontSize: 26, fontWeight: FontWeight.w200, height: 1.1));
@@ -1333,7 +1330,6 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
 
                   return Column(
                     children: [
-                      // 各項目の上部に細い線を描画（一番上の項目以外）
                       if (i > 0)
                         Divider(color: widget.textColor.withOpacity(0.5), thickness: 0.5, height: 1),
 
@@ -1350,7 +1346,6 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                             });
                           },
                           child: Padding(
-                            // ★ 修正：上パンディングは狭く(12)、下の余白は広く(展開時はコンテンツの繋がりを意識して16、閉じている時は40)
                             padding: EdgeInsets.only(top: 12.0, bottom: isExpanded ? 16.0 : 40.0),
                             child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -1381,12 +1376,10 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
                         ),
                       ),
 
-                      // ★ 展開時のコンテンツ
                       AnimatedCrossFade(
                         duration: const Duration(milliseconds: 250),
                         crossFadeState: isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
                         firstChild: Padding(
-                          // ★ 展開時はコンテンツの下に大きな余白(40)を作り、次の区切り線との距離を保つ
                           padding: const EdgeInsets.only(bottom: 40.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
