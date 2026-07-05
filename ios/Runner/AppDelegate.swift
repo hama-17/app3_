@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import workmanager // 🟢 追記
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -11,6 +12,10 @@ import UserNotifications
 
     // 1. プラグイン全体の基盤をレジスター
     GeneratedPluginRegistrant.register(with: self)
+
+    WorkmanagerPlugin.setPluginRegistrantCallback { registry in
+        GeneratedPluginRegistrant.register(with: registry)
+    }
 
     // 🟢【王道回帰】Flutter公式のデフォルトテンプレートと全く同じ「強制キャスト」に戻します。
     // plistの権限が揃った今、この王道スタイルが一番スレッドのデッドロック（窒息）を起こさず、

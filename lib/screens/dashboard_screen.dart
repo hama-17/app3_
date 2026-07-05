@@ -33,6 +33,11 @@ import 'package:camera/camera.dart';
 import 'package:path/path.dart' show join;
 import 'package:gal/gal.dart';
 import '../services/live_notification_service.dart';
+import '../services/silent_refresh_service.dart';
+import 'package:gal/gal.dart';
+import '../services/live_notification_service.dart';
+import '../services/silent_refresh_service.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // 🟢 追記：ネイティブCookie制御のためにインポート
 
 //lib/screens/dashboard_screen.dartの中身です。
 
@@ -1407,6 +1412,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   // ─── 🟢 決定打3：届いたIDを解析し、アプリ既存の高剛性ルーター「_routeToCourse」を直接叩いてブチ抜く本体 ───
   // ─── 🟢 最終進化版：WebView（openSmartUrl）直撃起動型・超高剛性ルーター ───
   // ─── 🟢 究極進化版：ローディングを完全無視して一撃起動するノンブロッキング・ルーター ───
+  // ─── 🟢 修正：ウィジェット直撃時のPDF真っ白（認証漏れ）バグを完全消滅させたルーター本体 ───
+  // ─── 🟢 修正：不要なflushをパージし、正常にコンパイルが通るようにした完成版ルーター ───
   void _processWidgetRoute() {
     final route = globalWidgetRouteNotifier.value;
     if (route == null) return;
@@ -1418,14 +1425,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     // 📝 Aパターン：課題（タスク）がタップされたとき ➔ WebView直撃
     // ──────────────────────────────────────────────────
     if (route.page == 'task_detail') {
-      // 🎯 決定打①：ローディングフラグを完全無視！今ある配列（キャッシュ含む）から即座にスキャン
       final task = _assignments.firstWhere(
             (t) => t['id'].toString() == targetId,
         orElse: () => null,
       );
 
       if (task != null) {
-        globalWidgetRouteNotifier.value = null; // 🎫 即座にチケットを消費して重複発火を防止
+        globalWidgetRouteNotifier.value = null; // 🎫 チケット消費
 
         if (task['course_id'] == 'custom_t' || task['is_app_custom_task'] == true) {
           _showCompleteCustomTaskDialog(targetId);
@@ -1433,12 +1439,26 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           String targetUrl = task['html_url'] ?? task['url'] ?? '';
 
           if (targetUrl.isNotEmpty) {
-            debugPrint("🔥 キャッシュから課題を発見！WebViewをノンブロッキング起動します: $targetUrl");
+            debugPrint("🔥 キャッシュから課題を発見！WebViewを起動します: $targetUrl");
 
-            // 🎯 決定打②：アプリ起動直後のNavigatorの初期化ブレを吸収するため、
-            // 200ミリ秒だけ安全にディレイ（遅延）をかけてから本番のWebViewを一閃起動！
-            Future.delayed(const Duration(milliseconds: 200), () {
+            Future.delayed(const Duration(milliseconds: 200), () async {
               if (mounted) {
+                // ─── 🟢 追記：ネイティブのCookieManagerへCookieを流し込み ───
+                if (widget.cookie.isNotEmpty) {
+                  final cm = CookieManager.instance();
+                  final bu = WebUri(canvasBaseUrl);
+                  for (var pair in widget.cookie.split(';')) {
+                    final idx = pair.indexOf('=');
+                    if (idx == -1) continue;
+                    final name = pair.substring(0, idx).trim();
+                    final value = pair.substring(idx + 1).trim();
+                    if (name.isNotEmpty) {
+                      await cm.setCookie(url: bu, name: name, value: value, isSecure: true, isHttpOnly: true);
+                    }
+                  }
+                  // ❌ 旧：if (Platform.isAndroid) await cm.flush(); は完全に削除しました
+                }
+
                 openSmartUrl(
                     context,
                     targetUrl,
@@ -1449,18 +1469,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               }
             });
           } else {
-            // URLが無い場合は授業詳細の課題タブへフォールバック
             _routeToCourse(task['course_id'].toString(), false, 2, targetId);
           }
         }
-        return; // 処理成功のため早期リターン
+        return;
       }
     }
     // ──────────────────────────────────────────────────
     // 📅 Bパターン：今日の授業予定がタップされたとき ➔ 授業詳細直撃
     // ──────────────────────────────────────────────────
     else if (route.page == 'course_detail') {
-      // 同じくローディングを無視してスキャン
       final course = _displayCourses.firstWhere(
             (c) => c['id'].toString() == targetId,
         orElse: () => null,
@@ -1469,14 +1487,31 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       if (course != null) {
         globalWidgetRouteNotifier.value = null; // 🎫 チケット消費
 
-        _routeToCourse(targetId, course['is_custom'] == true, 1, null);
-        debugPrint("➔ 授業詳細画面を展開しました");
+        Future.delayed(Duration.zero, () async {
+          if (widget.cookie.isNotEmpty) {
+            final cm = CookieManager.instance();
+            final bu = WebUri(canvasBaseUrl);
+            for (var pair in widget.cookie.split(';')) {
+              final idx = pair.indexOf('=');
+              if (idx == -1) continue;
+              final name = pair.substring(0, idx).trim();
+              final value = pair.substring(idx + 1).trim();
+              if (name.isNotEmpty) {
+                await cm.setCookie(url: bu, name: name, value: value, isSecure: true, isHttpOnly: true);
+              }
+            }
+            // ❌ 旧：if (Platform.isAndroid) await cm.flush(); は完全に削除しました
+          }
+
+          if (mounted) {
+            _routeToCourse(targetId, course['is_custom'] == true, 1, null);
+            debugPrint("➔ 授業詳細画面を展開しました");
+          }
+        });
         return;
       }
     }
 
-    // 💡 救済ルート：アプリ起動の超初期段階で、まだキャッシュすらメモリに展開されていない一瞬の間の処理
-    // ここではチケットを消さずに残すことで、コンマ数秒後にキャッシュデータがマウント（setState）された瞬間に自動で再着火します。
     debugPrint("⏳ ターゲットデータが未装填のため、次のマウントフレームまでロードを待機します...");
   }
 
@@ -1811,10 +1846,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       }
 
       // 🚀 3本の独立並列ワーカーを一斉に解き放つ（同時接続数を常に3本以下に完全拘束）
+      // 🚀 3本の独立並列ワーカーを一斉に解き放つ（同時接続数を常に3本以下に完全拘束）
       await Future.wait([
         runAssignmentWorker(),
         runAssignmentWorker(),
-        runAssignmentWorker(), // 🟢 3本目も正しく同じローカルワーカーを指定
+        runAssignmentWorker(),
       ]);
 
       final Map<String, dynamic> uniqueTasks = {};
@@ -1830,9 +1866,21 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       await WidgetUpdateService.updateHomeWidgets(tasks: finalTasks);
       _processWidgetRoute();
 
+      // ─── 👇 🟢 ここから catch ブロックを自動蘇生仕様へリバランス ───
     } catch (e) {
-      debugPrint("Dashboard._fetchAssignments Error: $e");
-      _triggerErrorState();
+      debugPrint("Dashboard._fetchAssignments セッション切断エラーを検知: $e");
+
+      // ただちに降伏せず、裏でサイレントSSOリフレッシュを試みる
+      final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
+
+      if (isRefreshSuccess) {
+        debugPrint("🟢 課題側回路：自動SSO延長に成功したため、一閃リトライフェッチをかけます");
+        _fetchDataParallel();
+      } else {
+        // 隠しブラウザでもダメだった（Okta自体の命も切れていた）場合のみ、警告赤点滅を解禁
+        _triggerErrorState();
+      }
+      // ─── 👆 変更ここまで ───
     } finally {
       if (mounted) {
         setState(() { _isLoadingAssignments = false; _hasApiError = false; });
@@ -1892,6 +1940,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       }
 
       // 🚀 同じく3本の並列ワーカーで一斉掃討
+      // 🚀 同じく3本の並列ワーカーで一斉掃討
       await Future.wait([
         runMessageWorker(),
         runMessageWorker(),
@@ -1907,9 +1956,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       await CacheManager.save('cached_messages_v14_all_year', fetchedMsgs);
       if (mounted) setState(() { _messages = fetchedMsgs; });
 
+      // ─── 👇 🟢 ここから catch ブロックを自動蘇生仕様へリバランス ───
     } catch (e) {
-      debugPrint("Dashboard._fetchMessages Error: $e");
-      _triggerErrorState();
+      debugPrint("Dashboard._fetchMessages セッション切断エラーを検知: $e");
+
+      // 同じく裏でサイレントSSOリフレッシュを試みる
+      final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
+
+      if (isRefreshSuccess) {
+        debugPrint("🟢 お知らせ側回路：自動SSO延長に成功したため、一閃リトライフェッチをかけます");
+        _fetchDataParallel();
+      } else {
+        _triggerErrorState();
+      }
+      // ─── 👆 変更ここまで ───
     } finally {
       if (mounted) {
         setState(() { _isLoadingMessages = false; _hasApiError = false; });

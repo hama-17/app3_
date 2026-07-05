@@ -1,26 +1,91 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-// ─── 🟢 追記：ウィジェット連携パッケージをインポート ───
 import 'package:home_widget/home_widget.dart';
+import 'package:workmanager/workmanager.dart'; // 🟢 追記：Workmanagerをインポート
 
 import 'screens/dashboard_screen.dart';
 import 'core/app_theme.dart';
+import 'services/silent_refresh_service.dart'; // 🟢 追記：先ほどのSSO延長サービスを結線
+import 'services/widget_update_service.dart';  // 🟢 追記：ウィジェット更新サービスも結線
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'services/cache_manager.dart'; // キャッシュマネージャーのパスを合わせてください
+import 'utils/lms_adapter.dart';
+import 'services/auth_service.dart';
 
 bool globalDisableAutoCacheClear = false;
-
-// ─── 🟢 決定打1：MaterialAppの外側からでも安全に画面遷移をブチ抜くグローバルキー ───
 final GlobalKey<NavigatorState> globalNavigatorKey = GlobalKey<NavigatorState>();
+
+// ─── 🟢 決定打：スマホがスリープ中にOSから独立して呼び出されるバックグラウンド専用の無線通信Dispatcher ───
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    debugPrint("💤 [Background Loop] アップル/アンドロイドのランチャー機能より巡回通信着火。");
+
+    try {
+      // ① まずは裏側でOktaを完全ステルス通過し、セッションを最新に延命！
+      final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
+
+      if (isRefreshSuccess) {
+        debugPrint("🟢 [Background Loop] サイレントログイン状態の延長に成功。データ先読みフェッチを開始します...");
+
+        // 最新のCookieをSecureStorageからサルベージ
+        final String? activeCookie = await AuthService.getSession();
+        if (activeCookie != null && activeCookie.isNotEmpty) {
+
+          // ② 【課題データの先読み直撃】全科目の課題APIを裏から叩く
+          final tasksUri = Uri.tryParse('$canvasBaseUrl/api/v1/users/self/todo?per_page=100'); // 本来の課題一括取得API
+          if (tasksUri != null) {
+            final res = await http.get(tasksUri, headers: {'Cookie': activeCookie}).timeout(const Duration(seconds: 10));
+            if (res.statusCode == 200) {
+              final List<dynamic> fetchedTasks = jsonDecode(res.body);
+
+              // 🎯 決定打：画面（UI）を一切介さず、ローカルキャッシュファイルを裏から力技で直接上書き！
+              await CacheManager.save('cached_assignments_v14_all_year', fetchedTasks);
+              debugPrint("📦 [Background Loop] 最新の課題データをキャッシュに直撃書き込みしました（先読み完了）");
+            }
+          }
+        }
+
+        // ③ データが完全に新しくなった状態で、時間割や予定ウィジェットの文字を最新状態へ焼き替える
+        await WidgetUpdateService.updateHomeWidgets();
+      }
+    } catch (e) {
+      debugPrint("❌ [Background Loop] バックグラウンド巡回中にエラーが発生: $e");
+    }
+
+    return Future.value(true);
+  });
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // ─── 🟢 追記：バックグラウンド巡回タスクマトリクスの初期化 ───
+  await Workmanager().initialize(
+      callbackDispatcher,
+      isInDebugMode: false // ⚙️ テスト時に通知を出したい場合はここを true に切り替えてください
+  );
+
   if (Platform.isAndroid) {
     await AndroidAlarmManager.initialize();
+
+    // アンドロイド用の6時間おき（1日4回）の定期巡回ジョブを設定
+    await Workmanager().registerPeriodicTask(
+      "com.example.app3_kportal_2.silent_refresh_job", // ユニークなID
+      "silentRefreshTask",
+      frequency: const Duration(hours: 6), // ⏳ 6時間おき＝1日4回周期
+      existingWorkPolicy: ExistingWorkPolicy.keep, // 二重登録を防止して既存のスケジュールを維持
+      constraints: Constraints(
+        networkType: NetworkType.connected, // 🌐 Wi-Fiまたはモバイル通信接続時のみ実行
+      ),
+    );
   }
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -41,6 +106,8 @@ void main() async {
 
   runApp(const CyberCanvasApp());
 }
+
+// （これ以降の CyberCanvasApp クラスの中身は、1文字も変更なしで完全無傷維持してください）
 
 class CyberCanvasApp extends StatefulWidget {
   const CyberCanvasApp({super.key});

@@ -29,6 +29,13 @@ android {
         jvmTarget = "1.8"
     }
 
+    configurations.all {
+        resolutionStrategy {
+            force("androidx.work:work-runtime:2.8.1")
+            force("androidx.work:work-runtime-ktx:2.8.1")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.hk_app3_k.portal"
         minSdk = flutter.minSdkVersion

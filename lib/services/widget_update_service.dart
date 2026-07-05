@@ -115,27 +115,61 @@ class WidgetUpdateService {
       final int targetDayIdx = ['月', '火', '水', '木', '金', '土'].indexOf({1: '月', 2: '火', 3: '水', 4: '木', 5: '金', 6: '土', 7: '日'}[targetDate.weekday] ?? '');
       final List<Map<String, dynamic>> dayEvents = [];
 
+      // ====================================================
+      // ② 予定ウィジェット（Today）データのパッキング【完全修復版】
+      // ====================================================
       for (int index = 0; index < finalCourses.length; index++) {
         final c = finalCourses[index];
         if (c['is_custom'] != true && !currentLMS.isTargetCourse(c, selectedYear, selectedTerm)) continue;
         if (!isTargetQuarter(c)) continue;
 
         String rawName = c['raw_name'] ?? c['name'] ?? '';
-        bool isTargetDayCourse = false; int periodStr = -1;
+
         if (c['is_custom'] == true) {
-          if (c['day'] == targetDayIdx) { isTargetDayCourse = true; periodStr = (c['period'] ?? 0) + 1; }
+          // ─── A：カスタム授業の処理 ───
+          if (c['day'] == targetDayIdx && targetDayIdx != -1) {
+            int pNum = (c['period'] ?? 0) + 1;
+            String startTimeStr = "00:00"; String endTimeStr = "00:00";
+            if (timeMap.containsKey(pNum)) { startTimeStr = timeMap[pNum]![0]; endTimeStr = timeMap[pNum]![1]; }
+            final parts = startTimeStr.split(':');
+            final eventTime = DateTime(targetDate.year, targetDate.month, targetDate.day, int.parse(parts[0]), int.parse(parts[1]));
+
+            dayEvents.add({
+              'time': eventTime,
+              'title': currentLMS.cleanTitle(rawName),
+              'sub': startTimeStr,
+              'end_time': endTimeStr,
+              'room': (c['room'] ?? '').toString().trim(),
+              'id': c['id'].toString(),
+              'page_route': 'course_detail',
+              'is_task': 'false',
+            });
+          }
         } else {
+          // ─── B：Canvas通常授業の処理 ───
           List<Map<String, int>> schedules = currentLMS.parseWeeklySchedule(rawName);
-          for (var s in schedules) { if (s['day'] == targetDayIdx) { isTargetDayCourse = true; periodStr = s['period']! + 1; break; } }
-        }
-        if (isTargetDayCourse && targetDayIdx != -1) {
-          String startTimeStr = "00:00"; String endTimeStr = "00:00";
-          if (timeMap.containsKey(periodStr)) { startTimeStr = timeMap[periodStr]![0]; endTimeStr = timeMap[periodStr]![1]; }
-          final parts = startTimeStr.split(':');
-          final eventTime = DateTime(targetDate.year, targetDate.month, targetDate.day, int.parse(parts[0]), int.parse(parts[1]));
-          dayEvents.add({
-            'time': eventTime, 'title': currentLMS.cleanTitle(rawName), 'sub': startTimeStr, 'end_time': endTimeStr, 'room': (c['is_custom'] == true ? (c['room'] ?? '') : currentLMS.extractRoom(rawName)).trim(), 'id': (c['id'] ?? '').toString(), 'page_route': 'course_detail', 'is_task': 'false',
-          });
+
+          for (var s in schedules) {
+            if (s['day'] == targetDayIdx && targetDayIdx != -1) {
+              // 🟢 決定打：breakを完全排除し、1授業に複数の時限があれば全て独立してスロットへadd
+              int pNum = s['period']! + 1;
+              String startTimeStr = "00:00"; String endTimeStr = "00:00";
+              if (timeMap.containsKey(pNum)) { startTimeStr = timeMap[pNum]![0]; endTimeStr = timeMap[pNum]![1]; }
+              final parts = startTimeStr.split(':');
+              final eventTime = DateTime(targetDate.year, targetDate.month, targetDate.day, int.parse(parts[0]), int.parse(parts[1]));
+
+              dayEvents.add({
+                'time': eventTime,
+                'title': currentLMS.cleanTitle(rawName),
+                'sub': startTimeStr,
+                'end_time': endTimeStr,
+                'room': currentLMS.extractRoom(rawName).trim(),
+                'id': c['id'].toString(),
+                'page_route': 'course_detail',
+                'is_task': 'false',
+              });
+            }
+          }
         }
       }
 
