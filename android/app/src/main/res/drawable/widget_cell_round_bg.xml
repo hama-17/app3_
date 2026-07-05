@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <!-- 🟢 変更：透過を完全にパージし、固有カラーが100%不透明に発色するように修正 -->
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="6dp" />
+</shape>

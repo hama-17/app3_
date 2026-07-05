@@ -33,8 +33,17 @@ import 'package:camera/camera.dart';
 import 'package:path/path.dart' show join;
 import 'package:gal/gal.dart';
 import '../services/live_notification_service.dart';
+
 //lib/screens/dashboard_screen.dartの中身です。
 
+
+class WidgetRouteData {
+  final String page;
+  final String id;
+  WidgetRouteData(this.page, this.id);
+}
+final ValueNotifier<WidgetRouteData?> globalWidgetRouteNotifier = ValueNotifier(null);
+// ─── 追記ここまで ───
 
 class MainSkeleton extends StatefulWidget { const MainSkeleton({super.key}); @override State<MainSkeleton> createState() => _MainSkeletonState(); }
 
@@ -1276,6 +1285,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+
     _mainScrollController = ScrollController();
     _mainScrollController.addListener(_onMainScroll);
 
@@ -1328,6 +1338,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         }
       });
     });
+    globalWidgetRouteNotifier.addListener(_processWidgetRoute);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _processWidgetRoute();
+    });
 
     _loadDismissedIds(); _loadCustomData(); _buildCourseIndexMap(); _fetchDataParallel();
     _prepareAvailableCameras(); // 🟢 カメラハードウェアの事前ロード
@@ -1364,6 +1379,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
   @override void dispose() {
     WidgetsBinding.instance.removeObserver(this); // 🟢 解除：メモリリークを100%完全遮断
+    globalWidgetRouteNotifier.removeListener(_processWidgetRoute);
     _autoRefreshTimer?.cancel();                  // 🟢 停止：裏タイマーを安全に消滅させる
     _cameraCaptureAnimController.dispose(); // 🟢 追加：リソースの安全解放
     _cameraController?.dispose();
@@ -1376,6 +1392,83 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     if (_schedulePageController.hasClients) { _schedulePageController.dispose(); }
     if (_taskPageController.hasClients) { _taskPageController.dispose(); }
     super.dispose();
+  }
+
+  // ─── 🟢 決定打2：ウィジェットからの指令を受け取り、自動で該当の詳細画面を開くルーター ───
+  // ─── 🟢 決定打3：届いたIDを解析し、アプリ既存の高剛性ルーター「_routeToCourse」を直接叩いてブチ抜く本体 ───
+  // ─── 🟢 最終進化版：WebView（openSmartUrl）直撃起動型・超高剛性ルーター ───
+  // ─── 🟢 究極進化版：ローディングを完全無視して一撃起動するノンブロッキング・ルーター ───
+  void _processWidgetRoute() {
+    final route = globalWidgetRouteNotifier.value;
+    if (route == null) return;
+
+    final String targetId = route.id;
+    debugPrint("🚀 ウィジェットジャンプ判定着火 ➔ ID: $targetId (${route.page})");
+
+    // ──────────────────────────────────────────────────
+    // 📝 Aパターン：課題（タスク）がタップされたとき ➔ WebView直撃
+    // ──────────────────────────────────────────────────
+    if (route.page == 'task_detail') {
+      // 🎯 決定打①：ローディングフラグを完全無視！今ある配列（キャッシュ含む）から即座にスキャン
+      final task = _assignments.firstWhere(
+            (t) => t['id'].toString() == targetId,
+        orElse: () => null,
+      );
+
+      if (task != null) {
+        globalWidgetRouteNotifier.value = null; // 🎫 即座にチケットを消費して重複発火を防止
+
+        if (task['course_id'] == 'custom_t' || task['is_app_custom_task'] == true) {
+          _showCompleteCustomTaskDialog(targetId);
+        } else {
+          String targetUrl = task['html_url'] ?? task['url'] ?? '';
+
+          if (targetUrl.isNotEmpty) {
+            debugPrint("🔥 キャッシュから課題を発見！WebViewをノンブロッキング起動します: $targetUrl");
+
+            // 🎯 決定打②：アプリ起動直後のNavigatorの初期化ブレを吸収するため、
+            // 200ミリ秒だけ安全にディレイ（遅延）をかけてから本番のWebViewを一閃起動！
+            Future.delayed(const Duration(milliseconds: 200), () {
+              if (mounted) {
+                openSmartUrl(
+                    context,
+                    targetUrl,
+                    widget.cookie,
+                    title: task['name'] ?? 'Task',
+                    onImagesSaved: _createImgSaverForCourse(task['course_id'].toString())
+                );
+              }
+            });
+          } else {
+            // URLが無い場合は授業詳細の課題タブへフォールバック
+            _routeToCourse(task['course_id'].toString(), false, 2, targetId);
+          }
+        }
+        return; // 処理成功のため早期リターン
+      }
+    }
+    // ──────────────────────────────────────────────────
+    // 📅 Bパターン：今日の授業予定がタップされたとき ➔ 授業詳細直撃
+    // ──────────────────────────────────────────────────
+    else if (route.page == 'course_detail') {
+      // 同じくローディングを無視してスキャン
+      final course = _displayCourses.firstWhere(
+            (c) => c['id'].toString() == targetId,
+        orElse: () => null,
+      );
+
+      if (course != null) {
+        globalWidgetRouteNotifier.value = null; // 🎫 チケット消費
+
+        _routeToCourse(targetId, course['is_custom'] == true, 1, null);
+        debugPrint("➔ 授業詳細画面を展開しました");
+        return;
+      }
+    }
+
+    // 💡 救済ルート：アプリ起動の超初期段階で、まだキャッシュすらメモリに展開されていない一瞬の間の処理
+    // ここではチケットを消さずに残すことで、コンマ数秒後にキャッシュデータがマウント（setState）された瞬間に自動で再着火します。
+    debugPrint("⏳ ターゲットデータが未装填のため、次のマウントフレームまでロードを待機します...");
   }
 
 
@@ -1533,6 +1626,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     } catch (e) {
       debugPrint("ライブ通知の予約中にエラーが発生しました: $e");
     }
+    _processWidgetRoute();
   }
 
 
@@ -1612,21 +1706,26 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
     // 🟢 追加：時間割の最終確定・並び替えが終わった瞬間にウィジェットへ射出
     WidgetUpdateService.updateHomeWidgets(courses: display);
+
+    // ─── 🟢 追記：時間割データのマウントが完了したため、保留中の指令があれば開く ───
+    _processWidgetRoute();
   }
 
 
   Future<void> _fetchAssignments() async {
-
     try {
-      // キャッシュキーを新しくし、クリーンな状態で全取得させる
       final cached = await CacheManager.load('cached_assignments_v14_all_year');
       if (cached != null && mounted) {
         setState(() {
           _assignments = cached;
         });
+
+        // ─── 🟢 追記：キャッシュがメモリに展開されたまさにこの瞬間、即座に指令をスキャンして開く！ ───
+        _processWidgetRoute();
       }
 
       if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
+      // (以下、LMSへのオンライン通信処理へと続く...)
 
       // ★ 追加：テストログイン中は本番APIの走査をスキップして早期リターン
       if (widget.cookie == "dummy_test_session") {
@@ -1693,6 +1792,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       CalendarSyncService.syncTasks(finalTasks);
 
       await WidgetUpdateService.updateHomeWidgets(tasks: finalTasks);
+
+      _processWidgetRoute();
 
     } catch (e) {
       debugPrint("Dashboard._fetchAssignments Error: $e");
@@ -2989,39 +3090,81 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                 child: Text(dueStr, style: TextStyle(color: AppTheme.textMain(context), fontSize: 32, fontWeight: FontWeight.w100, height: 1.0)),
                               ),
                             ),
-                            // 🟢 修正：すべての課題のデカ文字下に「曜日」を常時左詰めで配置
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3.0, left: 2.0),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // ① 曜日インジケータ（すべての期日あり課題で常時表示）
-                                  Text(
-                                    weekdayStr,
-                                    style: TextStyle(
-                                        color: AppTheme.textSub(context).withOpacity(0.55), // ソリッドで見やすい半透明
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w400, // 視認性の良いウェイト
-                                        letterSpacing: -0.1
-                                    ),
-                                  ),
 
-                                  // ② 変更時のみ、曜日の右隣にキープディスタンスを開けてオリジナル期日を結合
-                                  if (isOverridden && origDueStr.isNotEmpty) ...[
-                                    const SizedBox(width: 8), // 曜日との隙間
-                                    Text(
-                                      "original: $origDueStr",
-                                      style: TextStyle(
-                                          color: AppTheme.textSub(context).withOpacity(0.35), // 主張しない超極薄グレー
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w300,
-                                          letterSpacing: -0.2
+                            // ─── 🟢 決定打：曜日・排他オリジナル表示 ＆ ベースライン同期型デカ数字カウントダウン ───
+                            Builder(
+                              builder: (context) {
+                                // 1. カウントダウン対象（24時間以内）かどうかの厳密な事前シミュレーション
+                                bool showCountdown = false;
+                                int hours = 0;
+                                int mins = 0;
+                                if (!isNoDue && !isCompletedList) {
+                                  final dueDateTime = DateTime.tryParse(rawDue.toString())?.toLocal();
+                                  if (dueDateTime != null) {
+                                    final diff = dueDateTime.difference(DateTime.now());
+                                    final remainingMinutes = diff.inMinutes;
+                                    if (remainingMinutes > 0 && remainingMinutes <= 1440) {
+                                      showCountdown = true;
+                                      hours = remainingMinutes ~/ 60;
+                                      mins = remainingMinutes % 60;
+                                    }
+                                  }
+                                }
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 3.0, left: 2.0),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    // 🎯 職人技：これを与えることで、文字サイズが混在しても「底辺の目線」がミリ単位で100%美しく揃います
+                                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                                    textBaseline: TextBaseline.alphabetic,
+                                    children: [
+                                      // ① 曜日インジケータ（常時表示）
+                                      Text(
+                                        weekdayStr,
+                                        style: TextStyle(
+                                            color: AppTheme.textSub(context).withOpacity(0.55),
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w400,
+                                            letterSpacing: -0.1
+                                        ),
                                       ),
-                                      maxLines: 1,
-                                    ),
-                                  ],
-                                ],
-                              ),
+
+                                      // ② 24時間以内なら「赤字カウントダウン」、それ以外で変更があれば「オリジナル時間」を出す排他分岐
+                                      if (showCountdown) ...[
+                                        const SizedBox(width: 8), // 曜日とのキープディスタンス
+                                        Text.rich(
+                                          TextSpan(
+                                            style: TextStyle(
+                                              color: AppTheme.accent, // ログイン球体と完全同期の赤
+                                              letterSpacing: -0.2,
+                                            ),
+                                            children: [
+                                              //const TextSpan(text: "あと ", style: TextStyle(fontSize: 9, fontWeight: FontWeight.w400)),
+                                              TextSpan(text: "$hours", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w300)), // 🎯 数字を太く・大きく
+                                              const TextSpan(text: " hr  ", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w300)),
+                                              TextSpan(text: "$mins", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w300)),  // 🎯 数字を太く・大きく
+                                              const TextSpan(text: " min  left", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w300)),
+                                            ],
+                                          ),
+                                        ),
+                                      ] else if (isOverridden && origDueStr.isNotEmpty) ...[
+                                        const SizedBox(width: 8), // 曜日とのキープディスタンス
+                                        Text(
+                                          "original: $origDueStr",
+                                          style: TextStyle(
+                                              color: AppTheme.textSub(context).withOpacity(0.35),
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w300,
+                                              letterSpacing: -0.2
+                                          ),
+                                          maxLines: 1,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -3394,7 +3537,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   children: [
                                     Icon(
                                       Icons.arrow_back_rounded,
-                                      color: AppTheme.textMain(context).withOpacity(0.8),
+                                      color: AppTheme.textMain(context).withOpacity(0.85),
                                       size: 22,
                                     ),
                                     const SizedBox(width: 4),
@@ -3412,44 +3555,43 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                               ),
                             ),
                             // 🟢 新設：k-supportへのミニマルなウェブビュー誘導インジケータ
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                // 🎯 ユーザー指定枠：ここにお好みのURLをドッキングしてください
-                                const String kSupportUrl = "https://keiouniversity.my.site.com/students/s/";
-
-                                // 既存のスマートWebViewインフラへセッションクッキーを乗せて射出
-                                openSmartUrl(
-                                    context,
-                                    kSupportUrl,
-                                    widget.cookie,
-                                    title: "k-support"
-                                );
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 16.0), // ゆったりとした押しやすい座席
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      "k-support",
-                                      style: TextStyle(
-                                        color: AppTheme.textMain(context),
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w200, // ミニマルな極細ウェイトを継承
-                                        letterSpacing: -0.4,          // タイトなカーニングでテック感を統一
+                            // ─── 🟢 修正：テストログイン時はインダストリアルなk-support誘導インジケータを完全にパージする ───
+                            if (widget.cookie != "dummy_test_session")
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  const String kSupportUrl = "https://keiouniversity.my.site.com/students/s/";
+                                  openSmartUrl(
+                                      context,
+                                      kSupportUrl,
+                                      widget.cookie,
+                                      title: "k-support"
+                                  );
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        "k-support",
+                                        style: TextStyle(
+                                          color: AppTheme.textMain(context),
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.w200,
+                                          letterSpacing: -0.4,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      Icons.arrow_outward_rounded, // 外部ポータルへの接続を示すインダストリアルな斜め矢印
-                                      color: AppTheme.textMain(context).withOpacity(0.6),
-                                      size: 22,
-                                    ),
-                                  ],
+                                      const SizedBox(width: 6),
+                                      Icon(
+                                        Icons.arrow_outward_rounded,
+                                        color: AppTheme.textMain(context).withOpacity(0.85),
+                                        size: 22,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
 
                           ],
                         ),
@@ -3841,7 +3983,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                             alignment: Alignment.bottomRight,
                                             child: Container(
                                               decoration: BoxDecoration(
-                                                border: Border.all(color: const Color(0xFF7ebbdc), width: 8.0),
+                                                // ─── 🟢 修正：カラーを最下層の『c3』にロック ＆ 太さを『12.0』へ肉厚化 ───
+                                                border: Border.all(color: c3, width: 12.0),
                                                 borderRadius: const BorderRadius.only(
                                                   topLeft: Radius.circular(32.0),
                                                   topRight: Radius.circular(32.0),
@@ -3850,11 +3993,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                                 ),
                                               ),
                                               child: ClipRRect(
+                                                // ─── 🟢 修正：太くなった枠（12px）の内側に完璧にフィットする角丸（32-12=20 / 24-12=12）へ調教 ───
                                                 borderRadius: const BorderRadius.only(
-                                                  topLeft: Radius.circular(28.0),
-                                                  topRight: Radius.circular(28.0),
-                                                  bottomLeft: Radius.circular(20.0),
-                                                  bottomRight: Radius.circular(20.0),
+                                                  topLeft: Radius.circular(20.0),
+                                                  topRight: Radius.circular(20.0),
+                                                  bottomLeft: Radius.circular(12.0),
+                                                  bottomRight: Radius.circular(12.0),
                                                 ),
                                                 child: _capturedUiImageForAnim != null
                                                     ? RawImage(
@@ -3875,7 +4019,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                       },
                                     ),
                                   ),
-
                               ],
                             )
                                 : const Center(child: CircularProgressIndicator(color: Colors.white)),
@@ -4863,8 +5006,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     // テーマに応じたベース文字色とアクティブ背景色を定義
     final Color calTextColor = isWhiteTheme ? Colors.black87 : Colors.white;
     final Color calSubTextColor = isWhiteTheme ? Colors.black54 : Colors.white70;
-    final Color activeCapsuleBg = isWhiteTheme ? Colors.black.withOpacity(0.08) : Colors.white.withOpacity(0.95);
-    final Color activeCapsuleText = isWhiteTheme ? Colors.black : Colors.black;
+    final Color activeCapsuleBg = isWhiteTheme ? Colors.black.withOpacity(0.9) : Colors.white.withOpacity(0.95);
+    final Color activeCapsuleText = isWhiteTheme ? Colors.white : Colors.black;
     double currentItemHeight = baseItemWidth - t * (baseItemWidth - 12.0);
     double currentSpacing = 1.0;
     double textOpacity = math.max(0.0, 1.0 - t * 3.0);
@@ -4906,7 +5049,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   width: baseItemWidth,
                                   decoration: (isToday && !_isCapturing)
                                       ? BoxDecoration(
-                                      color: Colors.white.withOpacity(0.9),
+                                    // ─── 🟢 修正：今日の曜日カプセルも、白テーマ時は「黒背景」に強制ロック ───
+                                      color: isWhiteTheme ? Colors.black.withOpacity(0.9) : Colors.white.withOpacity(0.9),
                                       borderRadius: BorderRadius.circular(12)
                                   )
                                       : null,
@@ -4915,7 +5059,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                       entry.value,
                                       style: TextStyle(
                                           color: (isToday && !_isCapturing)
-                                              ? (isWhiteTheme ? Colors.white : Colors.black) // 今日かつ白テーマなら文字を白に
+                                          // 背景カプセルが黒に沈むため、白テーマ時の文字色は「白」で大正解になります
+                                              ? (isWhiteTheme ? Colors.white : Colors.black)
                                               : (_isCapturing && !isDark ? Colors.black : calTextColor), // 通常時の曜日文字色
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold
@@ -5798,11 +5943,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   }
 
   // ─── 🟢 修正：30分タイマーを完全廃止し、1分精度の経過時間チェッカーへ変更 ───
+  // ─── 🟢 修正：30分タイマーを完全廃止し、1分精度の経過時間チェッカーへ変更 ───
   void _startAutoRefreshTimer() {
     _autoRefreshTimer?.cancel(); // 二重起動防止のクリーンアップ
 
     // ⏱️ 1分（60秒）に1回、時計の針をチェックする超軽量な監視レール
     _autoRefreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+
+      // ─── 🟢 追記：1分ごとにダッシュボードをピンポイントリビルドし、カウントダウンを無負荷で進める ───
+      if (mounted) setState(() {});
+
       if (mounted && widget.isAuthenticated && _lastFetchTime != null) {
         final passedTime = DateTime.now().difference(_lastFetchTime!);
 
@@ -5903,19 +6053,22 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                   ),
                 ),
 
-                if (_showInitialLoginGuide && _currentViewState == ViewState.home)
+                // (中略：下部かすみ用グラデーションマスクのジャスト下)
+
+                // ─── 🟢 修正：テストログイン中（dummy_test_session）は表示を完全リジェクトする ───
+                if (_showInitialLoginGuide && _currentViewState == ViewState.home && widget.cookie != "dummy_test_session")
                   Positioned(
-                    bottom: 84.0 + MediaQuery.of(context).padding.bottom, // 下部バーを綺麗に避ける配置
-                    left: leftSwipeOffset + 8.0,  // 🎯 修正：画面端との余白を 16.0 から「8.0」へ極小化
-                    right: -leftSwipeOffset + 8.0, // 🎯 修正：画面端との余白を 16.0 から「8.0」へ極小化
+                    bottom: 84.0 + MediaQuery.of(context).padding.bottom,
+                    left: leftSwipeOffset + 8.0,
+                    right: -leftSwipeOffset + 8.0,
                     child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 200),
                       opacity: (_dragPosition < 0.0) ? (1.0 - _dragPosition.abs() * 2).clamp(0.0, 1.0) : 1.0,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 13.0),
                         decoration: BoxDecoration(
-                          color: AppTheme.accent, // 点滅するログイン球体と同じ赤
-                          borderRadius: BorderRadius.circular(100), // 🎯 修正：30から「100」へ引き上げ、縦幅の変動に関わらず両端が完璧な半円になる「完全カプセル型」を保証
+                          color: AppTheme.accent,
+                          borderRadius: BorderRadius.circular(100),
                         ),
                         child: Center(
                           child: Text(

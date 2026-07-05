@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="0dp">
+
+    <!-- 日付・曜日ヘッダー -->
+    <TextView
+        android:id="@+id/item_date_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="17sp"
+        android:fontFamily="sans-serif-light"
+        android:textColor="#FFFFFF"
+        android:paddingHorizontal="14dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="4dp"
+        android:includeFontPadding="false" />
+
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="14dp">
+
+        <!-- 左側：開始・終了時刻 -->
+        <!-- 🎯 修正：android:layout_alignParentStart="true" に完全修正 -->
+        <LinearLayout
+            android:id="@+id/today_time_block"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingVertical="10dp"
+            android:gravity="center_horizontal"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true">
+            <TextView
+                android:id="@+id/item_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:fontFamily="sans-serif-light"
+                android:textColor="#FFFFFF"
+                android:includeFontPadding="false" />
+            <TextView
+                android:id="@+id/item_end_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:textSize="10sp"
+                android:fontFamily="sans-serif-light"
+                android:textColor="#B3FFFFFF"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+
+        <!-- 右側：予定本文コンソール -->
+        <LinearLayout
+            android:id="@+id/today_text_block"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_toEndOf="@id/today_time_block"
+            android:layout_marginStart="26dp"
+            android:orientation="vertical"
+            android:paddingVertical="10dp"
+            android:gravity="center_vertical">
+            <TextView
+                android:id="@+id/item_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="#FFFFFF"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:includeFontPadding="false" />
+            <TextView
+                android:id="@+id/item_room"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textSize="10sp"
+                android:fontFamily="sans-serif-light"
+                android:textColor="#99FFFFFF"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+
+        <!-- 貫通細白縦線 -->
+        <ImageView
+            android:layout_width="0.5dp"
+            android:layout_height="match_parent"
+            android:layout_toEndOf="@id/today_time_block"
+            android:layout_marginStart="13dp"
+            android:layout_alignTop="@id/today_text_block"
+            android:layout_alignBottom="@id/today_text_block"
+            android:background="#33FFFFFF" />
+
+    </RelativeLayout>
+</LinearLayout>

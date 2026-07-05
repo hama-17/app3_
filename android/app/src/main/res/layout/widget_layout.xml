@@ -1,36 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#111111"
-    android:padding="16dp"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/widget_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="NEXT CLASS"
-        android:textColor="#888888"
-        android:textSize="11sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/widget_class_name"
+    <!-- 🟢 レイヤー1：最背面。Kotlin側から発射された3色動くカプセルグラデーションを敷き詰める鏡 -->
+    <ImageView
+        android:id="@+id/widget_background_image"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="授業を同期してください"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:layout_marginTop="4dp"
-        android:textStyle="bold" />
+        android:layout_height="match_parent"
+        android:scaleType="fitXY" />
 
-    <TextView
-        android:id="@+id/widget_room"
+    <!-- 🟢 レイヤー2：前面。グラデーションの上にNothing風のソリッドな文字情報をオーバーレイ -->
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="--- 号室"
-        android:textColor="#FF9800"
-        android:textSize="13sp"
-        android:layout_marginTop="2dp" />
-</LinearLayout>
+        android:layout_height="match_parent"
+        android:padding="16dp"
+        android:orientation="vertical"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="NEXT CLASS"
+            android:textColor="#88FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.15" />
+
+        <TextView
+            android:id="@+id/widget_class_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="授業を同期してください"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:layout_marginTop="6dp"
+            android:fontFamily="sans-serif-medium"
+            android:ellipsize="end"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/widget_room"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="--- 号室"
+            android:textColor="#CCFFFFFF"
+            android:textSize="12sp"
+            android:layout_marginTop="3dp"
+            android:fontFamily="sans-serif-light"
+            android:ellipsize="end"
+            android:maxLines="1" />
+    </LinearLayout>
+</FrameLayout>

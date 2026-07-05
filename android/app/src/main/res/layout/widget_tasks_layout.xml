@@ -1,15 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/widget_bg_shape"
-    android:padding="10dp"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
+    <!-- 背景画像（ここにKotlin側から自動でライト/ダークの角丸Bitmapが流し込まれます） -->
+    <ImageView
+        android:id="@+id/widget_background_image"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitXY" />
+
+    <!-- 課題リスト（余計な文字を完全パージし、リストだけで直球構成） -->
     <ListView
         android:id="@+id/widget_tasks_list"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:divider="@android:color/transparent"
-        android:dividerHeight="4dp" />
-</LinearLayout>
+        android:dividerHeight="0dp"
+        android:padding="16dp"
+        android:clipToPadding="false" />
+</FrameLayout>

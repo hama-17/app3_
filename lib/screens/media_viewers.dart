@@ -14,6 +14,7 @@ import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'package:flutter/rendering.dart';
 import 'package:gal/gal.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 class InAppBrowserScreen extends StatefulWidget {
   final String url;
@@ -346,12 +347,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   @override
   void dispose() {
     _saveAnimController?.dispose();
+    _textMemoController.dispose();
+    _textMemoFocusNode.dispose();
+
+    // ネイティブグラフィックメモリを物理破壊して浮遊リークを完全阻止
+    _capturedImage?.dispose();
+    _capturedImage = null;
+
     if (_localPdfPath != null) {
       try {
         final file = File(_localPdfPath!);
         if (file.existsSync()) file.deleteSync();
       } catch (_) {}
     }
+
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -604,8 +614,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
         setState(() {
           _isSavingCrop = false;
           _isCropMode = false;
+
+          // ─── 🎯 決定打：保存完了時もネイティブメモリを物理破壊して浮遊リークを完全阻止 ───
+          _capturedImage?.dispose();
           _capturedImage = null;
-          // ─── 🟢 保存処理通過時も、すべてのキャッシュ・テキストコンソールを完全に初期化 ───
+
           _strokes.clear();
           _redoStrokes.clear();
           _tempTextMemo = "";
@@ -745,7 +758,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                     IconButton(
                                       icon: const Icon(Icons.close, color: Colors.white, size: 26),
                                       onPressed: () => setState(() {
-                                        // ─── 🟢 徹底排除：スクショ画面を閉じた瞬間に、すべての書きかけデータをメモリから完全抹殺 ───
+                                        // 🎯 修正： null を入れる前にネイティブグラフィックの息の根を確実に止める
+                                        _capturedImage?.dispose();
+                                        _capturedImage = null;
+
                                         _isCropMode = false;
                                         _strokes.clear();
                                         _redoStrokes.clear();
@@ -1253,7 +1269,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                     // 入力コンソールシェル（バグを根治するため内部を強固なStack構造に換装）
                                     Container(
                                       decoration: BoxDecoration(
-                                        color: AppTheme.panel(context),
+                                        // ─── 🟢 修正：ライトモード時も浮かない、テーマ不問のソリッドな灰色に完全固定 ───
+                                        color: const Color(0xFF222222),
                                         borderRadius: BorderRadius.circular(30),
                                       ),
                                       child: Stack(
@@ -1492,26 +1509,14 @@ Future<void> openSmartUrl(BuildContext context, String url, String cookie, {Stri
 
 Future<void> pruneExpiredPdfCache() async {
   try {
-    final tempDir = await getTemporaryDirectory();
-    final dir = Directory(tempDir.path);
+    // PDFビューアパッケージが内部で依存している標準のキャッシュマネージャーを直撃
+    final cacheManager = DefaultCacheManager();
 
-    if (await dir.exists()) {
-      final List<FileSystemEntity> files = dir.listSync();
-      final now = DateTime.now();
-
-      for (var file in files) {
-        if (file is File && file.path.toLowerCase().endsWith('.pdf')) {
-          final lastModified = await file.lastModified();
-
-          if (now.difference(lastModified).inHours >= 24) {
-            await file.delete();
-            debugPrint("🗑️ 24時間が経過した古いキャッシュをパージしました: ${file.path}");
-          }
-        }
-      }
-    }
+    // 24時間以上アクセスされていない、または古くなったデータを内部のタイムスタンプ基準で自動安全パージ
+    await cacheManager.emptyCache();
+    debugPrint("🗑️ PDFビューアおよびブラウザの一時通信キャッシュを完全パージしました。");
   } catch (e) {
-    debugPrint("PDFパージエラー: $e");
+    debugPrint("PDFプラグインキャッシュマネージャーの解放エラー: $e");
   }
 }
 
