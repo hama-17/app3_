@@ -8,6 +8,8 @@ import '../services/auth_service.dart';
 import '../utils/lms_adapter.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+//login_screen.dartの本文です。
+
 
 class OktaLoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -153,10 +155,12 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
                 : InAppWebView(
                 onWebViewCreated: (controller) => _webViewController = controller,
                 initialUrlRequest: URLRequest(url: WebUri(canvasBaseUrl)),
+                // ─── 🟢 修正：InAppWebViewSettings の内部 ───
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                   thirdPartyCookiesEnabled: true,
+                  sharedCookiesEnabled: true, // 🟢 追記：アプリ全体（ネイティブとブラウザ間）でのクッキーの即時共有・同期を許可
                   supportMultipleWindows: true,
                   javaScriptCanOpenWindowsAutomatically: true,
                   userAgent: fakeUserAgent,

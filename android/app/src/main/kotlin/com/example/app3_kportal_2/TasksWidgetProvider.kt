@@ -62,10 +62,12 @@ class TasksWidgetProvider : HomeWidgetProvider() {
             }
 
             try {
+                // ─── 🟢 修正：ListViewがキャッシュをサボらないよう、IntentにユニークなDataを付与 ───
                 val intent = Intent(context, WidgetListViewService::class.java).apply {
                     putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                     putExtra("data_key", "tasks_json")
-                    data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                    // ★ 修正：現在の時刻をURIに含めて毎回Intentを別物として認識させる
+                    data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME) + "/" + System.currentTimeMillis().toString())
                 }
                 views.setRemoteAdapter(listId, intent)
 

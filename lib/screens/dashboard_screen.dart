@@ -34,9 +34,6 @@ import 'package:path/path.dart' show join;
 import 'package:gal/gal.dart';
 import '../services/live_notification_service.dart';
 import '../services/silent_refresh_service.dart';
-import 'package:gal/gal.dart';
-import '../services/live_notification_service.dart';
-import '../services/silent_refresh_service.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // 🟢 追記：ネイティブCookie制御のためにインポート
 
 //lib/screens/dashboard_screen.dartの中身です。
@@ -154,19 +151,27 @@ class _MainSkeletonState extends State<MainSkeleton> {
       final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses?per_page=100&include[]=term&include[]=teachers');
       if (uri == null) return;
 
+      // ─── 🟢 修正：科目の初期ロード時に401/403を喰らってもその場で即時自動蘇生 ───
       final response = await http.get(uri, headers: { 'Cookie': _cookie }).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         _allCourses = jsonDecode(response.body) as List;
         await CacheManager.save('my_course_cache_v10', _allCourses);
         _applyFilter();
 
-        // 🟢 追加：授業キャッシュが新しくなったら、即座にウィジェットへも同期
         await WidgetUpdateService.updateHomeWidgets(courses: _allCourses);
-
         if (mounted) setState(() { _isAuthenticated = true; _isLoading = false; });
       }
       else if (response.statusCode == 401 || response.statusCode == 403) {
-        if (mounted) setState(() { _isAuthenticated = false; _isLoading = false; });
+        debugPrint("⚠️ 初期ロードでセッション切れを検知。表のパワーでOktaから鍵を最速奪還します...");
+
+        // 隠しブラウザを表スレッドで走らせ、自動改札を即時突破
+        final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
+        if (isRefreshSuccess) {
+          debugPrint("🟢 SSO自動蘇生成功。新しい鍵で再チャレンジします。");
+          _loadData(); // 🔄 新しいCookieをSecureStorageから引き直してノーディレイトライ！
+        } else {
+          if (mounted) setState(() { _isAuthenticated = false; _isLoading = false; });
+        }
       }
       else { if (mounted) setState(() { _isLoading = false; }); }
     } catch (e) {
@@ -1444,6 +1449,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
             Future.delayed(const Duration(milliseconds: 200), () async {
               if (mounted) {
                 // ─── 🟢 追記：ネイティブのCookieManagerへCookieを流し込み ───
+                // ─── 🟢 修正：強制属性をパージし、ログイン画面のJSがクッキーを認識できるように解放 ───
                 if (widget.cookie.isNotEmpty) {
                   final cm = CookieManager.instance();
                   final bu = WebUri(canvasBaseUrl);
@@ -1453,10 +1459,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                     final name = pair.substring(0, idx).trim();
                     final value = pair.substring(idx + 1).trim();
                     if (name.isNotEmpty) {
-                      await cm.setCookie(url: bu, name: name, value: value, isSecure: true, isHttpOnly: true);
+                      // 🎯 属性の強制を撤廃し、ブラウザの標準規約に委ねる（これで「クッキーが必要です」が消滅します）
+                      await cm.setCookie(
+                        url: bu,
+                        name: name,
+                        value: value,
+                      );
                     }
                   }
-                  // ❌ 旧：if (Platform.isAndroid) await cm.flush(); は完全に削除しました
                 }
 
                 openSmartUrl(
@@ -1488,6 +1498,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         globalWidgetRouteNotifier.value = null; // 🎫 チケット消費
 
         Future.delayed(Duration.zero, () async {
+          // ─── 🟢 修正：強制属性をパージし、ログイン画面のJSがクッキーを認識できるように解放 ───
           if (widget.cookie.isNotEmpty) {
             final cm = CookieManager.instance();
             final bu = WebUri(canvasBaseUrl);
@@ -1497,10 +1508,14 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               final name = pair.substring(0, idx).trim();
               final value = pair.substring(idx + 1).trim();
               if (name.isNotEmpty) {
-                await cm.setCookie(url: bu, name: name, value: value, isSecure: true, isHttpOnly: true);
+                // 🎯 属性の強制を撤廃し、ブラウザの標準規約に委ねる（これで「クッキーが必要です」が消滅します）
+                await cm.setCookie(
+                  url: bu,
+                  name: name,
+                  value: value,
+                );
               }
             }
-            // ❌ 旧：if (Platform.isAndroid) await cm.flush(); は完全に削除しました
           }
 
           if (mounted) {
@@ -1652,10 +1667,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       _updateAlertAnimation();
     }
 
-    // 3連並列ワーカーの一斉完了を安全に同時待機
+    // 🎯 イミュータブルな widget.cookie を使い回さず、SecureStorageから常に今現在の「生きたクッキー」を取得
+    final String liveCookie = await AuthService.getSession() ?? widget.cookie;
+
+    // 3連並列ワーカーへライブクッキーを注入して同時待機
     await Future.wait([
-      _fetchAssignments(),
-      _fetchMessages()
+      _fetchAssignments(liveCookie),
+      _fetchMessages(liveCookie)
     ]);
 
     try {
@@ -1668,14 +1686,10 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       debugPrint("ライブ通知の予約中にエラーが発生しました: $e");
     }
 
-    // ─── 🟢 修正の決定打：通信が【本当に終了したこの瞬間】に初めてフラグを解放 ───
     if (mounted) {
-      setState(() {
-        _isFirstLaunchLoop = false; // 🎯 ログイン/ログアウト状態が名実ともに100%確定
-      });
-      _updateAlertAnimation(); // 確定した新ステートをベースに、点滅アニメーションを安全に再ジャッジ
+      setState(() { _isFirstLaunchLoop = false; });
+      _updateAlertAnimation();
     }
-
     _processWidgetRoute();
   }
 
@@ -1790,7 +1804,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   // ====================================================
   // ② 🟢 未提出課題の3連コンカレンシー・ワーカーフェッチ
   // ====================================================
-  Future<void> _fetchAssignments() async {
+  // ─── 🟢 修正：例外リークを100%防御した課題フェッチ（部分差し替え） ───
+  Future<void> _fetchAssignments(String liveCookie) async {
     try {
       final cached = await CacheManager.load('cached_assignments_v14_all_year');
       if (cached != null && mounted) {
@@ -1798,8 +1813,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         _processWidgetRoute();
       }
 
-      if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
-      if (widget.cookie == "dummy_test_session") {
+      if (liveCookie.isEmpty || widget.allCourses.isEmpty) return;
+      if (liveCookie == "dummy_test_session") {
         if (mounted) setState(() { _isLoadingAssignments = false; });
         return;
       }
@@ -1812,19 +1827,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       final List<dynamic> fetchedTasks = [];
       int courseIndex = 0;
 
-      // 🎯 決定打：回線をパンクさせずに最大スループットを維持するスロット並列ワーカー
+      // 🎯 鉄壁の防衛線：他のワーカーの暴発を止める緊急停止スイッチ
+      bool isAborted = false;
+
       Future<void> runAssignmentWorker() async {
         while (true) {
+          if (isAborted) break; // 既に誰かが認証切れを検知していたら即時撤退
+
           int myIdx = courseIndex++;
-          if (myIdx >= thisYearCourses.length) break; // 全科目終了でワーカー停止
+          if (myIdx >= thisYearCourses.length) break;
 
           final course = thisYearCourses[myIdx];
           final uri = Uri.tryParse('$canvasBaseUrl/api/v1/courses/${course['id']}/assignments?per_page=40&include[]=submission');
           if (uri == null) continue;
 
           try {
-            // 同時接続数がクランプされているため、タイムアウトを安全に8秒に縮小
-            final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 8));
+            final res = await http.get(uri, headers: {'Cookie': liveCookie}).timeout(const Duration(seconds: 8));
+            if (isAborted) break; // 通信待合中（await）に誰かが力尽きていたら、静かに終了
+
             if (res.statusCode == 200) {
               final List<dynamic> courseTasks = jsonDecode(res.body);
               for (var task in courseTasks) {
@@ -1839,14 +1859,26 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 fetchedTasks.add(task);
               }
             }
+            else if (res.statusCode == 401) {
+              // 🎯 決定打：自分が「最初の検知者」なら例外を投げて蘇生へ。
+              // 通信ラグで同時に401を喰らった他のワーカーは、フラグを見て安全に「正常終了（break）」させます。
+              if (!isAborted) {
+                isAborted = true;
+                throw Exception('KEIO_LMS_AUTH_EXPIRED');
+              } else {
+                break;
+              }
+            } else if (res.statusCode == 403) {
+              debugPrint("🚫 科目 ${course['id']} はアクセス制限(403)のためスキップします。");
+              continue;
+            }
           } catch (e) {
+            if (e.toString().contains('KEIO_LMS_AUTH_EXPIRED')) rethrow;
             debugPrint("科目 ${course['id']} 課題取得セッションラグ(自動回避): $e");
           }
         }
       }
 
-      // 🚀 3本の独立並列ワーカーを一斉に解き放つ（同時接続数を常に3本以下に完全拘束）
-      // 🚀 3本の独立並列ワーカーを一斉に解き放つ（同時接続数を常に3本以下に完全拘束）
       await Future.wait([
         runAssignmentWorker(),
         runAssignmentWorker(),
@@ -1866,22 +1898,25 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       await WidgetUpdateService.updateHomeWidgets(tasks: finalTasks);
       _processWidgetRoute();
 
-      // ─── 👇 🟢 ここから catch ブロックを自動蘇生仕様へリバランス ───
     } catch (e) {
-      debugPrint("Dashboard._fetchAssignments セッション切断エラーを検知: $e");
-
-      // ただちに降伏せず、裏でサイレントSSOリフレッシュを試みる
+      debugPrint("Dashboard._fetchAssignments 認証切れエスケープを受信: $e");
       final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
-
       if (isRefreshSuccess) {
-        debugPrint("🟢 課題側回路：自動SSO延長に成功したため、一閃リトライフェッチをかけます");
         _fetchDataParallel();
       } else {
-        // 隠しブラウザでもダメだった（Okta自体の命も切れていた）場合のみ、警告赤点滅を解禁
         _triggerErrorState();
       }
-      // ─── 👆 変更ここまで ───
     } finally {
+      // ─── 🟢 変更：手動更新や最新フェッチが完了した「この瞬間」、グラデーション色、日付、最新課題をウィジェットにすべて叩き込む ───
+      try {
+        await WidgetUpdateService.updateHomeWidgets(
+          tasks: _assignments, // 手動更新で取得できた最新の課題リスト（エラー時は既存データ）
+        );
+        debugPrint("🔄 [Manual Sync] 手動更新タイミングでのウィジェット一括焼き替えに成功。");
+      } catch (e) {
+        debugPrint("❌ [Manual Sync] 手動更新時のウィジェット共有失敗: $e");
+      }
+
       if (mounted) {
         setState(() { _isLoadingAssignments = false; _hasApiError = false; });
         _updateAlertAnimation();
@@ -1892,15 +1927,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
   // ====================================================
   // ③ 🟢 お知らせの3連コンカレンシー・ワーカーフェッチ
   // ====================================================
-  Future<void> _fetchMessages() async {
+  // ─── 🟢 修正：例外リークを100%防御したお知らせフェッチ（部分差し替え） ───
+  Future<void> _fetchMessages(String liveCookie) async {
     try {
       final cached = await CacheManager.load('cached_messages_v14_all_year');
       if (cached != null && mounted) {
         setState(() { _messages = cached; });
       }
 
-      if (widget.cookie.isEmpty || widget.allCourses.isEmpty) return;
-      if (widget.cookie == "dummy_test_session") {
+      if (liveCookie.isEmpty || widget.allCourses.isEmpty) return;
+      if (liveCookie == "dummy_test_session") {
         if (mounted) setState(() { _isLoadingMessages = false; });
         return;
       }
@@ -1913,9 +1949,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       final List<dynamic> fetchedMsgs = [];
       int courseIndex = 0;
 
-      // 🎯 お知らせ専用のスロット並列ワーカー
+      // 🎯 鉄壁の防衛線：他のワーカーの暴発を止める緊急停止スイッチ
+      bool isAborted = false;
+
       Future<void> runMessageWorker() async {
         while (true) {
+          if (isAborted) break;
+
           int myIdx = courseIndex++;
           if (myIdx >= thisYearCourses.length) break;
 
@@ -1924,7 +1964,9 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           if (uri == null) continue;
 
           try {
-            final res = await http.get(uri, headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 8));
+            final res = await http.get(uri, headers: {'Cookie': liveCookie}).timeout(const Duration(seconds: 8));
+            if (isAborted) break;
+
             if (res.statusCode == 200) {
               final List<dynamic> courseMsgs = jsonDecode(res.body);
               for (var m in courseMsgs) {
@@ -1933,14 +1975,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 fetchedMsgs.add(m);
               }
             }
+            else if (res.statusCode == 401) {
+              if (!isAborted) {
+                isAborted = true;
+                throw Exception('KEIO_LMS_AUTH_EXPIRED');
+              } else {
+                break;
+              }
+            } else if (res.statusCode == 403) {
+              debugPrint("🚫 科目 ${course['id']} はお知らせ制限(403)のためスキップします。");
+              continue;
+            }
           } catch (e) {
+            if (e.toString().contains('KEIO_LMS_AUTH_EXPIRED')) rethrow;
             debugPrint("科目 ${course['id']} お知らせ取得セッションラグ(自動回避): $e");
           }
         }
       }
 
-      // 🚀 同じく3本の並列ワーカーで一斉掃討
-      // 🚀 同じく3本の並列ワーカーで一斉掃討
       await Future.wait([
         runMessageWorker(),
         runMessageWorker(),
@@ -1956,20 +2008,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       await CacheManager.save('cached_messages_v14_all_year', fetchedMsgs);
       if (mounted) setState(() { _messages = fetchedMsgs; });
 
-      // ─── 👇 🟢 ここから catch ブロックを自動蘇生仕様へリバランス ───
     } catch (e) {
-      debugPrint("Dashboard._fetchMessages セッション切断エラーを検知: $e");
+      debugPrint("Dashboard._fetchMessages 認証切れエスケープを受信: $e");
 
-      // 同じく裏でサイレントSSOリフレッシュを試みる
       final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
-
       if (isRefreshSuccess) {
-        debugPrint("🟢 お知らせ側回路：自動SSO延長に成功したため、一閃リトライフェッチをかけます");
+        debugPrint("🟢 お知らせ回路：自動SSO修復が完了。最新クッキーでリトライフェッチを敢行します。");
         _fetchDataParallel();
       } else {
         _triggerErrorState();
       }
-      // ─── 👆 変更ここまで ───
     } finally {
       if (mounted) {
         setState(() { _isLoadingMessages = false; _hasApiError = false; });
@@ -3658,20 +3706,49 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                             ),
                             // 🟢 新設：k-supportへのミニマルなウェブビュー誘導インジケータ
                             // ─── 🟢 修正：テストログイン時はインダストリアルなk-support誘導インジケータを完全にパージする ───
+                            // ─── 🟢 修正：k-supportへの直撃型・超高剛性顔パスルーター ───
                             if (widget.cookie != "dummy_test_session")
                               GestureDetector(
                                 behavior: HitTestBehavior.opaque,
-                                onTap: () {
+                                onTap: () async {
                                   const String kSupportUrl = "https://keiouniversity.my.site.com/students/s/";
-                                  openSmartUrl(
-                                      context,
-                                      kSupportUrl,
-                                      widget.cookie,
-                                      title: "k-support"
-                                  );
+
+                                  // 🎯 核心：k-supportを開くコンマ数ミリ秒前に、ネイティブのCookieManagerをハック。
+                                  // Canvas用に持っているクッキーを、k-supportのドメイン（Salesforce/Okta）の改札にも先回りして流し込みます。
+                                  if (widget.cookie.isNotEmpty) {
+                                    final cm = CookieManager.instance();
+
+                                    // k-supportの大元ドメインと、認証のバウンス先である keio.jp の両方に結線
+                                    final kSupportUri = WebUri("https://keiouniversity.my.site.com");
+                                    final keioJpUri = WebUri("https://keio.jp");
+
+                                    for (var pair in widget.cookie.split(';')) {
+                                      final idx = pair.indexOf('=');
+                                      if (idx == -1) continue;
+                                      final name = pair.substring(0, idx).trim();
+                                      final value = pair.substring(idx + 1).trim();
+                                      if (name.isNotEmpty) {
+                                        // 両方のドメインのブラウザストレージにクッキーを同期
+                                        await cm.setCookie(url: kSupportUri, name: name, value: value);
+                                        await cm.setCookie(url: keioJpUri, name: name, value: value);
+                                      }
+                                    }
+                                    debugPrint("🔑 [k-support Bridge] Oktaフリーパスの流し込みが完了しました。");
+                                  }
+
+                                  // 必ずアプリ内の共通WebView（openSmartUrl）で展開すること！
+                                  if (context.mounted) {
+                                    openSmartUrl(
+                                        context,
+                                        kSupportUrl,
+                                        widget.cookie,
+                                        title: "k-support"
+                                    );
+                                  }
                                 },
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 16.0),
+                                  // （...これより下のRowやText等のUIレイアウトは一切変更なし維持）
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [

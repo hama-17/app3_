@@ -71,10 +71,12 @@ class TodayWidgetProvider : HomeWidgetProvider() {
             }
 
             try {
+                // ─── 🟢 修正：ListViewがキャッシュをサボらないよう、IntentにユニークなDataを付与 ───
                 val intent = Intent(context, WidgetListViewService::class.java).apply {
                     putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                     putExtra("data_key", "today_json")
-                    data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                    // ★ ここにポイント：現在の時刻をURIに含めて毎回Intentを別物にする
+                    data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME) + "/" + System.currentTimeMillis().toString())
                 }
                 views.setRemoteAdapter(listId, intent)
 
@@ -98,6 +100,7 @@ class TodayWidgetProvider : HomeWidgetProvider() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
                 )
                 if (bgImageId != 0) { views.setOnClickPendingIntent(bgImageId, mainPendingIntent) }
+                appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, listId)
             } catch (e: Exception) {
                 Log.e("TodayWidgetProvider", "リストシステム結線エラー", e)
             }

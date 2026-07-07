@@ -68,24 +68,24 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // ─── 🟢 追記：バックグラウンド巡回タスクマトリクスの初期化 ───
-  await Workmanager().initialize(
-      callbackDispatcher,
-      isInDebugMode: false // ⚙️ テスト時に通知を出したい場合はここを true に切り替えてください
-  );
+  // await Workmanager().initialize(
+  //     callbackDispatcher,
+  //     isInDebugMode: false // ⚙️ テスト時に通知を出したい場合はここを true に切り替えてください
+  // );
 
   if (Platform.isAndroid) {
     await AndroidAlarmManager.initialize();
 
     // アンドロイド用の6時間おき（1日4回）の定期巡回ジョブを設定
-    await Workmanager().registerPeriodicTask(
-      "com.example.app3_kportal_2.silent_refresh_job", // ユニークなID
-      "silentRefreshTask",
-      frequency: const Duration(hours: 6), // ⏳ 6時間おき＝1日4回周期
-      existingWorkPolicy: ExistingWorkPolicy.keep, // 二重登録を防止して既存のスケジュールを維持
-      constraints: Constraints(
-        networkType: NetworkType.connected, // 🌐 Wi-Fiまたはモバイル通信接続時のみ実行
-      ),
-    );
+    // await Workmanager().registerPeriodicTask(
+    //   "com.example.app3_kportal_2.silent_refresh_job", // ユニークなID
+    //   "silentRefreshTask",
+    //   frequency: const Duration(hours: 6), // ⏳ 6時間おき＝1日4回周期
+    //   existingWorkPolicy: ExistingWorkPolicy.keep, // 二重登録を防止して既存のスケジュールを維持
+    //   constraints: Constraints(
+    //     networkType: NetworkType.connected, // 🌐 Wi-Fiまたはモバイル通信接続時のみ実行
+    //   ),
+    // );
   }
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -124,15 +124,28 @@ class _CyberCanvasAppState extends State<CyberCanvasApp> with WidgetsBindingObse
     WidgetsBinding.instance.addObserver(this);
     _clearAppCache();
 
+    // ─── 🟢 変更：アプリ起動の瞬間に、最新の色・日付・キャッシュデータをウィジェットに一発共有 ───
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await WidgetUpdateService.updateHomeWidgets();
+        debugPrint("🚀 [Launch Sync] アプリ起動時のウィジェット初期同期が完了しました。");
+      } catch (e) {
+        debugPrint("❌ [Launch Sync] 起動時同期エラー: $e");
+      }
+    });
+
     // ─── 🟢 決定打2：アプリ起動の瞬間から、ウィジェットによるジャンプ命令の監視を開始 ───
     _initWidgetNavigation();
   }
 
   @override
   void dispose() {
+    // 🧹 リスナーを撤去したため、ここでの removeListener などの処理は不要（クリーン）です
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+
+  // （これ以降の _initWidgetNavigation などのメソッドや build 関数はそのまま完全維持）
 
   // ─── 🟢 修正版：ネイティブから飛んできたURLの捕獲エンジン ───
   void _initWidgetNavigation() {

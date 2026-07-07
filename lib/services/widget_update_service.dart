@@ -255,6 +255,7 @@ class WidgetUpdateService {
       }
     }
 
+    // ─── 🟢 修正：Android OSの描画サボりを完全破壊する強制上書きインジェクション ───
     try {
       await HomeWidget.saveWidgetData('widget_task_bg', taskBgHex);
       await HomeWidget.saveWidgetData('widget_c1', colorToHex(currentPalette[0]));
@@ -264,9 +265,17 @@ class WidgetUpdateService {
       await HomeWidget.saveWidgetData('today_json', jsonEncode(todayWidgetData));
       await HomeWidget.saveWidgetData('timetable_matrix_json', jsonEncode(timetableMatrixData));
 
+      // 🎯 決定打：毎回100%異なる「現在のミリ秒」を専用キーとしてネイティブへ射出します。
+      // これにより、課題や時間割の文字列が前回と完全同一であっても、OSは「新しいデータが届いた！」と
+      // 誤認せざるを得なくなり、グラデーション色や日付を巻き添えにしてウィジェットを強制再描画します。
+      await HomeWidget.saveWidgetData('widget_sync_timestamp', DateTime.now().millisecondsSinceEpoch.toString());
+
+      // 満を持して各ウィジェットプロバイダーへ再描画命令をブロードキャスト
       await HomeWidget.updateWidget(androidName: 'TimetableWidgetProvider');
       await HomeWidget.updateWidget(androidName: 'TasksWidgetProvider');
       await HomeWidget.updateWidget(androidName: 'TodayWidgetProvider');
+
+      debugPrint("📢 [Widget Engine] タイムスタンプ偽装により、全ウィジェットの強制リアルタイム上書きに成功しました。");
     } catch (e) {
       print("ウィジェット連動同期エラー: $e");
     }
