@@ -23,7 +23,10 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
   bool _isSuccessTriggered = false;
   Timer? _pollingTimer;
   InAppWebViewController? _webViewController;
-  bool _isInitialized = false; // ★ フライング防止用の初期化フラグ
+  bool _isInitialized = false;
+
+  // 🟢 追記：タイマーの多重衝突を物理的に防ぐためのロックフラグ
+  bool _isValidating = false; // ★ フライング防止用の初期化フラグ
 
   @override
   void initState() {
@@ -48,18 +51,21 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     }
   }
 
+  // 差し替え対象の関数
   Future<void> _clearWebViewCache() async {
     try {
-      // 全消去ではなく、Canvasのドメインに紐づく古いセッションだけをピンポイントで消し去る
       final cookieManager = CookieManager.instance();
       final url = WebUri(canvasBaseUrl);
 
+      // 🎯 Okta(auth.keio.jp)のSSOクッキーは絶対に消さず、
+      // 命の切れたLMSのセッション残骸だけをピンポイントで爆破します。
       final cookies = await cookieManager.getCookies(url: url);
       for (var cookie in cookies) {
         if (cookie.name == 'canvas_session' || cookie.name == '_csrf_token') {
           await cookieManager.deleteCookie(url: url, name: cookie.name);
         }
       }
+      debugPrint("🛡️ [SSO Shield] Oktaのセッションを保護しつつ、LMSのクッキーのみをお掃除しました。");
     } catch (e) {
       debugPrint("Targeted cookie clear error: $e");
     }
@@ -77,40 +83,47 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
   }
 
   // Cookieを引っこ抜いて検証・即時クリーニングする処理
+  // 差し替え対象の関数
+  // 差し替え対象の関数
+  // login_screen.dart 内の同名関数をこの内容に丸ごと差し替えてください
   Future<void> _checkAndValidateCookies() async {
     if (_webViewController == null || _isSuccessTriggered) return;
 
     try {
-      // 1. JSを注入してクッキーを抽出
-      final String? jsCookie = await _webViewController!.evaluateJavascript(source: "document.cookie");
+      // 1. 現在のURLを取得
+      final currentUrl = await _webViewController!.getUrl();
+      if (currentUrl == null) return;
+      final urlString = currentUrl.toString();
 
-      // 2. Android向けに CookieManager も併用
-      final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
-      final String managerCookie = cookies.map((c) => "${c.name}=${c.value}").join("; ");
+      // 2. 🎯 URLガード：Oktaの認証ドメインやLMSのログイン画面の中にいる間は、タイマーを完全に無視（スルー）する
+      // これにより、ログイン前の _csrf_token によるフライング暴発を100%封殺します。
+      bool isInsideCanvasDashboard = urlString.startsWith(canvasBaseUrl) &&
+          !urlString.contains('/login') &&
+          !urlString.contains('/saml');
 
-      // 両方の結果を合体
-      String? cookieString = "${jsCookie ?? ''}; $managerCookie";
+      if (isInsideCanvasDashboard) {
+        // 3. あなたの元のコードと100%同じ、最も安定した結合方式でクッキーを回収
+        final String? jsCookie = await _webViewController!.evaluateJavascript(source: "document.cookie");
+        final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
+        final String managerCookie = cookies.map((c) => "${c.name}=${c.value}").join("; ");
 
-      if (cookieString.contains('canvas_session') || cookieString.contains('_csrf_token')) {
+        String? cookieString = "${jsCookie ?? ''}; $managerCookie";
+
+        // 4. セッション検証
         final isValid = await AuthService.validateSession(cookieString);
 
         if (isValid && !_isSuccessTriggered && mounted) {
           _isSuccessTriggered = true;
 
-          // --- 🛡️ 安全性向上のためのクリーニング処理 ---
-          _pollingTimer?.cancel(); // タイマーを即時停止
+          _pollingTimer?.cancel();
           _pollingTimer = null;
 
           try {
-            await _webViewController!.stopLoading(); // WebViewの通信を強制停止
-            await _webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri("about:blank"))); // 空白ページに切り替えて画面上のトークンを消滅させる
+            await _webViewController!.stopLoading();
+            await _webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri("about:blank")));
           } catch (_) {}
-          // --------------------------------------------
 
-          // セキュリティストレージ（Keychain/Keystore）へ暗号化保存
           await AuthService.saveSession(cookieString);
-
-          // メモリ上のクッキー文字列を即座に消去（揮発）させる
           cookieString = null;
 
           if (mounted) {

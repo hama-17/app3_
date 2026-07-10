@@ -3800,9 +3800,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         // 🟢 修正：最前面オーバーレイ（左上コース名、バリデーション警告、矢印保存仕様）
         // 🟢 修正：最前面オーバーレイ（上端左詰め太字、背景0.95、未入力時の矢印ロック仕様）
         // 🟢 修正：アニメーション＆バリデーション機能を内包した新メモコンソールユニットへ移行
+        // lib/screens/dashboard_screen.dart 内の _buildHomeContent メソッドの該当箇所をこれに差し替え
+
         if (_isMemoFieldOpen && _dragPosition < -0.99)
           _CameraMemoOverlay(
-            memoTitleText: () {
+            memoTitleText: (() { // 👈 行頭に「 ( 」を追加
               final target = _getCurrentOrNextCourse();
               final now = DateTime.now();
               final dateStr = '${now.month}/${now.day}';
@@ -3811,7 +3813,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 return "$dateStr $cleanTitle";
               }
               return "対応メモなし";
-            }(),
+            })(), // 👈 「 ) 」で閉じてから実行させる
             controller: _cameraMemoController,
             focusNode: _cameraMemoFocusNode,
             onSave: (text) => _addMemoToCourse('text', text),
