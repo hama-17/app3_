@@ -3978,17 +3978,12 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         // ─── 🟢 修正：高速pop時のヘッダー消失バグを完全パージした防衛Hero ───
         return Hero(
           tag: heroTag,
-          placeholderBuilder: (context, dropAreaSize, child) {
-            // 🎯 決定打：遷移中も元のグラデーション構造をツリーに実在させ続けることで、
-            // コントローラーが迷子になって元画面を透明化フリーズさせるバグを物理的に根絶します。
-            return child;
-          },
+          // placeholderBuilder を削除（または必要に応じて Visibility 等で隠す）
           child: Material(
             type: MaterialType.transparency,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onHorizontalDragEnd: (details) {
-                // （...これより下の既存ロジックは一切変更なし維持）
                 if (_dragPosition > 0.5 && details.primaryVelocity != null && details.primaryVelocity!.abs() > 300) {
                   setState(() { _isTimeVisible = details.primaryVelocity! > 0; });
                 }
@@ -4000,7 +3995,6 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                 height: currentHeight,
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
-                  // 💡 計算された動的補間カラー[c1, c2, c3]を展開して適用
                   gradient: LinearGradient(colors: [c1, c2, c3], begin: Alignment.topLeft, end: Alignment.bottomRight, stops: const [0.0, 0.5, 1.0]),
                   borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
                 ),

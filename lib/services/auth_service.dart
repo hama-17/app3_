@@ -1,9 +1,9 @@
-import 'package:flutter/foundation.dart'; // ← debugPrint用に追加
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart' as fss;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import '../utils/lms_adapter.dart';
-//auth_service.dart
+import 'dart:io';
 
 class AuthService {
   static const _storage = fss.FlutterSecureStorage(
@@ -30,8 +30,22 @@ class AuthService {
 
   static Future<void> clearSession() async {
     try {
+      // 1. SecureStorage から暗号化キーを削除
       await _storage.delete(key: _cookieKey);
-      await CookieManager.instance().deleteCookies(url: WebUri(canvasBaseUrl));
+
+      // 2. 全クッキーを一括完全初期化
+      await CookieManager.instance().deleteAllCookies();
+
+      // 3. WebStorage (LocalStorage / SessionStorage) の削除
+      final storageManager = WebStorageManager.instance();
+      if (Platform.isAndroid) {
+        await storageManager.android.deleteAllData();
+      } else if (Platform.isIOS) {
+        await storageManager.ios.fetchDataRecords(dataTypes: {
+          IOSWKWebsiteDataType.WKWebsiteDataTypeLocalStorage,
+          IOSWKWebsiteDataType.WKWebsiteDataTypeCookies,
+        });
+      }
     } catch (e) {
       debugPrint("AuthService.clearSession Error: $e");
     }
@@ -41,7 +55,7 @@ class AuthService {
     try {
       final uri = Uri.tryParse('$canvasBaseUrl/api/v1/users/self');
       if (uri == null) return false;
-      final response = await http.get(uri, headers: {'Cookie': cookie}).timeout(const Duration(seconds: 10)); // ← タイムアウト追加
+      final response = await http.get(uri, headers: {'Cookie': cookie}).timeout(const Duration(seconds: 10));
       return response.statusCode == 200;
     } catch (e) {
       debugPrint("AuthService.validateSession Error: $e");
@@ -49,5 +63,3 @@ class AuthService {
     }
   }
 }
-
-
