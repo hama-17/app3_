@@ -18,7 +18,7 @@ import 'package:http/http.dart' as http;
 import 'services/cache_manager.dart'; // キャッシュマネージャーのパスを合わせてください
 import 'utils/lms_adapter.dart';
 import 'services/auth_service.dart';
-
+//main.dart
 bool globalDisableAutoCacheClear = false;
 final GlobalKey<NavigatorState> globalNavigatorKey = GlobalKey<NavigatorState>();
 

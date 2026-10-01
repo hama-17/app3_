@@ -14,7 +14,7 @@ import '../utils/dummy_data_helper.dart';
 import '../services/cache_manager.dart';
 import '../services/auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+//setting_screen.dart
 class TermCirclePainter extends CustomPainter {
   final bool q1Active;
   final bool q2Active;

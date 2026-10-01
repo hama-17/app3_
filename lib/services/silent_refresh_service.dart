@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'auth_service.dart'; // パスは適宜合わせてください
 import '../utils/lms_adapter.dart';
-
+//silent_refresh_service.dart
 class LmsSilentRefreshService {
   static HeadlessInAppWebView? _headlessWebView;
 

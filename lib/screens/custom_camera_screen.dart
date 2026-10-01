@@ -9,7 +9,7 @@ import '../core/app_theme.dart';
 import 'dart:ui' as ui;           // 🟢 追記
 import 'package:flutter/rendering.dart'; // 🟢 追記
 import 'package:shared_preferences/shared_preferences.dart'; // 🟢 追記（これで1つ目のエラー消滅）
-
+//custom_camera_screen.dart
 class CustomCameraScreen extends StatefulWidget {
   const CustomCameraScreen({super.key});
 
