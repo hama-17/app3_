@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 
 #version: 1.0.2+4 #ios
-version: 1.0.0+24 #android
+version: 1.0.0+26 #android
 
 
 environment:
@@ -147,27 +147,23 @@ flutter:
           weight: 900
 
 
-  # pubspec.yaml の末尾に追記
+
+
+
+
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/images/Icon_o.png"
-  # ★ ここから下を追加（Androidのアダプティブアイコン対応）
-  adaptive_icon_background: "#000000" # 背景色を「黒」に指定
-  adaptive_icon_foreground: "assets/images/Icon_o.png" # 前面の画
+  image_path: "assets/icon/con.udot.png"
+  min_sdk_android: 21 # Androidの最小SDKバージョン
 
-
-# pubspec.yaml の末尾にある flutter_native_splash の設定を書き換えます
+  # （任意）Androidのアダプティブアイコンに対応させる場合
+  adaptive_icon_background: "#ffffff" # アプリのテーマカラー背景色
+  adaptive_icon_foreground: "assets/icon/con.udot.png" # 前景（透過アイコン）
 
 flutter_native_splash:
-  # ★ デフォルトの背景色を「黒」に指定（Android 11以前やiOS用）
-  color: "#000000"
-
-  # ★ Android 12以降の強制スプラッシュ画面専用の設定
+  color: "#ffffff"
+  color_dark: "#ffffff" # ダークモード時も背景色を#f5f5f5に固定
   android_12:
-    # ここに、前回の高画質画像をそのまま指定します
-    image: "assets/images/Icon_o.png"
-    # アイコン背景色も「黒」に指定
-    icon_background_color: "#000000"
-    # (ダークモード設定も一応黒にしておきます)
-    icon_background_color_dark: "#000000"
+    color: "#ffffff"
+    color_dark: "#ffffff"
