@@ -2,22 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
-	    <key>NSMicrophoneUsageDescription</key>
-            <string>カメラの初期化および動画撮影のためにマイクを使用します。</string>
-        <key>NSPhotoLibraryAddUsageDescription</key>
-            <string>撮影したメモ画像を端末に保存するために写真ライブラリを使用します。</string>
-	    <key>ITSAppUsesNonExemptEncryption</key>
-        <false/>
-	    <key>NSCameraUsageDescription</key>
-        <string>メモに添付する写真をその場で撮影してアプリ内に保存するためにカメラを使用します。</string>
-        <key>NSPhotoLibraryUsageDescription</key>
-        <string>端末に保存されている写真をメモに添付してアプリ内にストックするために、写真ライブラリへアクセスします。</string>
-	    <key>NSCalendarsUsageDescription</key>
-        <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
-        <key>NSCalendarsFullAccessUsageDescription</key>
-        <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
-        <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-            <string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>カメラの初期化および動画撮影のためにマイクを使用します。</string>
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>撮影したメモ画像を端末に保存するために写真ライブラリを使用します。</string>
+		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
+		<key>NSCameraUsageDescription</key>
+		<string>メモに添付する写真をその場で撮影してアプリ内に保存するためにカメラを使用します。</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>端末に保存されている写真をメモに添付してアプリ内にストックするために、写真ライブラリへアクセスします。</string>
+		<key>NSCalendarsUsageDescription</key>
+		<string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
+		<key>NSCalendarsFullAccessUsageDescription</key>
+		<string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
+		<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+		<string>タスクを自動的にカレンダーに同期するためにカレンダーへのアクセスが必要です。</string>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
@@ -45,7 +45,6 @@
 		<key>UIMainStoryboardFile</key>
 		<string>Main</string>
 		<key>UISupportedInterfaceOrientations</key>
-
 		<array>
 			<string>UIInterfaceOrientationPortrait</string>
 			<string>UIInterfaceOrientationLandscapeLeft</string>
@@ -59,15 +58,15 @@
 			<string>UIInterfaceOrientationLandscapeRight</string>
 		</array>
 		<key>UIBackgroundModes</key>
-        <array>
-            <string>fetch</string>
-            <string>processing</string>
-        </array>
-        <key>BGTaskSchedulerPermittedIdentifiers</key>
-        <array>
-            <!-- 🎯 iOSシステムへ、この名前のバックグラウンドランチャーの実行をAppleに正式公認させます -->
-            <string>be.antonborri.workmanager.BackgroundTask</string>
-        </array>
+		<array>
+			<string>fetch</string>
+			<string>processing</string>
+		</array>
+		<key>BGTaskSchedulerPermittedIdentifiers</key>
+		<array>
+			<!-- 🎯 iOSシステムへ、この名前のバックグラウンドランチャーの実行をAppleに正式公認させます -->
+			<string>be.antonborri.workmanager.BackgroundTask</string>
+		</array>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
@@ -75,6 +74,6 @@
 		<key>UIStatusBarHidden</key>
 		<false/>
 		<key>NSSupportsLiveActivities</key>
-        	<true/>
+		<true/>
 	</dict>
 </plist>

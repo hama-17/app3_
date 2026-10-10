@@ -520,7 +520,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                 curve: Curves.easeOutCubic,
                                 width: _selectedThemeMode == 'blue' ? 20 : 9,
                                 height: _selectedThemeMode == 'blue' ? 20 : 9,
-                                decoration: const BoxDecoration(color: Color(0xFF174a69), shape: BoxShape.circle),
+                                decoration: const BoxDecoration(color: Color(0xFF96a9f9), shape: BoxShape.circle),
                               ),
                             ),
                           ),
@@ -553,7 +553,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                 width: _selectedThemeMode == 'purple' ? 20 : 9,
                                 height: _selectedThemeMode == 'purple' ? 20 : 9,
                                 decoration: const BoxDecoration(
-                                  color: Color(0xFF9E86EF), // 💡 パステルネオンパープル
+                                  color: Color(0xFF174a69), //
                                   shape: BoxShape.circle,
                                 ),
                               ),

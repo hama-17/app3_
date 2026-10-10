@@ -2131,87 +2131,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     return combined;
   }
 
-  // ★ 修正：外部予定の数も含めてカレンダーの高さを正確に計算する
   double _getScheduleHeight(int pageIndex, double topPadding) {
-    int offset = pageIndex - 10000;
-    DateTime now = DateTime.now();
-
+    // 🟢 Wモードは 620.0px、Mモードはさらに大きい 700.0px に固定設定
     if (_scheduleMode == 'W') {
-      DateTime currentMonday = now.subtract(Duration(days: now.weekday - 1));
-      DateTime targetWeek = currentMonday.add(Duration(days: offset * 7));
-
-      int minHour = 24;
-      int maxHour = 0;
-
-      for (int i = 0; i < 7; i++) {
-        DateTime d = targetWeek.add(Duration(days: i));
-        List<Map<String, dynamic>> appEvents = _getScheduleForDate(d).where((item) => item['status'] != 2).toList();
-        String dateKey = "${d.year}-${d.month}-${d.day}";
-        List<Map<String, dynamic>> ext = _externalEventsCache[dateKey] ?? [];
-
-        for (var item in [...appEvents, ...ext]) {
-          if (item['isAllDay'] == true) continue;
-          DateTime st = item['time'];
-          DateTime et = item['endTime'] ?? st.add(const Duration(hours: 1));
-          if (st.hour < minHour) minHour = st.hour;
-          // ★ 修正：終了時間の時間を厳密に取る（分が1でもあれば次の時間まで枠を広げる）
-          if (et.hour + (et.minute > 0 ? 1 : 0) > maxHour) maxHour = et.hour + (et.minute > 0 ? 1 : 0);
-        }
-      }
-
-      if (minHour > maxHour) {
-        minHour = 9; maxHour = 18;
-      } else {
-        minHour = math.max(0, minHour - 1);
-        maxHour = math.min(24, maxHour + 1);
-      }
-
-      double pixelsPerMinute = 0.5;
-      double timelineHeight = (maxHour - minHour) * 60 * pixelsPerMinute;
-      // ★ 修正：バッファを増やして見切れを防止（+ 60.0）
-      return topPadding + 48.0 + timelineHeight + 60.0;
-
+      return topPadding + 48.0 + 620.0;
     } else if (_scheduleMode == 'M') {
-      DateTime targetMonth = DateTime(now.year, now.month + offset, 1);
-      DateTime startDate = targetMonth.subtract(Duration(days: targetMonth.weekday - 1));
-
-      int daysInMonth = DateTime(targetMonth.year, targetMonth.month + 1, 0).day;
-      int numWeeks = ((targetMonth.weekday - 1 + daysInMonth) / 7.0).ceil();
-
-      double totalWeeksHeight = 0.0;
-      double headerHeight = 54.0;
-
-      for (int weekIdx = 0; weekIdx < numWeeks; weekIdx++) {
-        int maxItemsInThisWeek = 0;
-        for (int dayIdx = 0; dayIdx < 7; dayIdx++) {
-          DateTime currentDay = startDate.add(Duration(days: weekIdx * 7 + dayIdx));
-          // ★ タスクを含めた数をカウントする
-          int appItemCount = _getScheduleForDate(currentDay).where((item) => item['status'] != 2).length;
-
-          String dateKey = "${currentDay.year}-${currentDay.month}-${currentDay.day}";
-          int externalCount = (_externalEventsCache[dateKey] ?? []).length;
-          if (externalCount > 3) externalCount = 3;
-
-          if (appItemCount + externalCount > maxItemsInThisWeek) {
-            maxItemsInThisWeek = appItemCount + externalCount;
-          }
-        }
-        double dayLabelHeight = 24.0;
-        double itemsHeight = maxItemsInThisWeek * 12.0;
-        double weekHeight = dayLabelHeight + itemsHeight + 6.0;
-        totalWeeksHeight += weekHeight;
-      }
-      return topPadding + 48.0 + headerHeight + totalWeeksHeight + 8.0 + 4.0;
+      return topPadding + 48.0 + 700.0;
     }
 
-    // Dモード
-    // --- メソッドの最下部、Dモードのロジック部分を以下に差し替え ---
-    // Dモード
+    // --- Dモード（日表示）の計算は従来通り ---
+    int offset = pageIndex - 10000;
+    DateTime now = DateTime.now();
     DateTime date = now.add(Duration(days: offset));
     final items = _getScheduleForDate(date);
 
-    // 🟢 決定打：_buildDayPageと完全に足並みを揃え、
-    // 前後3日分のプールから「純粋に日本時間の当日に表示される外部予定」の正確な個数を割り出します。
     final DateTime prevDate = date.subtract(const Duration(days: 1));
     final DateTime nextDate = date.add(const Duration(days: 1));
 
@@ -2230,12 +2163,11 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
         String eventKey = "${item['title']}_${localTime.millisecondsSinceEpoch}";
         if (!seenEvents.contains(eventKey)) {
           seenEvents.add(eventKey);
-          correctedExternalCount++; // 実際にこの日に描画されるものだけをインクリメント
+          correctedExternalCount++;
         }
       }
     }
 
-    // 授業・タスク数 ＋ 厳選された外部予定数
     int totalItems = items.length + correctedExternalCount;
 
     double baseHeight = topPadding + 48.0 + 20.0 + 8.0;
@@ -4821,33 +4753,24 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     final monthsEn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     String monthLabel = monthsEn[startOfWeek.month - 1];
 
-    int minHour = 24;
-    int maxHour = 0;
-    for (int i = 0; i < 7; i++) {
-      DateTime d = startOfWeek.add(Duration(days: i));
-      List<Map<String, dynamic>> appEvents = _getScheduleForDate(d).where((item) => item['status'] != 2).toList();
-      String dateKey = "${d.year}-${d.month}-${d.day}";
-      List<Map<String, dynamic>> ext = _externalEventsCache[dateKey] ?? [];
-      for (var item in [...appEvents, ...ext]) {
-        if (item['isAllDay'] == true) continue;
-        DateTime st = item['time'];
-        DateTime et = item['endTime'] ?? st.add(const Duration(hours: 1));
-        if (st.hour < minHour) minHour = st.hour;
-        if (et.hour > maxHour) maxHour = et.hour + (et.minute > 0 ? 1 : 0);
-      }
-    }
+    const int minHour = 0;
+    const int maxHour = 26;
 
-    if (minHour > maxHour) { minHour = 9; maxHour = 18; }
-    else { minHour = math.max(0, minHour - 1); maxHour = math.min(24, maxHour + 1); }
+    const double gridHeight = 550.0;
+    final double pixelsPerMinute = gridHeight / (26 * 60);
+    const double timeColWidth = 22.0;
 
-    final double pixelsPerMinute = 0.5;
-    final double timelineHeight = (maxHour - minHour) * 60 * pixelsPerMinute;
+    final Color gridLineColor = tCol.withOpacity(1.0);
+
+    // 🟢 現在時刻以前のハイライト計算
+    final DateTime now = DateTime.now();
+    int nowMins = (now.hour * 60 + now.minute).clamp(0, 26 * 60);
+    double pastHeight = nowMins * pixelsPerMinute;
 
     return Align(
       alignment: Alignment.topCenter,
       child: Padding(
-        padding: EdgeInsets.only(left: 16, right: 16, top: topPadding + 48.0, bottom: 8.0),
-        // ★ 修正：Dモード同様に、縦スワイプをタスクリストのスクロールに流し込む
+        padding: EdgeInsets.only(left: 0, right: 0, top: topPadding + 48.0, bottom: 0),
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
           onVerticalDragUpdate: (details) {
@@ -4859,163 +4782,252 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               }
             }
           },
-          child: SingleChildScrollView(
-            physics: const NeverScrollableScrollPhysics(),
+          child: SizedBox(
+            height: 620.0,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.max,
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: SizedBox(
-                    height: 28,
+                    height: 32,
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.baseline,
                       textBaseline: TextBaseline.alphabetic,
                       children: [
-                        Text(monthLabel, style: TextStyle(color: tCol.withOpacity(0.9), fontSize: 22, fontWeight: FontWeight.w200, letterSpacing: 1.2)),
+                        Text(monthLabel, style: TextStyle(color: tCol, fontSize: 22, fontWeight: FontWeight.w300, letterSpacing: 1.2)),
                         const SizedBox(width: 8),
-                        Text("${minHour}:00 - ${maxHour}:00", style: TextStyle(color: tCol.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.w400)),
+                        Text("0:00 - 26:00", style: TextStyle(color: tCol.withOpacity(0.8), fontSize: 11, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: List.generate(7, (i) {
-                    DateTime currentDay = startOfWeek.add(Duration(days: i));
-                    bool isToday = currentDay.year == DateTime.now().year && currentDay.month == DateTime.now().month && currentDay.day == DateTime.now().day;
+                const SizedBox(height: 6),
 
-                    List<Map<String, dynamic>> appEvents = _getScheduleForDate(currentDay).where((item) => item['status'] != 2).toList();
-                    String dateKey = "${currentDay.year}-${currentDay.month}-${currentDay.day}";
-                    List<Map<String, dynamic>> externalEvents = _externalEventsCache[dateKey] ?? [];
-
-                    List<Map<String, dynamic>> dailyEvents = [...appEvents, ...externalEvents];
-                    dailyEvents.sort((a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime));
-
-                    List<Widget> eventWidgets = [];
-
-                    for (var event in dailyEvents) {
-                      bool isExternal = event['type'] == 'external_event';
-                      bool isTask = event['type'] == 'task';
-                      DateTime startTime = event['time'];
-                      DateTime endTime = event['endTime'] ?? startTime.add(const Duration(hours: 1));
-
-                      double topOffset;
-                      double height;
-
-                      if (isExternal && event['isAllDay'] == true) {
-                        topOffset = 0.0;
-                        height = 12.0;
-                      } else {
-                        int startMinTotal = startTime.hour * 60 + startTime.minute;
-                        int endMinTotal = endTime.hour * 60 + endTime.minute;
-
-                        if (startMinTotal < minHour * 60) startMinTotal = minHour * 60;
-                        if (endMinTotal > maxHour * 60) endMinTotal = maxHour * 60;
-
-                        int durationMin = endMinTotal - startMinTotal;
-                        if (durationMin < 20) durationMin = 20;
-
-                        topOffset = (startMinTotal - minHour * 60) * pixelsPerMinute;
-                        height = durationMin * pixelsPerMinute;
-                      }
-
-                      Color bgColor = !isExternal ? _getCourseColor(event['courseObj']) : tCol.withOpacity(0.15);
-                      Color txtColor = !isExternal ? AppTheme.getTextColorForBackground(bgColor) : tCol;
-
-                      if (isTask) {
-                        bgColor = bgColor.withOpacity(0.8);
-                      } else if (!isExternal && event['status'] == 1) {
-                        bgColor = bgColor.withOpacity(0.3);
-                        txtColor = txtColor.withOpacity(0.5);
-                      }
-
-                      String title = event['title'] ?? '';
-
-                      eventWidgets.add(
-                          Positioned(
-                            top: topOffset,
-                            left: 0,
-                            right: 0,
-                            height: height,
-                            child: GestureDetector(
-                              onTap: () {
-                                if (isTask) {
-                                  if (event['courseId'] == 'custom_t') _showCompleteCustomTaskDialog(event['taskId']);
-                                  else {
-                                    String url = event['targetUrl'] ?? '';
-                                    // 🎯 修正：onImagesSaved に専用インジェクターを結合！
-                                    if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: event['title'], onImagesSaved: _createImgSaverForCourse(event['courseId'].toString()));
-                                    else {
-                                      int cIdx = _courseIndexMap[event['courseId']] ?? -1;
-                                      if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: event['taskId']);
-                                    }
-                                  }
-                                } else if (!isExternal) {
-                                  if (event['isCustom'] == true) _navigateToCustomDetail(event['courseObj']);
-                                  else {
-                                    int cIdx = _courseIndexMap[event['courseId']] ?? -1;
-                                    if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
-                                  }
-                                }
-                              },
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 1.0, right: 1.0),
-                                padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
-                                decoration: BoxDecoration(
-                                  color: bgColor,
-                                  // ★ 修正：角の丸みを4から6へ少し大きく
-                                  borderRadius: BorderRadius.circular(6),
-                                  // ★ 修正：授業(!isTask && !isExternal)なら枠線なし、それ以外は枠線を残す
-                                  border: (!isTask && !isExternal)
-                                      ? null
-                                      : Border.all(color: AppTheme.bg(context).withOpacity(isTask ? 0.8 : 0.4), width: isTask ? 1.0 : 0.5),
-                                ),
-                                child: Text(
-                                  title,
-                                  style: TextStyle(color: txtColor, fontSize: 7, fontWeight: FontWeight.w600, height: 1.1),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: math.max(1, (height / 10).floor()),
-                                ),
-                              ),
-                            ),
-                          )
-                      );
-                    }
-
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2.0),
-                        child: Column(
-                          children: [
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => _switchToDayMode(currentDay),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                SizedBox(
+                  height: 22,
+                  child: Row(
+                    children: [
+                      const SizedBox(width: timeColWidth),
+                      Expanded(
+                        child: Row(
+                          children: List.generate(7, (i) {
+                            DateTime currentDay = startOfWeek.add(Duration(days: i));
+                            bool isToday = currentDay.year == now.year && currentDay.month == now.month && currentDay.day == now.day;
+                            return Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _switchToDayMode(currentDay),
                                 child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Text(daysEn[i][0], style: TextStyle(color: tCol.withOpacity(isToday ? 1.0 : 0.5), fontSize: 10, fontWeight: isToday ? FontWeight.bold : FontWeight.w300)),
-                                    Text("${currentDay.day}", style: TextStyle(color: tCol.withOpacity(isToday ? 1.0 : 0.5), fontSize: 14, fontWeight: isToday ? FontWeight.bold : FontWeight.w300)),
+                                    Text("${daysEn[i][0]} ${currentDay.day}", style: TextStyle(color: tCol.withOpacity(isToday ? 1.0 : 0.8), fontSize: 11, fontWeight: isToday ? FontWeight.bold : FontWeight.w600)),
                                   ],
                                 ),
                               ),
+                            );
+                          }),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                SizedBox(
+                  height: gridHeight,
+                  width: double.infinity,
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: timeColWidth,
+                        height: gridHeight,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: List.generate(14, (idx) {
+                            int hour = idx * 2;
+                            double topPos = (hour * 60) * pixelsPerMinute;
+                            if (idx == 0) topPos = 0.0;
+                            else if (idx == 13) topPos = gridHeight - 11.0;
+                            else topPos -= 5.5;
+
+                            return Positioned(
+                              top: topPos,
+                              left: 2,
+                              child: Text(
+                                "$hour",
+                                style: TextStyle(color: tCol.withOpacity(0.85), fontSize: 9, fontWeight: FontWeight.w600, height: 1.0),
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _WeekGridPainter(
+                                  minHour: minHour,
+                                  maxHour: maxHour,
+                                  pixelsPerMinute: pixelsPerMinute,
+                                  lineColor: gridLineColor,
+                                ),
+                              ),
                             ),
-                            const SizedBox(height: 4),
-                            SizedBox(
-                                height: timelineHeight,
-                                width: double.infinity,
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: eventWidgets,
-                                )
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: List.generate(7, (i) {
+                                DateTime currentDay = startOfWeek.add(Duration(days: i));
+                                bool isToday = currentDay.year == now.year && currentDay.month == now.month && currentDay.day == now.day;
+
+                                List<Map<String, dynamic>> appEvents = _getScheduleForDate(currentDay).where((item) => item['status'] != 2).toList();
+                                String dateKey = "${currentDay.year}-${currentDay.month}-${currentDay.day}";
+                                List<Map<String, dynamic>> externalEvents = _externalEventsCache[dateKey] ?? [];
+
+                                List<Map<String, dynamic>> dailyEvents = [...appEvents, ...externalEvents];
+                                dailyEvents.sort((a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime));
+
+                                List<Widget> eventWidgets = [];
+                                List<Map<String, double>> pastExternalRanges = [];
+
+                                for (var event in dailyEvents) {
+                                  bool isExternal = event['type'] == 'external_event';
+                                  bool isTask = event['type'] == 'task';
+                                  DateTime startTime = event['time'];
+                                  DateTime endTime = event['endTime'] ?? startTime.add(const Duration(hours: 1));
+
+                                  double topOffset;
+                                  double height;
+
+                                  if (isExternal && event['isAllDay'] == true) {
+                                    topOffset = 0.0;
+                                    height = 14.0;
+                                  } else {
+                                    int startMinTotal = startTime.hour * 60 + startTime.minute;
+                                    int endMinTotal = endTime.hour * 60 + endTime.minute;
+
+                                    if (startMinTotal < 0) startMinTotal = 0;
+                                    if (endMinTotal > 26 * 60) endMinTotal = 26 * 60;
+
+                                    int durationMin = endMinTotal - startMinTotal;
+                                    if (durationMin < 20) durationMin = 20;
+
+                                    topOffset = startMinTotal * pixelsPerMinute;
+                                    height = durationMin * pixelsPerMinute;
+                                  }
+
+                                  // 🟢 今日かつ現在以前のカレンダー予定はくり抜き範囲に追加
+                                  if (isExternal && isToday && topOffset < pastHeight) {
+                                    pastExternalRanges.add({'top': topOffset, 'height': height});
+                                  }
+
+                                  Color bgColor;
+                                  Color txtColor;
+
+                                  if (isExternal) {
+                                    if (isToday && topOffset < pastHeight) {
+                                      bgColor = Colors.transparent; // くり抜き穴を見せるため透明化
+                                      txtColor = tCol;
+                                    } else {
+                                      bgColor = Colors.white;
+                                      txtColor = Colors.black;
+                                    }
+                                  } else if (isTask) {
+                                    bgColor = AppTheme.accent;
+                                    txtColor = Colors.white;
+                                  } else {
+                                    bgColor = _getCourseColor(event['courseObj']);
+                                    txtColor = AppTheme.getTextColorForBackground(bgColor);
+                                    if (event['status'] == 1) {
+                                      bgColor = bgColor.withOpacity(0.45);
+                                      txtColor = txtColor.withOpacity(0.8);
+                                    }
+                                  }
+
+                                  String title = event['title'] ?? '';
+
+                                  eventWidgets.add(
+                                    Positioned(
+                                      top: topOffset,
+                                      left: 0,
+                                      right: 0,
+                                      height: height,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          if (isTask) {
+                                            if (event['courseId'] == 'custom_t') {
+                                              _showCompleteCustomTaskDialog(event['taskId']);
+                                            } else {
+                                              String url = event['targetUrl'] ?? '';
+                                              if (url.isNotEmpty) {
+                                                openSmartUrl(context, url, widget.cookie, title: event['title'], onImagesSaved: _createImgSaverForCourse(event['courseId'].toString()));
+                                              } else {
+                                                int cIdx = _courseIndexMap[event['courseId']] ?? -1;
+                                                if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: event['taskId']);
+                                              }
+                                            }
+                                          } else if (!isExternal) {
+                                            if (event['isCustom'] == true) {
+                                              _navigateToCustomDetail(event['courseObj']);
+                                            } else {
+                                              int cIdx = _courseIndexMap[event['courseId']] ?? -1;
+                                              if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
+                                            }
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 1.0),
+                                          decoration: BoxDecoration(
+                                            color: bgColor,
+                                            borderRadius: BorderRadius.zero,
+                                          ),
+                                          child: Text(
+                                            title,
+                                            style: TextStyle(color: txtColor, fontSize: 9, fontWeight: FontWeight.w600, height: 1.1),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: math.max(1, (height / 11).floor()),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                return Expanded(
+                                  child: SizedBox(
+                                    height: gridHeight,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        // 🟢 今日の現在以前白塗り＆カレンダーくり抜きペインター
+                                        if (isToday && pastHeight > 0)
+                                          Positioned(
+                                            top: 0,
+                                            left: 0,
+                                            right: 0,
+                                            height: pastHeight.clamp(0.0, gridHeight),
+                                            child: CustomPaint(
+                                              painter: _PastHighlightPainter(
+                                                pastHeight: pastHeight,
+                                                externalRanges: pastExternalRanges,
+                                              ),
+                                            ),
+                                          ),
+                                        ...eventWidgets,
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }),
                             ),
                           ],
                         ),
                       ),
-                    );
-                  }),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -5034,11 +5046,16 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
     int daysInMonth = DateTime(pageDate.year, pageDate.month + 1, 0).day;
     int numWeeks = ((firstDayOfMonth.weekday - 1 + daysInMonth) / 7.0).ceil();
 
+    const double gridHeight = 630.0;
+    final double rowHeight = gridHeight / numWeeks;
+
+    final Color gridLineColor = tCol.withOpacity(1.0);
+    final DateTime now = DateTime.now();
+
     return Align(
       alignment: Alignment.topCenter,
       child: Padding(
-        padding: EdgeInsets.only(left: 16, right: 16, top: topPadding + 48.0, bottom: 8.0),
-        // ★ 修正：Dモード同様に、縦スワイプをタスクリストのスクロールに流し込む
+        padding: EdgeInsets.only(left: 0, right: 0, top: topPadding + 48.0, bottom: 0),
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
           onVerticalDragUpdate: (details) {
@@ -5050,130 +5067,429 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
               }
             }
           },
-          child: SingleChildScrollView(
-            physics: const NeverScrollableScrollPhysics(),
+          child: SizedBox(
+            height: 700.0,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.max,
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: SizedBox(
-                    height: 28,
-                    child: Text(monthLabel, style: TextStyle(color: tCol.withOpacity(0.9), fontSize: 22, fontWeight: FontWeight.w200, letterSpacing: 1.2)),
+                    height: 32,
+                    child: Text(monthLabel, style: TextStyle(color: tCol, fontSize: 22, fontWeight: FontWeight.w300, letterSpacing: 1.2)),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) =>
-                      Expanded(child: Center(child: Text(d, style: TextStyle(color: tCol.withOpacity(0.5), fontSize: 10, fontWeight: FontWeight.w300))))
-                  ).toList(),
+                const SizedBox(height: 6),
+
+                SizedBox(
+                  height: 22,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) =>
+                        Expanded(child: Center(child: Text(d, style: TextStyle(color: tCol.withOpacity(0.85), fontSize: 11, fontWeight: FontWeight.bold))))
+                    ).toList(),
+                  ),
                 ),
                 const SizedBox(height: 8),
 
-                ...List.generate(numWeeks, (weekIdx) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 6.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: List.generate(7, (dayIdx) {
-                        DateTime currentDay = startDate.add(Duration(days: weekIdx * 7 + dayIdx));
-                        bool isCurrentMonth = currentDay.month == pageDate.month;
-                        bool isToday = currentDay.year == DateTime.now().year && currentDay.month == DateTime.now().month && currentDay.day == DateTime.now().day;
+                Container(
+                  width: double.infinity,
+                  height: gridHeight,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: gridLineColor, width: 1.0),
+                  ),
+                  child: Column(
+                    children: List.generate(numWeeks, (weekIdx) {
+                      return Container(
+                        height: rowHeight,
+                        decoration: BoxDecoration(
+                          border: weekIdx < numWeeks - 1
+                              ? Border(bottom: BorderSide(color: gridLineColor, width: 1.0))
+                              : null,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: List.generate(7, (dayIdx) {
+                            DateTime currentDay = startDate.add(Duration(days: weekIdx * 7 + dayIdx));
+                            bool isCurrentMonth = currentDay.month == pageDate.month;
+                            bool isToday = currentDay.year == now.year && currentDay.month == now.month && currentDay.day == now.day;
 
-                        List<Map<String, dynamic>> appEvents = _getScheduleForDate(currentDay).where((item) => item['status'] != 2).toList();
-                        String dateKey = "${currentDay.year}-${currentDay.month}-${currentDay.day}";
-                        List<Map<String, dynamic>> externalEvents = _externalEventsCache[dateKey] ?? [];
+                            List<Map<String, dynamic>> appEvents = _getScheduleForDate(currentDay).where((item) => item['status'] != 2).toList();
+                            String dateKey = "${currentDay.year}-${currentDay.month}-${currentDay.day}";
+                            List<Map<String, dynamic>> externalEvents = _externalEventsCache[dateKey] ?? [];
 
-                        return Expanded(
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () => _switchToDayMode(currentDay),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
-                                    child: Text(
-                                        "${currentDay.day}",
-                                        style: TextStyle(
-                                            color: tCol.withOpacity(isToday ? 1.0 : (isCurrentMonth ? 0.7 : 0.2)),
-                                            fontSize: 10,
-                                            fontWeight: isToday ? FontWeight.bold : FontWeight.w300
-                                        )
-                                    ),
+                            List<Map<String, dynamic>> dailyEvents = [...appEvents, ...externalEvents];
+                            dailyEvents.sort((a, b) {
+                              DateTime ta = a['time'] as DateTime;
+                              DateTime tb = b['time'] as DateTime;
+                              return ta.compareTo(tb);
+                            });
+
+                            double currentY = 17.0;
+                            List<Map<String, double>> externalRanges = [];
+
+                            for (var item in dailyEvents) {
+                              bool isTask = item['type'] == 'task';
+                              bool isExternal = item['type'] == 'external_event';
+                              double itemHeight = isTask ? 7.0 : (isExternal ? 5.0 : 8.0);
+
+                              if (isExternal) {
+                                externalRanges.add({'top': currentY, 'height': itemHeight});
+                              }
+                              currentY += itemHeight;
+                            }
+
+                            return Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _showDaySummaryPopup(context, currentDay, dailyEvents),
+                                child: Container(
+                                  clipBehavior: Clip.hardEdge, // 🟢 溢れたバーをマスの枠線で綺麗にカット
+                                  decoration: BoxDecoration(
+                                    border: dayIdx < 6
+                                        ? Border(right: BorderSide(color: gridLineColor, width: 1.0))
+                                        : null,
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      if (isToday)
+                                        Positioned.fill(
+                                          child: CustomPaint(
+                                            painter: _TodayCellHighlightPainter(
+                                              externalRanges: externalRanges,
+                                            ),
+                                          ),
+                                        ),
+
+                                      // 🟢 ノンスクロール用 SingleChildScrollView で包んでゼブラ警告（RenderFlex overflow）を封殺
+                                      SingleChildScrollView(
+                                        physics: const NeverScrollableScrollPhysics(),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.symmetric(vertical: 3.0),
+                                              child: Text(
+                                                  "${currentDay.day}",
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                      color: isToday ? Colors.black : tCol.withOpacity(isCurrentMonth ? 0.9 : 0.35),
+                                                      fontSize: 11,
+                                                      fontWeight: isToday ? FontWeight.bold : FontWeight.w500
+                                                  )
+                                              ),
+                                            ),
+                                            const SizedBox(height: 0),
+
+                                            ...dailyEvents.map((item) {
+                                              bool isTask = item['type'] == 'task';
+                                              bool isExternal = item['type'] == 'external_event';
+
+                                              Color cColor;
+                                              if (isExternal) {
+                                                cColor = isToday ? Colors.transparent : Colors.white;
+                                              } else if (isTask) {
+                                                cColor = AppTheme.accent;
+                                              } else {
+                                                cColor = _getCourseColor(item['courseObj']);
+                                                if (item['status'] == 1) {
+                                                  cColor = cColor.withOpacity(0.45);
+                                                }
+                                              }
+
+                                              return Container(
+                                                margin: EdgeInsets.zero,
+                                                height: isTask ? 7 : (isExternal ? 5 : 8),
+                                                width: double.infinity,
+                                                decoration: BoxDecoration(
+                                                  color: cColor,
+                                                  borderRadius: BorderRadius.zero,
+                                                ),
+                                              );
+                                            }),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 2),
-
-                                ...appEvents.map((c) {
-                                  bool isTask = c['type'] == 'task';
-                                  Color cColor = _getCourseColor(c['courseObj']);
-                                  bool isOndemand = c['status'] == 1;
-
-                                  return GestureDetector(
-                                    onTap: () {
-                                      if (isTask) {
-                                        if (c['courseId'] == 'custom_t') {
-                                          _showCompleteCustomTaskDialog(c['taskId']);
-                                        } else {
-                                          String url = c['targetUrl'] ?? '';
-                                          // 🎯 修正：onImagesSaved に専用インジェクターを結合！
-                                          if (url.isNotEmpty) openSmartUrl(context, url, widget.cookie, title: c['title'], onImagesSaved: _createImgSaverForCourse(c['courseId'].toString()));
-                                          else {
-                                            int cIdx = _courseIndexMap[c['courseId']] ?? -1;
-                                            if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: c['taskId']);
-                                          }
-                                        }
-                                      } else {
-                                        if (c['isCustom'] == true) _navigateToCustomDetail(c['courseObj']);
-                                        else {
-                                          int cIdx = _courseIndexMap[c['courseId']] ?? -1;
-                                          if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
-                                        }
-                                      }
-                                    },
-                                    child: Container(
-                                      margin: const EdgeInsets.only(bottom: 2),
-                                      height: isTask ? 6 : 10,
-                                      width: double.infinity,
-                                      decoration: BoxDecoration(
-                                        color: isTask ? cColor.withOpacity(0.9) : cColor.withOpacity(isOndemand ? 0.3 : 0.8),
-                                        borderRadius: BorderRadius.circular(isTask ? 3 : 5),
-                                        border: isTask ? Border.all(color: tCol.withOpacity(0.4), width: 0.5) : null,
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-
-                                ...externalEvents.take(3).map((e) {
-                                  return Container(
-                                    margin: const EdgeInsets.only(bottom: 2),
-                                    height: 3,
-                                    width: double.infinity,
-                                    decoration: BoxDecoration(
-                                      color: tCol.withOpacity(0.3),
-                                      borderRadius: BorderRadius.circular(1.5),
-                                    ),
-                                  );
-                                }).toList(),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  );
-                }),
+                              ),
+                            );
+                          }),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  // 🟢 Todayカードグラデーション ＆ Dモード体裁に完全同期した日別予定ポップアップ
+  void _showDaySummaryPopup(BuildContext context, DateTime date, List<Map<String, dynamic>> events) {
+    final daysEn = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    String dayStr = daysEn[date.weekday - 1];
+    String dateAndDay = "${date.month}/${date.day} $dayStr";
+
+    // Todayカードと同じグラデーションパレットおよびテキスト色の取得
+    final String gradientMode = appGradientThemeNotifier.value;
+    final currentPalette = AppGradient.getColors(gradientMode);
+
+    List<Color> gradientColors = currentPalette;
+    if (events.isNotEmpty) {
+      Color? customTop; Color? customMid; Color? customBot;
+      for (var item in events) {
+        if (_hasCustomColor(item['courseObj'])) {
+          Color c = _getCourseColor(item['courseObj']);
+          int hour = (item['time'] as DateTime).hour;
+          if (hour < 12) customTop = c; else if (hour < 16) customMid = c; else customBot = c;
+        }
+      }
+      gradientColors = [
+        customTop ?? currentPalette[0],
+        customMid ?? currentPalette[1],
+        customBot ?? currentPalette[2],
+      ];
+    }
+
+    Color tCol = (gradientMode == 'white') ? Colors.black87 : Colors.white;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: const [0.0, 0.5, 1.0],
+              ),
+              borderRadius: BorderRadius.circular(32),
+            ),
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ① ヘッダー部（日付と閉じるボタン）
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      dateAndDay,
+                      style: TextStyle(
+                        color: tCol.withOpacity(0.9),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w300,
+                        height: 1.0,
+                      ),
+                    ),
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: Icon(Icons.close_rounded, color: tCol.withOpacity(0.8), size: 24),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // ② 予定リスト（Dモードと全く同じタイムライン体裁）
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: events.isEmpty
+                        ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32.0),
+                      child: Center(
+                        child: Text(
+                          "予定はありません",
+                          style: TextStyle(
+                            color: tCol.withOpacity(0.6),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w300,
+                          ),
+                        ),
+                      ),
+                    )
+                        : Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // Dモードと共通の極細縦直線
+                        Positioned(
+                          top: 12.0,
+                          bottom: 0,
+                          left: 51.0,
+                          child: Container(
+                            width: 0.5,
+                            color: tCol.withOpacity(0.95),
+                          ),
+                        ),
+
+                        // Dモードと同一デザインのアイテム群
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: events.map((item) {
+                            bool isTask = item['type'] == 'task';
+                            bool isExternal = item['type'] == 'external_event';
+
+                            DateTime time = item['time'];
+                            String startTimeStr = "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}";
+
+                            String endTimeStr = "";
+                            DateTime endTime = item['endTime'] ?? time.add(const Duration(hours: 1));
+                            endTimeStr = "${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}";
+
+                            if (isExternal && item['isAllDay'] == true) {
+                              startTimeStr = "ALL";
+                              endTimeStr = "DAY";
+                            }
+
+                            int status = item['status'] ?? 0;
+                            double itemOpacity = 1.0;
+                            Color subTextColor = tCol.withOpacity(0.7);
+                            String subText = item['subtitle']?.toString() ?? '';
+
+                            if (!isTask && !isExternal) {
+                              if (status == 1) { subText = "Ondemand"; itemOpacity = 0.4; }
+                              else if (status == 3) { subText = "Exam"; }
+                            }
+
+                            String periodStr = "";
+                            if (item['type'] == 'class') {
+                              int startMins = time.hour * 100 + time.minute;
+                              if (startMins == 900) periodStr = "1．";
+                              else if (startMins == 1045) periodStr = "2．";
+                              else if (startMins == 1300) periodStr = "3．";
+                              else if (startMins == 1445) periodStr = "4．";
+                              else if (startMins == 1630) periodStr = "5．";
+                              else if (startMins == 1815) periodStr = "6．";
+                            }
+
+                            FontWeight titleWeight = FontWeight.w400;
+                            if (isExternal) {
+                              titleWeight = FontWeight.w200;
+                            } else {
+                              bool isPracticeClass = item['type'] == 'class' && item['title'].toString().contains('演習');
+                              if (isTask || isPracticeClass) {
+                                titleWeight = FontWeight.w600;
+                              }
+                            }
+
+                            if (endTime.isBefore(DateTime.now()) && !(isExternal && item['isAllDay'] == true)) {
+                              itemOpacity *= 0.35;
+                            }
+
+                            return SizedBox(
+                              height: 56,
+                              child: Opacity(
+                                opacity: itemOpacity,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 16.0),
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      if (isExternal) return;
+                                      if (isTask) {
+                                        if (item['courseId'] == 'custom_t') {
+                                          _showCompleteCustomTaskDialog(item['taskId']);
+                                        } else {
+                                          String url = item['targetUrl'] ?? '';
+                                          if (url.isNotEmpty) {
+                                            openSmartUrl(context, url, widget.cookie, title: item['title'], onImagesSaved: _createImgSaverForCourse(item['courseId'].toString()));
+                                          } else {
+                                            int cIdx = _courseIndexMap[item['courseId']] ?? -1;
+                                            if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 2, targetTaskId: item['taskId']);
+                                          }
+                                        }
+                                      } else if (item['isCustom'] == true) {
+                                        _navigateToCustomDetail(item['courseObj']);
+                                      } else {
+                                        int cIdx = _courseIndexMap[item['courseId']] ?? -1;
+                                        if (cIdx != -1) _navigateToDetail(cIdx, initialBottomIndex: 1);
+                                      }
+                                    },
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Row(
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
+                                            SizedBox(
+                                              width: 45,
+                                              child: Text(startTimeStr, style: TextStyle(color: tCol, fontSize: 14, fontWeight: FontWeight.w400, height: 1.0)),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            if (isTask) ...[Icon(Icons.assignment_late, size: 18, color: tCol), const SizedBox(width: 4)],
+                                            if (isExternal) ...[Icon(Icons.event, size: 16, color: tCol), const SizedBox(width: 4)],
+
+                                            Expanded(
+                                              child: Text.rich(
+                                                TextSpan(
+                                                  style: TextStyle(color: tCol, fontSize: 14, height: 1.0),
+                                                  children: [
+                                                    if (periodStr.isNotEmpty)
+                                                      TextSpan(
+                                                        text: periodStr,
+                                                        style: const TextStyle(fontWeight: FontWeight.w900),
+                                                      ),
+                                                    TextSpan(
+                                                      text: item['title'],
+                                                      style: TextStyle(fontWeight: titleWeight),
+                                                    ),
+                                                  ],
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            SizedBox(
+                                              width: 45,
+                                              child: !isTask
+                                                  ? Text(endTimeStr, style: TextStyle(color: tCol.withOpacity(0.75), fontSize: 11, fontWeight: FontWeight.w300, height: 1.0))
+                                                  : const SizedBox(),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(subText, style: TextStyle(color: subTextColor, fontSize: 10, height: 1.0), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -6727,5 +7043,121 @@ class _CameraMemoOverlayState extends State<_CameraMemoOverlay> with TickerProvi
         );
       },
     );
+  }
+}
+
+// 🟢 Wモードの不透明格子描画クラス (0時〜26時の13区画対応)
+class _WeekGridPainter extends CustomPainter {
+  final int minHour;
+  final int maxHour;
+  final double pixelsPerMinute;
+  final Color lineColor;
+
+  _WeekGridPainter({
+    required this.minHour,
+    required this.maxHour,
+    required this.pixelsPerMinute,
+    required this.lineColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    // 外枠線
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+
+    // ① 7列の縦線
+    final double colWidth = size.width / 7.0;
+    for (int i = 1; i < 7; i++) {
+      double x = colWidth * i;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+
+    // ② 2時間ごと（13区画）の横線 (2時〜24時)
+    for (int h = 2; h < 26; h += 2) {
+      double y = h * 60 * pixelsPerMinute;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WeekGridPainter oldDelegate) {
+    return oldDelegate.minHour != minHour ||
+        oldDelegate.maxHour != maxHour ||
+        oldDelegate.lineColor != lineColor ||
+        oldDelegate.pixelsPerMinute != pixelsPerMinute;
+  }
+}
+
+// 🟢 Wモード用：過去時間帯の白塗り＆カレンダー予定のくり抜きペインター
+class _PastHighlightPainter extends CustomPainter {
+  final double pastHeight;
+  final List<Map<String, double>> externalRanges;
+
+  _PastHighlightPainter({required this.pastHeight, required this.externalRanges});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (pastHeight <= 0) return;
+
+    final bounds = Rect.fromLTWH(0, 0, size.width, pastHeight.clamp(0.0, size.height));
+    canvas.saveLayer(bounds, Paint());
+
+    // 現在以前の領域を白色で塗りつぶす
+    canvas.drawRect(bounds, Paint()..color = Colors.white);
+
+    // カレンダー予定がある領域をくり抜く
+    final clearPaint = Paint()..blendMode = BlendMode.clear;
+    for (var range in externalRanges) {
+      double top = range['top']!;
+      double h = range['height']!;
+      final eventRect = Rect.fromLTWH(0, top, size.width, h);
+      final intersectRect = eventRect.intersect(bounds);
+      if (!intersectRect.isEmpty) {
+        canvas.drawRect(intersectRect, clearPaint);
+      }
+    }
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _PastHighlightPainter old) {
+    return old.pastHeight != pastHeight || old.externalRanges != externalRanges;
+  }
+}
+
+// 🟢 Mモード用：今日のマスの白塗り＆カレンダー予定のくり抜きペインター
+class _TodayCellHighlightPainter extends CustomPainter {
+  final List<Map<String, double>> externalRanges;
+
+  _TodayCellHighlightPainter({required this.externalRanges});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bounds = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.saveLayer(bounds, Paint());
+
+    // 今日のマス全体を白色で塗りつぶす
+    canvas.drawRect(bounds, Paint()..color = Colors.white);
+
+    // カレンダー予定の四角領域をくり抜く
+    final clearPaint = Paint()..blendMode = BlendMode.clear;
+    for (var range in externalRanges) {
+      double top = range['top']!;
+      double h = range['height']!;
+      canvas.drawRect(Rect.fromLTWH(0, top, size.width, h), clearPaint);
+    }
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _TodayCellHighlightPainter old) {
+    return old.externalRanges != externalRanges;
   }
 }
