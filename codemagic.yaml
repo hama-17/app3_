@@ -1,0 +1,23 @@
+workflows:
+  ios-release:
+    name: iOS Release
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifiers:
+          - com.h.k.portal
+          - com.h.k.portal.extension
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Install xcodeproj
+        script: gem install xcodeproj
+      - name: Inject Safari Extension
+        script: ruby ios/add_extension.rb
+      - name: Flutter build
+        script: flutter pub get
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace ios/Runner.xcworkspace \
+            --scheme Runner

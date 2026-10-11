@@ -1,14 +1,13 @@
 import 'dart:io';
-import 'dart:async'; // タイマーを使用
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_theme.dart';
 import '../services/auth_service.dart';
 import '../utils/lms_adapter.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
-//login_screen.dartの本文です。
 
 class OktaLoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -22,50 +21,47 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
   InAppWebViewController? _webViewController;
   bool _isInitialized = false;
 
-  // 🟢 追記：タイマーの多重衝突を物理的に防ぐためのロックフラグ
-  bool _isValidating = false; // ★ フライング防止用の初期化フラグ
+  // 🟢 iOS App Group 読み取り用 MethodChannel
+  static const _appGroupChannel = MethodChannel('com.h.k.portal/app_group');
 
   @override
   void initState() {
     super.initState();
-    _prepareLoginScreen(); // 古いキャッシュやクッキーを完全に消し去ってから起動
+    if (Platform.isAndroid) {
+      _prepareLoginScreenAndroid();
+    } else if (Platform.isIOS) {
+      setState(() {
+        _isInitialized = true;
+      });
+      _startCookiePolling(); // iOS: App Group 監視スタート
+    }
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel(); // 閉じたらタイマーを確実に止める
+    _pollingTimer?.cancel();
     super.dispose();
   }
 
-  // ★ 解決の鍵：古いクッキー・キャッシュの削除が「完全に終わるまで」WebViewの描画とタイマーの始動をカチッと待機させる
-  Future<void> _prepareLoginScreen() async {
+  // 🤖 Android用：既存のキャッシュ・クッキー一掃処理
+  Future<void> _prepareLoginScreenAndroid() async {
     await _clearWebViewCache();
     if (mounted) {
       setState(() {
-        _isInitialized = true; // お掃除完了！WebView解禁
+        _isInitialized = true;
       });
-      _startCookiePolling(); // クリーンな状態で安全に監視を開始
+      _startCookiePolling();
     }
   }
 
-  // 🟢 修正：ピンポイント消去を廃止し、CSRF矛盾を防ぐためにクッキー・ストレージを完全一掃
   Future<void> _clearWebViewCache() async {
     try {
       final cookieManager = CookieManager.instance();
-
-      // 1. 全ドメイン（CanvasおよびOkta等）のクッキーを完全初期化
       await cookieManager.deleteAllCookies();
 
-      // 2. LocalStorage / SessionStorage の完全一掃（IOSWKWebsiteDataType を使用）
       final storageManager = WebStorageManager.instance();
       if (Platform.isAndroid) {
         await storageManager.android.deleteAllData();
-      } else if (Platform.isIOS) {
-        await storageManager.ios.fetchDataRecords(dataTypes: {
-          IOSWKWebsiteDataType.WKWebsiteDataTypeLocalStorage,
-          IOSWKWebsiteDataType.WKWebsiteDataTypeCookies,
-          IOSWKWebsiteDataType.WKWebsiteDataTypeSessionStorage,
-        });
       }
 
       debugPrint("🛡️ [SSO Shield] クッキーおよびWebStorageを完全に初期化しました。");
@@ -81,68 +77,95 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
         timer.cancel();
         return;
       }
-      await _checkAndValidateCookies();
+
+      if (Platform.isAndroid) {
+        await _checkAndValidateAndroidCookies();
+      } else if (Platform.isIOS) {
+        await _checkAndValidateIosAppGroupCookies();
+      }
     });
   }
 
-  // Cookieを引っこ抜いて検証・即時クリーニングする処理
-  Future<void> _checkAndValidateCookies() async {
+  // 🤖 Android：従来の WebView からクッキーを回収
+  Future<void> _checkAndValidateAndroidCookies() async {
     if (_webViewController == null || _isSuccessTriggered) return;
 
     try {
-      // 1. 現在のURLを取得
       final currentUrl = await _webViewController!.getUrl();
       if (currentUrl == null) return;
       final urlString = currentUrl.toString();
 
-      // 2. 🎯 URLガード：Oktaの認証ドメインやLMSのログイン画面の中にいる間は、タイマーを完全に無視（スルー）する
-      // これにより、ログイン前の _csrf_token によるフライング暴発を100%封殺します。
       bool isInsideCanvasDashboard = urlString.startsWith(canvasBaseUrl) &&
           !urlString.contains('/login') &&
           !urlString.contains('/saml');
 
       if (isInsideCanvasDashboard) {
-        // 3. 元のコードと100%同じ、最も安定した結合方式でクッキーを回収
         final String? jsCookie = await _webViewController!.evaluateJavascript(source: "document.cookie");
         final cookies = await CookieManager.instance().getCookies(url: WebUri(canvasBaseUrl));
         final String managerCookie = cookies.map((c) => "${c.name}=${c.value}").join("; ");
 
         String? cookieString = "${jsCookie ?? ''}; $managerCookie";
-
-        // 4. セッション検証
-        final isValid = await AuthService.validateSession(cookieString);
-
-        if (isValid && !_isSuccessTriggered && mounted) {
-          _isSuccessTriggered = true;
-
-          _pollingTimer?.cancel();
-          _pollingTimer = null;
-
-          try {
-            await _webViewController!.stopLoading();
-            await _webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri("about:blank")));
-          } catch (_) {}
-
-          await AuthService.saveSession(cookieString);
-          cookieString = null;
-
-          if (mounted) {
-            Navigator.pop(context);
-            widget.onLoginSuccess();
-          }
-        }
+        await _validateAndSave(cookieString);
       }
     } catch (e) {
-      debugPrint("Cookie check error: $e");
+      debugPrint("Android Cookie check error: $e");
+    }
+  }
+
+  // 🍎 iOS：Safari Web Extension が書き込んだ App Group (UserDefaults) から回収
+  Future<void> _checkAndValidateIosAppGroupCookies() async {
+    if (_isSuccessTriggered) return;
+
+    try {
+      final String? appGroupCookie = await _appGroupChannel.invokeMethod<String>('getAppGroupCookie');
+      if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
+        await _validateAndSave(appGroupCookie);
+      }
+    } catch (e) {
+      debugPrint("iOS AppGroup Cookie check error: $e");
+    }
+  }
+
+  // 🟢 共通：クッキーの有効性を確認してログイン完了へ導く
+  Future<void> _validateAndSave(String cookieString) async {
+    final isValid = await AuthService.validateSession(cookieString);
+
+    if (isValid && !_isSuccessTriggered && mounted) {
+      _isSuccessTriggered = true;
+
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+
+      if (Platform.isAndroid && _webViewController != null) {
+        try {
+          await _webViewController!.stopLoading();
+          await _webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri("about:blank")));
+        } catch (_) {}
+      }
+
+      if (Platform.isIOS) {
+        // 使用済み App Group クッキーの消去
+        await _appGroupChannel.invokeMethod('clearAppGroupCookie');
+      }
+
+      await AuthService.saveSession(cookieString);
+
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onLoginSuccess();
+      }
+    }
+  }
+
+  // 🍎 iOS用：Safariを外付けブラウザとして起動
+  Future<void> _launchSafariLogin() async {
+    final Uri url = Uri.parse(canvasBaseUrl);
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
     }
   }
 
   @override Widget build(BuildContext context) {
-    // 🟢 ネイティブSafari17.5のUAへ偽装
-    final String fakeUserAgent = Platform.isIOS
-        ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-        : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
-
     return Scaffold(
         backgroundColor: AppTheme.bg(context),
         appBar: AppBar(
@@ -152,44 +175,78 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
               icon: Icon(Icons.close, color: AppTheme.textMain(context)),
               onPressed: () => Navigator.pop(context)
           ),
-          title: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(width: 6),
-              Text("lms.keio.jp login", style: TextStyle(color: AppTheme.textMain(context), fontSize: 14)),
-            ],
-          ),
+          title: Text("lms.keio.jp login", style: TextStyle(color: AppTheme.textMain(context), fontSize: 14)),
           centerTitle: true,
         ),
-        // クッキーの完全お掃除が終わるまでは、インジケータを回してフライング誤検知を100%ブロックします
         body: SafeArea(
-            child: !_isInitialized
+            child: Platform.isIOS
+                ? _buildIosPasskeyGuidance()
+                : !_isInitialized
                 ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
-                : InAppWebView(
-                onWebViewCreated: (controller) => _webViewController = controller,
-                initialUrlRequest: URLRequest(url: WebUri(canvasBaseUrl)),
-                // ─── 🟢 修正：キャッシュ・セッションクリアの設定を追加 ───
-                initialSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  domStorageEnabled: true,
-                  thirdPartyCookiesEnabled: true,
-                  sharedCookiesEnabled: true,
-                  supportMultipleWindows: true,
-                  javaScriptCanOpenWindowsAutomatically: true,
-                  userAgent: fakeUserAgent,
-                  // 🟢 キャッシュと古いセッションの読み込みを強制的に遮断
-                  clearCache: true,
-                  clearSessionCache: true,
-                  cacheEnabled: false,
-                ),
-                onLoadStop: (controller, url) {
-                  _checkAndValidateCookies();
-                },
-                onUpdateVisitedHistory: (controller, url, isReload) {
-                  _checkAndValidateCookies();
-                }
-            )
+                : _buildAndroidWebView()
         )
+    );
+  }
+
+  // 🤖 Android用 WebView
+  Widget _buildAndroidWebView() {
+    const fakeUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+    return InAppWebView(
+        onWebViewCreated: (controller) => _webViewController = controller,
+        initialUrlRequest: URLRequest(url: WebUri(canvasBaseUrl)),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          domStorageEnabled: true,
+          thirdPartyCookiesEnabled: true,
+          sharedCookiesEnabled: true,
+          supportMultipleWindows: true,
+          javaScriptCanOpenWindowsAutomatically: true,
+          userAgent: fakeUserAgent,
+          clearCache: true,
+          clearSessionCache: true,
+          cacheEnabled: false,
+        ),
+        onLoadStop: (controller, url) => _checkAndValidateAndroidCookies(),
+        onUpdateVisitedHistory: (controller, url, isReload) => _checkAndValidateAndroidCookies()
+    );
+  }
+
+  // 🍎 iOS用 パキーログインガイド UI
+  Widget _buildIosPasskeyGuidance() {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.fingerprint, size: 72, color: AppTheme.accent),
+          const SizedBox(height: 20),
+          Text(
+            "Safariでパスキーログイン",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textMain(context)),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "Safariでパスキー（Face ID / Touch ID）を使ってログインしてください。認証が完了すると、自動的にアプリへ同期されます。",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: AppTheme.textSub(context)),
+          ),
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            onPressed: _launchSafariLogin,
+            icon: const Icon(Icons.open_in_browser),
+            label: const Text("Safariを開いてパスキーログイン"),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

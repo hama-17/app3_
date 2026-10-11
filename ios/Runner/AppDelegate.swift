@@ -1,7 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
-import workmanager // 🟢 追記
+import workmanager
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -10,20 +10,19 @@ import workmanager // 🟢 追記
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
 
-    // 1. プラグイン全体の基盤をレジスター
+    // プラグイン全体の基盤をレジスター
     GeneratedPluginRegistrant.register(with: self)
 
     WorkmanagerPlugin.setPluginRegistrantCallback { registry in
         GeneratedPluginRegistrant.register(with: registry)
     }
 
-    // 🟢【王道回帰】Flutter公式のデフォルトテンプレートと全く同じ「強制キャスト」に戻します。
-    // plistの権限が揃った今、この王道スタイルが一番スレッドのデッドロック（窒息）を起こさず、
-    // Dartの起動よりも確実に先回りでMethodChannelを100%開通させることができます。
     let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
-    let channel = FlutterMethodChannel(name: "app3.kportal/live_notification", binaryMessenger: controller.binaryMessenger)
 
-    channel.setMethodCallHandler({
+    // ─── 1. 既存：ローカル通知用 MethodChannel ───
+    let notificationChannel = FlutterMethodChannel(name: "app3.kportal/live_notification", binaryMessenger: controller.binaryMessenger)
+
+    notificationChannel.setMethodCallHandler({
       (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
 
       switch call.method {
@@ -68,6 +67,31 @@ import workmanager // 🟢 追記
 
       case "startLiveNotification":
           result(nil)
+
+      default:
+          result(FlutterMethodNotImplemented)
+      }
+    })
+
+    // ─── 2. 🟢 追記：App Group クッキー同期用 MethodChannel ───
+    let appGroupChannel = FlutterMethodChannel(name: "com.h.k.portal/app_group", binaryMessenger: controller.binaryMessenger)
+
+    appGroupChannel.setMethodCallHandler({
+      (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
+
+      // 🟢 お使いの App Group ID に合わせて変更（例: group.com.example.app3kportal など）
+      let suiteName = "group.com.h.k.portal"
+      let defaults = UserDefaults(suiteName: suiteName)
+
+      switch call.method {
+      case "getAppGroupCookie":
+          let cookie = defaults?.string(forKey: "session_cookie")
+          result(cookie)
+
+      case "clearAppGroupCookie":
+          defaults?.removeObject(forKey: "session_cookie")
+          defaults?.synchronize()
+          result(true)
 
       default:
           result(FlutterMethodNotImplemented)
