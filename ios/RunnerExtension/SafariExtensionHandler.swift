@@ -1,4 +1,5 @@
 import SafariServices
+import UIKit
 
 class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
@@ -10,10 +11,22 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
-        // 🟢 AppDelegate.swift と同じ App Group ID を指定
+        // App Group にクッキーを保存
         if let defaults = UserDefaults(suiteName: "group.com.h.k.portal") {
             defaults.set(cookie, forKey: "session_cookie")
             defaults.synchronize()
+        }
+
+        // 🟢 ディープリンクでアプリを自動起動
+        if let url = URL(string: "app3kportal://login-success") {
+            var responder: UIResponder? = self
+            while responder != nil {
+                if let application = responder as? UIApplication {
+                    application.open(url, options: [:], completionHandler: nil)
+                    break
+                }
+                responder = responder?.next
+            }
         }
 
         context.completeRequest(returningItems: nil, completionHandler: nil)

@@ -157,9 +157,10 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     }
   }
 
-  // 🍎 iOS用：Safariを外付けブラウザとして起動
   Future<void> _launchSafariLogin() async {
     final Uri url = Uri.parse(canvasBaseUrl);
+
+    // externalApplication で起動（デフォルトブラウザがSafariでない場合はChromeが開くため、案内に「Safariで開いてください」と明記するのが最も確実です）
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }

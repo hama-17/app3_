@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+	<key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLName</key>
+        <string>com.h.k.portal</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>app3kportal</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>カメラの初期化および動画撮影のためにマイクを使用します。</string>
 		<key>NSPhotoLibraryAddUsageDescription</key>

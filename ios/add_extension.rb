@@ -9,9 +9,11 @@ if existing_target
   exit 0
 end
 
+# 🟢 product_type を :app_extension として作成
 extension_target = project.new_target(:app_extension, 'RunnerExtension', :ios, '16.0')
+extension_target.product_type = 'com.apple.product-type.app-extension'
+
 extension_target.build_configurations.each do |config|
-  # 🟢 実際の拡張機能用 Bundle ID に合わせて変更
   config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.h.k.portal.extension'
   config.build_settings['INFOPLIST_FILE'] = 'RunnerExtension/Info.plist'
   config.build_settings['SWIFT_VERSION'] = '5.0'
