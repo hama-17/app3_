@@ -17,8 +17,8 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
 
-version: 1.0.2+5 #ios
-#version: 1.0.0+27 #android
+#version: 1.0.2+6 #ios
+version: 1.0.0+28 #android
 
 
 
@@ -156,7 +156,7 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/images/icon.udot.png"
+  image_path: "assets/images/app_icon_solid.png"
   min_sdk_android: 21
   remove_alpha_ios: true
   adaptive_icon_background: "#ffffff"
