@@ -1,5 +1,0 @@
-\workflows:
-  default-workflow:
-    name: Reset Workflow
-    scripts:
-      - echo "Resetting Codemagic cache"
