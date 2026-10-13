@@ -9,7 +9,7 @@ if existing_target
   exit 0
 end
 
-# 🟢 product_type を :app_extension として作成
+# 1. 拡張機能ターゲットの定義
 extension_target = project.new_target(:app_extension, 'RunnerExtension', :ios, '16.0')
 extension_target.product_type = 'com.apple.product-type.app-extension'
 
@@ -19,8 +19,11 @@ extension_target.build_configurations.each do |config|
   config.build_settings['SWIFT_VERSION'] = '5.0'
   config.build_settings['TARGETED_DEVICE_FAMILY'] = '1,2'
   config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
+  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+  config.build_settings['GENERATE_INFOPLIST_FILE'] = 'NO'
 end
 
+# 2. ソースファイルおよびリソースの紐付け
 group = project.main_group.find_subpath('RunnerExtension', true)
 group.set_source_tree('<group>')
 
@@ -33,6 +36,13 @@ resources_phase = extension_target.resources_build_phase
 resources_phase.add_file_reference(manifest_file)
 resources_phase.add_file_reference(content_file)
 
+# 3. SafariServices Framework のリンク設定
+frameworks_phase = extension_target.frameworks_build_phase
+sf_framework = project.frameworks_group.new_file('System/Library/Frameworks/SafariServices.framework')
+sf_framework.source_tree = 'SDKROOT'
+frameworks_phase.add_file_reference(sf_framework)
+
+# 4. メインアプリ (Runner) への Embed (PlugIns フォルダへの同梱) 設定
 main_target = project.targets.find { |t| t.name == 'Runner' }
 main_target.add_dependency(extension_target)
 

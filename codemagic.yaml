@@ -1,23 +1,27 @@
 workflows:
   ios-release:
-    name: iOS Release
+    name: iOS Release with Safari Extension
+    instance_type: mac_mini_m1
+    max_build_duration: 60
     environment:
+      flutter: stable
+      xcode: latest
       ios_signing:
         distribution_type: app_store
         bundle_identifiers:
           - com.h.k.portal
           - com.h.k.portal.extension
-      flutter: stable
-      xcode: latest
     scripts:
-      - name: Install xcodeproj
+      - name: Install xcodeproj gem
         script: gem install xcodeproj
-      - name: Inject Safari Extension
+      - name: Inject Safari Extension Target
         script: ruby ios/add_extension.rb
-      - name: Flutter build
+      - name: Get Flutter packages
         script: flutter pub get
       - name: Build IPA
         script: |
           xcode-project build-ipa \
             --workspace ios/Runner.xcworkspace \
             --scheme Runner
+    artifacts:
+      - build/ios/ipa/*.ipa
