@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "Uni Portal Cookie Sync",
   "version": "1.0",
-  "permissions": ["cookies", "activeTab"],
-  "host_permissions": ["https://*.ac.jp/*"],
-  "content_scripts": [
-    {
-      "matches": ["https://*.ac.jp/*"],
-      "js": ["content.js"]
-    }
-  ]
+  "permissions": [
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://*.ac.jp/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  }
 }

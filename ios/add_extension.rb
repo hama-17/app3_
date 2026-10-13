@@ -32,9 +32,12 @@ extension_target.add_file_references([swift_file])
 
 manifest_file = group.new_file('RunnerExtension/manifest.json')
 content_file = group.new_file('RunnerExtension/content.js')
+background_file = group.new_file('RunnerExtension/background.js') # 🟢 追加：HttpOnlyクッキー取得用
+
 resources_phase = extension_target.resources_build_phase
 resources_phase.add_file_reference(manifest_file)
 resources_phase.add_file_reference(content_file)
+resources_phase.add_file_reference(background_file) # 🟢 追加
 
 # 3. SafariServices Framework のリンク設定
 frameworks_phase = extension_target.frameworks_build_phase
