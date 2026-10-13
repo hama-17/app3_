@@ -12,16 +12,17 @@ workflows:
           - com.h.k.portal
           - com.h.k.portal.extension
     scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
       - name: Install xcodeproj gem
         script: gem install xcodeproj
       - name: Inject Safari Extension Target
         script: ruby ios/add_extension.rb
-      - name: Get Flutter packages
-        script: flutter pub get
+      - name: Re-generate Code Signing Profiles for both targets
+        script: |
+          xcode-project use-profiles
       - name: Build IPA
         script: |
-          xcode-project build-ipa \
-            --workspace ios/Runner.xcworkspace \
-            --scheme Runner
+          flutter build ipa --release
     artifacts:
       - build/ios/ipa/*.ipa
