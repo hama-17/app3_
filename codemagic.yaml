@@ -16,13 +16,19 @@ workflows:
         script: flutter pub get
       - name: Install xcodeproj gem
         script: gem install xcodeproj
-      - name: Inject Safari Extension Target
-        script: ruby ios/add_extension.rb
-      - name: Re-generate Code Signing Profiles for both targets
+      - name: Inject Safari Extension Target & Sync Git
+        script: |
+          ruby ios/add_extension.rb
+          git config user.name "Codemagic CI"
+          git config user.email "ci@codemagic.io"
+          git add ios/
+          git commit -m "ci: Update RunnerExtension target in project.pbxproj [skip ci]" || true
+          git push origin HEAD:$CM_BRANCH || true
+      - name: Set up code signing for updated project
         script: |
           xcode-project use-profiles
       - name: Build IPA
         script: |
-          flutter build ipa --release
+          flutter build ipa --release --export-options-plist /Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
