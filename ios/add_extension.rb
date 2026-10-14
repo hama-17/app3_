@@ -1,5 +1,6 @@
 require 'xcodeproj'
 require 'fileutils'
+require 'rexml/document'
 
 begin
   puts "=== Starting Safari Extension Injection ==="
@@ -159,7 +160,7 @@ begin
     frameworks_phase.add_file_reference(sf_framework)
   end
 
-  # 🟢 5. 指摘を取り入れた Target Dependency と Embed App Extensions の確実な接続
+  # 5. Target Dependency と Embed App Extensions の安全な接続
   main_target = project.targets.find { |t| t.name == 'Runner' }
   abort 'ERROR: Runner target not found' unless main_target
 
@@ -175,8 +176,8 @@ begin
     embed_phase = main_target.new_copy_files_build_phase('Embed App Extensions')
   end
 
-  # iOS app extensions must be embedded in PlugIns (dst_subfolder_spec = '13')
-  embed_phase.dst_subfolder_spec = '13'
+  # Xcodeprojにおける PlugIns (13) の指定
+  embed_phase.symbol_dst_subfolder_spec = :plug_ins
   embed_phase.dst_path = ''
 
   product_ref = extension_target.product_reference
@@ -191,7 +192,6 @@ begin
     build_file = embed_phase.add_file_reference(product_ref, true)
   end
 
-  # 重複した参照があれば削除
   matching_files.drop(1).each do |duplicate|
     embed_phase.remove_build_file(duplicate)
   end
@@ -201,7 +201,42 @@ begin
   }
 
   project.save
-  puts "Successfully configured RunnerExtension and Embed Phase in Runner.xcodeproj"
+  puts "Successfully configured RunnerExtension target and embed phase."
+
+  # 🟢 6. 【核心】Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
+  scheme_paths = Dir.glob('ios/**/*.xcscheme')
+  runner_scheme = scheme_paths.find { |p| p.include?('Runner.xcscheme') }
+
+  if runner_scheme && File.exist?(runner_scheme)
+    scheme_content = File.read(runner_scheme)
+    unless scheme_content.include?('BlueprintName = "RunnerExtension"')
+      target_uuid = extension_target.uuid
+      entry_xml = <<~XML
+            <BuildActionEntry
+               buildForTesting = "YES"
+               buildForRunning = "YES"
+               buildForProfiling = "YES"
+               buildForArchiving = "YES"
+               buildForAnalyzing = "YES">
+               <BuildableReference
+                  BuildableIdentifier = "primary"
+                  BlueprintIdentifier = "#{target_uuid}"
+                  BuildableName = "RunnerExtension.appex"
+                  BlueprintName = "RunnerExtension"
+                  ReferencedContainer = "container:Runner.xcodeproj">
+               </BuildableReference>
+            </BuildActionEntry>
+      XML
+
+      updated_content = scheme_content.sub('</BuildActionEntries>', "#{entry_xml}\n      </BuildActionEntries>")
+      File.write(runner_scheme, updated_content)
+      puts "Successfully injected RunnerExtension into #{runner_scheme}"
+    end
+  else
+    puts "⚠️ Warning: Runner.xcscheme not found."
+  end
+
+  puts "=== Safari Extension Injection Completed Successfully ==="
 
 rescue => e
   puts "❌ ERROR during script execution: #{e.message}"

@@ -20,6 +20,21 @@
                ReferencedContainer = "container:Runner.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+      <BuildActionEntry
+   buildForTesting = "YES"
+   buildForRunning = "YES"
+   buildForProfiling = "YES"
+   buildForArchiving = "YES"
+   buildForAnalyzing = "YES">
+   <BuildableReference
+      BuildableIdentifier = "primary"
+      BlueprintIdentifier = "92E572A031F43D5C2DD081FF"
+      BuildableName = "RunnerExtension.appex"
+      BlueprintName = "RunnerExtension"
+      ReferencedContainer = "container:Runner.xcodeproj">
+   </BuildableReference>
+</BuildActionEntry>
+
       </BuildActionEntries>
    </BuildAction>
    <TestAction
