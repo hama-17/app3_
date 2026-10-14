@@ -3,14 +3,15 @@
   "name": "K.dot Extension",
   "version": "1.0",
   "description": "Cookie sync extension for K.dot portal",
-  "permissions": [
-    "cookies",
-    "https://*/*"
-  ],
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "permissions": ["cookies", "https://*/*"],
   "background": {
-    "scripts": [
-      "background.js"
-    ],
+    "scripts": ["background.js"],
     "persistent": false
   }
 }

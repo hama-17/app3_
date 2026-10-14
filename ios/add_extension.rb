@@ -1,6 +1,7 @@
 require 'xcodeproj'
 require 'fileutils'
 require 'rexml/document'
+require 'base64'
 
 begin
   puts "=== Starting Safari Extension Injection ==="
@@ -11,6 +12,13 @@ begin
   # 1. ディレクトリと構成ファイルの作成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
+
+  # 🟢 1x1 透明PNG画像をBase64から自動生成 (アイコン未配置時のダミー)
+  png_bytes = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+  ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'].each do |icon_name|
+    icon_path = File.join(ext_dir, icon_name)
+    File.write(icon_path, png_bytes) unless File.exist?(icon_path)
+  end
 
   info_plist_path = File.join(ext_dir, 'Info.plist')
   unless File.exist?(info_plist_path)
@@ -81,21 +89,27 @@ begin
     SWIFT
   end
 
+  # 🟢 必須キー "icons" を付与した manifest.json の強制更新
   manifest_path = File.join(ext_dir, 'manifest.json')
-    File.write(manifest_path, <<~JSON)
-      {
-        "manifest_version": 2,
-        "name": "K.dot Extension",
-        "version": "1.0",
-        "description": "Cookie sync extension for K.dot portal",
-        "permissions": ["cookies", "https://*/*"],
-        "background": {
-          "scripts": ["background.js"],
-          "persistent": false
-        }
+  File.write(manifest_path, <<~JSON)
+    {
+      "manifest_version": 2,
+      "name": "K.dot Extension",
+      "version": "1.0",
+      "description": "Cookie sync extension for K.dot portal",
+      "icons": {
+        "16": "icon-16.png",
+        "32": "icon-32.png",
+        "48": "icon-48.png",
+        "128": "icon-128.png"
+      },
+      "permissions": ["cookies", "https://*/*"],
+      "background": {
+        "scripts": ["background.js"],
+        "persistent": false
       }
-    JSON
-  end
+    }
+  JSON
 
   bg_path = File.join(ext_dir, 'background.js')
   unless File.exist?(bg_path)
@@ -151,6 +165,11 @@ begin
   content_file = group.files.find { |f| f.path == 'content.js' } || group.new_file('content.js')
   background_file = group.files.find { |f| f.path == 'background.js' } || group.new_file('background.js')
 
+  # 🟢 アイコンファイルをグループに追加
+  icon_files = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'].map do |name|
+    group.files.find { |f| f.path == name } || group.new_file(name)
+  end
+
   extension_target.add_file_references([swift_file])
 
   resources_phase = extension_target.resources_build_phase
@@ -158,6 +177,7 @@ begin
   resources_phase.add_file_reference(manifest_file)
   resources_phase.add_file_reference(content_file)
   resources_phase.add_file_reference(background_file)
+  icon_files.each { |icon_f| resources_phase.add_file_reference(icon_f) }
 
   # 4. Frameworks 設定
   frameworks_phase = extension_target.frameworks_build_phase
@@ -168,7 +188,7 @@ begin
     frameworks_phase.add_file_reference(sf_framework)
   end
 
-  # 5. Target Dependency と Embed App Extensions の安全な接続
+  # 5. Target Dependency と Embed App Extensions の接続
   main_target = project.targets.find { |t| t.name == 'Runner' }
   abort 'ERROR: Runner target not found' unless main_target
 
@@ -207,8 +227,6 @@ begin
     'ATTRIBUTES' => ['RemoveHeadersOnCopy', 'CodeSignOnCopy']
   }
 
-  # 🟢【循環依存 (CYCLE) の解消】
-  # Embed App Extensions を Resources フェーズの直後に移動（Thin Binary スクリプトより前に実行させる）
   resources_phase_index = main_target.build_phases.index { |p| p.is_a?(Xcodeproj::Project::Object::PBXResourcesBuildPhase) }
   if resources_phase_index
     main_target.build_phases.delete(embed_phase)
@@ -216,7 +234,7 @@ begin
   end
 
   project.save
-  puts "Successfully configured RunnerExtension target and reordered embed phase."
+  puts "Successfully configured RunnerExtension target with icons and embed phase."
 
   # 6. Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
   scheme_paths = Dir.glob('ios/**/*.xcscheme')
