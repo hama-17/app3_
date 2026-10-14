@@ -71,7 +71,12 @@ begin
       import SafariServices
 
       class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
-          func beginRequest(with context: NSExtensionContext) {}
+          func beginRequest(with context: NSExtensionContext) {
+              guard let item = context.inputItems.first as? NSExtensionItem else { return }
+              let response = NSExtensionItem()
+              response.userInfo = [ SFExtensionMessageKey: [ "Response": "Cookie synced successfully" ] ]
+              context.completeRequest(returningItems: [response], completionHandler: nil)
+          }
       }
     SWIFT
   end
@@ -135,7 +140,7 @@ begin
     config.build_settings['SKIP_INSTALL'] = 'YES'
   end
 
-  # 3. リソースとソースファイルの紐付け（パス解決の最適化）
+  # 3. リソースとソースファイルの紐付け
   group = project.main_group.find_subpath('RunnerExtension', true) || project.main_group.new_group('RunnerExtension', 'RunnerExtension')
   group.path = 'RunnerExtension'
   group.source_tree = '<group>'
@@ -201,8 +206,16 @@ begin
     'ATTRIBUTES' => ['RemoveHeadersOnCopy', 'CodeSignOnCopy']
   }
 
+  # 🟢【循環依存 (CYCLE) の解消】
+  # Embed App Extensions を Resources フェーズの直後に移動（Thin Binary スクリプトより前に実行させる）
+  resources_phase_index = main_target.build_phases.index { |p| p.is_a?(Xcodeproj::Project::Object::PBXResourcesBuildPhase) }
+  if resources_phase_index
+    main_target.build_phases.delete(embed_phase)
+    main_target.build_phases.insert(resources_phase_index + 1, embed_phase)
+  end
+
   project.save
-  puts "Successfully configured RunnerExtension target and embed phase."
+  puts "Successfully configured RunnerExtension target and reordered embed phase."
 
   # 6. Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
   scheme_paths = Dir.glob('ios/**/*.xcscheme')
