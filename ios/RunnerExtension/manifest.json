@@ -1,14 +1,16 @@
 {
-  "manifest_version": 3,
-  "name": "Uni Portal Cookie Sync",
+  "manifest_version": 2,
+  "name": "K.dot Extension",
   "version": "1.0",
+  "description": "Cookie sync extension for K.dot portal",
   "permissions": [
-    "cookies"
-  ],
-  "host_permissions": [
-    "https://*.ac.jp/*"
+    "cookies",
+    "https://*/*"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": false
   }
 }

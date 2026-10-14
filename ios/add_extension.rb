@@ -82,16 +82,17 @@ begin
   end
 
   manifest_path = File.join(ext_dir, 'manifest.json')
-  unless File.exist?(manifest_path)
     File.write(manifest_path, <<~JSON)
       {
-        "manifest_version": 3,
+        "manifest_version": 2,
         "name": "K.dot Extension",
         "version": "1.0",
-        "description": "Cookie Sync Extension for K.dot",
-        "permissions": ["cookies"],
-        "host_permissions": ["https://*/*"],
-        "background": { "scripts": ["background.js"] }
+        "description": "Cookie sync extension for K.dot portal",
+        "permissions": ["cookies", "https://*/*"],
+        "background": {
+          "scripts": ["background.js"],
+          "persistent": false
+        }
       }
     JSON
   end
