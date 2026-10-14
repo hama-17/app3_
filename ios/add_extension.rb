@@ -73,7 +73,7 @@ begin
     XML
   end
 
-  # 🟢 最新の session_cookie 書き込みロジックを反映
+  # 🟢 session_cookie 書き込み Swift ハンドラ
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -101,7 +101,7 @@ begin
     }
   SWIFT
 
-  # 🟢 lms.keio.jp 対応 manifest.json
+  # 🟢 content_scripts を追加した manifest.json
   manifest_path = File.join(ext_dir, 'manifest.json')
   File.write(manifest_path, <<~JSON)
     {
@@ -121,6 +121,13 @@ begin
         "https://lms.keio.jp/*",
         "https://*/*"
       ],
+      "content_scripts": [
+        {
+          "matches": ["https://lms.keio.jp/*"],
+          "js": ["content.js"],
+          "run_at": "document_end"
+        }
+      ],
       "background": {
         "scripts": ["background.js"],
         "persistent": false
@@ -128,28 +135,42 @@ begin
     }
   JSON
 
-  # 🟢 lms.keio.jp 判定 & メッセージリダイレクト連携
+  # 🟢 ログイン完了時のみ同期する精緻な background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (changeInfo.status === 'complete' && tab.url && tab.url.includes('lms.keio.jp')) {
+        // ログイン途中の画面（auth / login / saml）ではスキップ
+        if (tab.url.includes('/login') || tab.url.includes('/saml') || tab.url.includes('auth')) {
+          return;
+        }
+
         browser.cookies.getAll({ url: "https://lms.keio.jp" }, (cookies) => {
           if (cookies && cookies.length > 0) {
-            const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-            browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
-              browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
-                console.log("Redirect message failed: ", err);
+            // セッションCookie（ログイン完了を示すCookie）が存在するか判定
+            const hasSessionCookie = cookies.some(c =>
+              c.name.includes('session') || c.name.includes('canvas') || c.name.includes('_legacy')
+            );
+
+            if (hasSessionCookie) {
+              const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+              browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
+                browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
+                  console.log("Redirect message failed: ", err);
+                });
               });
-            });
+            }
           }
         });
       }
     });
   JS
 
-  # 🟢 フォアグラウンドでのディープリンク発火用 content.js
+  # 🟢 フォアグラウンドでアプリへ遷移させる content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
+    console.log("K.dot extension content script loaded on:", window.location.href);
+
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message && message.action === "REDIRECT_TO_APP") {
         window.location.href = "app3kportal://login-success";
@@ -213,7 +234,6 @@ begin
   main_target = project.targets.find { |t| t.name == 'Runner' }
   abort 'ERROR: Runner target not found' unless main_target
 
-  # 🟢 メインターゲット（Runner）側にも App Group entitlements を設定
   main_target.build_configurations.each do |config|
     config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
   end
