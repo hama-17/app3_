@@ -135,7 +135,7 @@ begin
     }
   JSON
 
-  # 🟢 ログイン完了時のみ同期する精緻な background.js
+  # 🟢 ログイン完了時のみ同期＆リダイレクト指示を送信する background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -147,29 +147,34 @@ begin
 
         browser.cookies.getAll({ url: "https://lms.keio.jp" }, (cookies) => {
           if (cookies && cookies.length > 0) {
-            // セッションCookie（ログイン完了を示すCookie）が存在するか判定
-            const hasSessionCookie = cookies.some(c =>
-              c.name.includes('session') || c.name.includes('canvas') || c.name.includes('_legacy')
-            );
+            const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
-            if (hasSessionCookie) {
-              const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-              browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
-                browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
-                  console.log("Redirect message failed: ", err);
-                });
+            browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
+              console.log("Native response:", response);
+            });
+
+            setTimeout(() => {
+              browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
+                console.log("Redirect message failed, fallback to tab update: ", err);
+                browser.tabs.update(tabId, { url: "app3kportal://login-success" });
               });
-            }
+            }, 300);
           }
         });
       }
     });
   JS
 
-  # 🟢 フォアグラウンドでアプリへ遷移させる content.js
+  # 🟢 バナーUI ＋ ディープリンク発火用 content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
-    console.log("K.dot extension content script loaded on:", window.location.href);
+    if (!document.getElementById('kdot-extension-banner')) {
+      const banner = document.createElement('div');
+      banner.id = 'kdot-extension-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:13px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
+      banner.innerHTML = 'K.dot 拡張機能動作中 ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
+      document.body.appendChild(banner);
+    }
 
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message && message.action === "REDIRECT_TO_APP") {

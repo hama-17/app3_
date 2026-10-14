@@ -1,7 +1,6 @@
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url && tab.url.includes('lms.keio.jp')) {
-
-    // ログイン認証中の画面（auth/login/saml）はスキップ
+    // ログイン途中の画面（auth / login / saml）ではスキップ
     if (tab.url.includes('/login') || tab.url.includes('/saml') || tab.url.includes('auth')) {
       return;
     }
@@ -10,13 +9,16 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (cookies && cookies.length > 0) {
         const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
-        // 🟢 第一引数にダミー文字列を渡さず、直接メッセージオブジェクトを送信
-        browser.runtime.sendNativeMessage({ "cookie": cookieHeader }, (response) => {
-          // Swift（App Group）への保存完了後、content.js へアプリ復帰を命令
-          browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
-            console.log("SendMessage error: ", err);
-          });
+        browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
+          console.log("Native response:", response);
         });
+
+        setTimeout(() => {
+          browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
+            console.log("Redirect message failed, fallback to tab update: ", err);
+            browser.tabs.update(tabId, { url: "app3kportal://login-success" });
+          });
+        }, 300);
       }
     });
   }

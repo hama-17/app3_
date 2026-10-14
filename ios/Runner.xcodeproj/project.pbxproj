@@ -12,19 +12,19 @@
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
 		1690677445A527008DEC3B77 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36AB5EE027AE82A40EF2A1C2 /* Foundation.framework */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
-		384E6BC3B93432B0F45A375D /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 88236E0EF1BF784E46C07F04 /* content.js */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
-		3C6253D603A754681E08B90C /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 47AAF2ABBDCF3835D930E05E /* icon-128.png */; };
-		59C7C9720F68DEAF394E202A /* icon-48.png in Resources */ = {isa = PBXBuildFile; fileRef = 6EDEBC16AC9C01ADF446501C /* icon-48.png */; };
+		6BE491133853707521BC8E34 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = B918054B32BF89FDDEA6F1D3 /* manifest.json */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
-		7E3D8F34DDA89CDEDB83A525 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = B918054B32BF89FDDEA6F1D3 /* manifest.json */; };
-		8ADFB69DA6C38AFD215FED56 /* icon-16.png in Resources */ = {isa = PBXBuildFile; fileRef = 94276133D98D123D7BDF4BC3 /* icon-16.png */; };
+		8858D88DD17E504F4829BADC /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 88236E0EF1BF784E46C07F04 /* content.js */; };
+		89A0F994695D1E3938038206 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 9865A88E9B77A29DF46E4EC5 /* background.js */; };
+		8DA53DBC0AC84BBE1F69F60C /* icon-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 279651A84E216DF840A60C77 /* icon-32.png */; };
+		9087A73A84700F5513F9B9ED /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 47AAF2ABBDCF3835D930E05E /* icon-128.png */; };
+		96D1D71084EB6D63F68193FA /* icon-48.png in Resources */ = {isa = PBXBuildFile; fileRef = 6EDEBC16AC9C01ADF446501C /* icon-48.png */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		B6E378145186DFA23CC60B97 /* SafariServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C3A391D4AE049FDE9FEFE33 /* SafariServices.framework */; };
-		E15D4A97E74844A1FCF5C439 /* icon-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 279651A84E216DF840A60C77 /* icon-32.png */; };
-		FC8612F9D8CB5AF0B5932D86 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 9865A88E9B77A29DF46E4EC5 /* background.js */; };
+		EB8A0CB5D9E0B00B4CF271F2 /* icon-16.png in Resources */ = {isa = PBXBuildFile; fileRef = 94276133D98D123D7BDF4BC3 /* icon-16.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -317,13 +317,13 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7E3D8F34DDA89CDEDB83A525 /* manifest.json in Resources */,
-				384E6BC3B93432B0F45A375D /* content.js in Resources */,
-				FC8612F9D8CB5AF0B5932D86 /* background.js in Resources */,
-				8ADFB69DA6C38AFD215FED56 /* icon-16.png in Resources */,
-				E15D4A97E74844A1FCF5C439 /* icon-32.png in Resources */,
-				59C7C9720F68DEAF394E202A /* icon-48.png in Resources */,
-				3C6253D603A754681E08B90C /* icon-128.png in Resources */,
+				6BE491133853707521BC8E34 /* manifest.json in Resources */,
+				8858D88DD17E504F4829BADC /* content.js in Resources */,
+				89A0F994695D1E3938038206 /* background.js in Resources */,
+				EB8A0CB5D9E0B00B4CF271F2 /* icon-16.png in Resources */,
+				8DA53DBC0AC84BBE1F69F60C /* icon-32.png in Resources */,
+				96D1D71084EB6D63F68193FA /* icon-48.png in Resources */,
+				9087A73A84700F5513F9B9ED /* icon-128.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
