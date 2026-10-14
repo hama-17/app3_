@@ -123,15 +123,16 @@ begin
   end
 
   extension_target.build_configurations.each do |config|
-    config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.h.k.portal.extension'
-    config.build_settings['INFOPLIST_FILE'] = 'RunnerExtension/Info.plist'
-    config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'RunnerExtension/RunnerExtension.entitlements'
-    config.build_settings['SWIFT_VERSION'] = '5.0'
-    config.build_settings['TARGETED_DEVICE_FAMILY'] = '1,2'
-    config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
-    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
-    config.build_settings['GENERATE_INFOPLIST_FILE'] = 'NO'
-    config.build_settings['SKIP_INSTALL'] = 'YES'
+      config.build_settings['PRODUCT_NAME'] = 'RunnerExtension' # 🟢 この行を追加！
+      config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.h.k.portal.extension'
+      config.build_settings['INFOPLIST_FILE'] = 'RunnerExtension/Info.plist'
+      config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'RunnerExtension/RunnerExtension.entitlements'
+      config.build_settings['SWIFT_VERSION'] = '5.0'
+      config.build_settings['TARGETED_DEVICE_FAMILY'] = '1,2'
+      config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      config.build_settings['GENERATE_INFOPLIST_FILE'] = 'NO'
+      config.build_settings['SKIP_INSTALL'] = 'YES'
   end
 
   # 3. リソースとソースファイルの紐付け
