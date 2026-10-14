@@ -8,7 +8,7 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
-  # 1. ディレクトリと構成ファイルの作成
+  #1. ディレクトリと構成ファイルの作成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
