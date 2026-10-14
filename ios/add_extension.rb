@@ -8,7 +8,7 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
-  #1. ディレクトリと構成ファイルの作成
+  # 1. ディレクトリと構成ファイルの作成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
@@ -19,31 +19,31 @@ begin
       <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
       <plist version="1.0">
       <dict>
-      	<key>CFBundleDevelopmentRegion</key>
-      	<string>$(DEVELOPMENT_LANGUAGE)</string>
-      	<key>CFBundleDisplayName</key>
-      	<string>RunnerExtension</string>
-      	<key>CFBundleExecutable</key>
-      	<string>$(EXECUTABLE_NAME)</string>
-      	<key>CFBundleIdentifier</key>
-      	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-      	<key>CFBundleInfoDictionaryVersion</key>
-      	<string>6.0</string>
-      	<key>CFBundleName</key>
-      	<string>$(PRODUCT_NAME)</string>
-      	<key>CFBundlePackageType</key>
-      	<string>XPC!</string>
-      	<key>CFBundleShortVersionString</key>
-      	<string>1.0</string>
-      	<key>CFBundleVersion</key>
-      	<string>1</string>
-      	<key>NSExtension</key>
-      	<dict>
-      		<key>NSExtensionPointIdentifier</key>
-      		<string>com.apple.Safari.web-extension</string>
-      		<key>NSExtensionPrincipalClass</key>
-      		<string>$(PRODUCT_MODULE_NAME).SafariExtensionHandler</string>
-      	</dict>
+        <key>CFBundleDevelopmentRegion</key>
+        <string>$(DEVELOPMENT_LANGUAGE)</string>
+        <key>CFBundleDisplayName</key>
+        <string>RunnerExtension</string>
+        <key>CFBundleExecutable</key>
+        <string>$(EXECUTABLE_NAME)</string>
+        <key>CFBundleIdentifier</key>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+        <key>CFBundleInfoDictionaryVersion</key>
+        <string>6.0</string>
+        <key>CFBundleName</key>
+        <string>$(PRODUCT_NAME)</string>
+        <key>CFBundlePackageType</key>
+        <string>XPC!</string>
+        <key>CFBundleShortVersionString</key>
+        <string>1.0</string>
+        <key>CFBundleVersion</key>
+        <string>1</string>
+        <key>NSExtension</key>
+        <dict>
+           <key>NSExtensionPointIdentifier</key>
+           <string>com.apple.Safari.web-extension</string>
+           <key>NSExtensionPrincipalClass</key>
+           <string>$(PRODUCT_MODULE_NAME).SafariExtensionHandler</string>
+        </dict>
       </dict>
       </plist>
     XML
@@ -56,10 +56,10 @@ begin
       <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
       <plist version="1.0">
       <dict>
-      	<key>com.apple.security.application-groups</key>
-      	<array>
-      		<string>group.com.h.k.portal</string>
-      	</array>
+        <key>com.apple.security.application-groups</key>
+        <array>
+           <string>group.com.h.k.portal</string>
+        </array>
       </dict>
       </plist>
     XML
@@ -123,21 +123,22 @@ begin
   end
 
   extension_target.build_configurations.each do |config|
-      config.build_settings['PRODUCT_NAME'] = 'RunnerExtension' # 🟢 この行を追加！
-      config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.h.k.portal.extension'
-      config.build_settings['INFOPLIST_FILE'] = 'RunnerExtension/Info.plist'
-      config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'RunnerExtension/RunnerExtension.entitlements'
-      config.build_settings['SWIFT_VERSION'] = '5.0'
-      config.build_settings['TARGETED_DEVICE_FAMILY'] = '1,2'
-      config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
-      config.build_settings['GENERATE_INFOPLIST_FILE'] = 'NO'
-      config.build_settings['SKIP_INSTALL'] = 'YES'
+    config.build_settings['PRODUCT_NAME'] = 'RunnerExtension'
+    config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.h.k.portal.extension'
+    config.build_settings['INFOPLIST_FILE'] = 'RunnerExtension/Info.plist'
+    config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'RunnerExtension/RunnerExtension.entitlements'
+    config.build_settings['SWIFT_VERSION'] = '5.0'
+    config.build_settings['TARGETED_DEVICE_FAMILY'] = '1,2'
+    config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
+    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+    config.build_settings['GENERATE_INFOPLIST_FILE'] = 'NO'
+    config.build_settings['SKIP_INSTALL'] = 'YES'
   end
 
-  # 3. リソースとソースファイルの紐付け
+  # 3. リソースとソースファイルの紐付け（パス解決の最適化）
   group = project.main_group.find_subpath('RunnerExtension', true) || project.main_group.new_group('RunnerExtension', 'RunnerExtension')
-  group.set_source_tree('<group>')
+  group.path = 'RunnerExtension'
+  group.source_tree = '<group>'
 
   swift_file = group.files.find { |f| f.path == 'SafariExtensionHandler.swift' } || group.new_file('SafariExtensionHandler.swift')
   manifest_file = group.files.find { |f| f.path == 'manifest.json' } || group.new_file('manifest.json')
@@ -177,7 +178,6 @@ begin
     embed_phase = main_target.new_copy_files_build_phase('Embed App Extensions')
   end
 
-  # Xcodeprojにおける PlugIns (13) の指定
   embed_phase.symbol_dst_subfolder_spec = :plug_ins
   embed_phase.dst_path = ''
 
@@ -204,7 +204,7 @@ begin
   project.save
   puts "Successfully configured RunnerExtension target and embed phase."
 
-  # 🟢 6. 【核心】Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
+  # 6. Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
   scheme_paths = Dir.glob('ios/**/*.xcscheme')
   runner_scheme = scheme_paths.find { |p| p.include?('Runner.xcscheme') }
 
@@ -233,8 +233,6 @@ begin
       File.write(runner_scheme, updated_content)
       puts "Successfully injected RunnerExtension into #{runner_scheme}"
     end
-  else
-    puts "⚠️ Warning: Runner.xcscheme not found."
   end
 
   puts "=== Safari Extension Injection Completed Successfully ==="
