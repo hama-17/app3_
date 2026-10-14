@@ -160,9 +160,14 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
   Future<void> _launchSafariLogin() async {
     final Uri url = Uri.parse(canvasBaseUrl);
 
-    // externalApplication で起動（デフォルトブラウザがSafariでない場合はChromeが開くため、案内に「Safariで開いてください」と明記するのが最も確実です）
-    if (await canLaunchUrl(url)) {
+    try {
+      // Safari を外部アプリとして起動
       await launchUrl(url, mode: LaunchMode.externalApplication);
+
+      // アプリに戻ってきたタイミングで即時クッキーチェックを実行
+      _checkAndValidateIosAppGroupCookies();
+    } catch (e) {
+      debugPrint("Safari launch error: $e");
     }
   }
 
