@@ -1,7 +1,6 @@
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url && tab.url.includes('lms.keio.jp')) {
-    // ログイン途中の画面（auth / login / saml）ではスキップ
-    if (tab.url.includes('/login') || tab.url.includes('/saml') || tab.url.includes('auth')) {
+    if (tab.url.includes('/login/saml') || tab.url.includes('/saml/consume')) {
       return;
     }
 
@@ -15,8 +14,7 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
         setTimeout(() => {
           browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
-            console.log("Redirect message failed, fallback to tab update: ", err);
-            browser.tabs.update(tabId, { url: "app3kportal://login-success" });
+            console.log("Redirect message failed: ", err);
           });
         }, 300);
       }

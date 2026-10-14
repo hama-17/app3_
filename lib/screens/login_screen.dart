@@ -15,35 +15,46 @@ class OktaLoginScreen extends StatefulWidget {
   @override State<OktaLoginScreen> createState() => _OktaLoginScreenState();
 }
 
-class _OktaLoginScreenState extends State<OktaLoginScreen> {
+class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingObserver {
   bool _isSuccessTriggered = false;
   Timer? _pollingTimer;
   InAppWebViewController? _webViewController;
   bool _isInitialized = false;
+  String _statusText = "Safariでログインしてください"; // 🟢 画面表示用ステータス
 
-  // 🟢 iOS App Group 読み取り用 MethodChannel
   static const _appGroupChannel = MethodChannel('com.h.k.portal/app_group');
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     if (Platform.isAndroid) {
       _prepareLoginScreenAndroid();
     } else if (Platform.isIOS) {
       setState(() {
         _isInitialized = true;
       });
-      _startCookiePolling(); // iOS: App Group 監視スタート
+      _startCookiePolling();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollingTimer?.cancel();
     super.dispose();
   }
 
-  // 🤖 Android用：既存のキャッシュ・クッキー一掃処理
+  // 🟢 アプリ復帰時に即時クッキーチェック
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && Platform.isIOS) {
+      debugPrint("📱 アプリ復帰を検知: App Group クッキーを即時チェック");
+      _checkAndValidateIosAppGroupCookies();
+    }
+  }
+
   Future<void> _prepareLoginScreenAndroid() async {
     await _clearWebViewCache();
     if (mounted) {
@@ -58,19 +69,15 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     try {
       final cookieManager = CookieManager.instance();
       await cookieManager.deleteAllCookies();
-
       final storageManager = WebStorageManager.instance();
       if (Platform.isAndroid) {
         await storageManager.android.deleteAllData();
       }
-
-      debugPrint("🛡️ [SSO Shield] クッキーおよびWebStorageを完全に初期化しました。");
     } catch (e) {
-      debugPrint("Targeted cookie clear error: $e");
+      debugPrint("Cookie clear error: $e");
     }
   }
 
-  // 裏で常にCookieを監視し続けるメソッド
   void _startCookiePolling() {
     _pollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (_isSuccessTriggered || !mounted) {
@@ -86,7 +93,6 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     });
   }
 
-  // 🤖 Android：従来の WebView からクッキーを回収
   Future<void> _checkAndValidateAndroidCookies() async {
     if (_webViewController == null || _isSuccessTriggered) return;
 
@@ -112,39 +118,46 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     }
   }
 
-  // 🍎 iOS：Safari Web Extension が書き込んだ App Group (UserDefaults) から回収
+  // 🍎 iOS：App Group (UserDefaults) 監視＆診断メッセージ更新
   Future<void> _checkAndValidateIosAppGroupCookies() async {
     if (_isSuccessTriggered) return;
 
     try {
       final String? appGroupCookie = await _appGroupChannel.invokeMethod<String>('getAppGroupCookie');
+
       if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _statusText = "App Group からクッキーを取得！検証中...";
+          });
+        }
         await _validateAndSave(appGroupCookie);
+      } else {
+        if (mounted && _statusText != "Safariでログインしてください") {
+          setState(() {
+            _statusText = "クッキー同期待機中...";
+          });
+        }
       }
     } catch (e) {
       debugPrint("iOS AppGroup Cookie check error: $e");
+      if (mounted) {
+        setState(() {
+          _statusText = "App Group 読み込みエラー: $e";
+        });
+      }
     }
   }
 
-  // 🟢 共通：クッキーの有効性を確認してログイン完了へ導く
   Future<void> _validateAndSave(String cookieString) async {
     final isValid = await AuthService.validateSession(cookieString);
 
     if (isValid && !_isSuccessTriggered && mounted) {
       _isSuccessTriggered = true;
-
       _pollingTimer?.cancel();
       _pollingTimer = null;
 
-      if (Platform.isAndroid && _webViewController != null) {
-        try {
-          await _webViewController!.stopLoading();
-          await _webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri("about:blank")));
-        } catch (_) {}
-      }
-
       if (Platform.isIOS) {
-        // 使用済み App Group クッキーの消去
         await _appGroupChannel.invokeMethod('clearAppGroupCookie');
       }
 
@@ -154,11 +167,14 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
         Navigator.pop(context);
         widget.onLoginSuccess();
       }
+    } else if (!isValid && mounted) {
+      setState(() {
+        _statusText = "クッキーを取得しましたが未ログイン状態です（ログイン完了後に戻ってください）";
+      });
     }
   }
 
   Future<void> _launchSafariLogin() async {
-    // 🟢 デフォルトブラウザが Chrome 等でも、強制的に Safari アプリを起動するスキーム
     final Uri safariUri = Uri.parse('x-safari-https://lms.keio.jp');
     final Uri fallbackUri = Uri.parse('https://lms.keio.jp');
 
@@ -168,8 +184,6 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
       } else {
         await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
       }
-
-      // アプリに戻ってきた際にも即座にクッキーをチェック
       _checkAndValidateIosAppGroupCookies();
     } catch (e) {
       debugPrint("Safari launch error: $e");
@@ -199,7 +213,6 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     );
   }
 
-  // 🤖 Android用 WebView
   Widget _buildAndroidWebView() {
     const fakeUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
@@ -223,7 +236,6 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
     );
   }
 
-  // 🍎 iOS用 パキーログインガイド UI
   Widget _buildIosPasskeyGuidance() {
     return Padding(
       padding: const EdgeInsets.all(24.0),
@@ -240,11 +252,25 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            "Safariでパスキー（Face ID / Touch ID）を使ってログインしてください。認証が完了すると、自動的にアプリへ同期されます。",
+            "Safariでパスキー（Face ID / Touch ID）を使ってログインしてください。認証完了後、アプリに復帰すると同期されます。",
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, color: AppTheme.textSub(context)),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 20),
+          // 🟢 リアルタイム診断ステータス表示エリア
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black.withAlpha(20),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _statusText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.accent),
+            ),
+          ),
+          const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: _launchSafariLogin,
             icon: const Icon(Icons.open_in_browser),

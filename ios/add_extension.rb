@@ -9,11 +9,9 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
-  # 1. ディレクトリと構成ファイルの作成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
-  # 🟢 1x1 透明PNG画像をBase64から自動生成 (アイコン未配置時のダミー)
   png_bytes = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
   ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'].each do |icon_name|
     icon_path = File.join(ext_dir, icon_name)
@@ -73,7 +71,6 @@ begin
     XML
   end
 
-  # 🟢 session_cookie 書き込み Swift ハンドラ
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -101,7 +98,6 @@ begin
     }
   SWIFT
 
-  # 🟢 content_scripts を追加した manifest.json
   manifest_path = File.join(ext_dir, 'manifest.json')
   File.write(manifest_path, <<~JSON)
     {
@@ -135,13 +131,11 @@ begin
     }
   JSON
 
-  # 🟢 ログイン完了時のみ同期＆リダイレクト指示を送信する background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (changeInfo.status === 'complete' && tab.url && tab.url.includes('lms.keio.jp')) {
-        // ログイン途中の画面（auth / login / saml）ではスキップ
-        if (tab.url.includes('/login') || tab.url.includes('/saml') || tab.url.includes('auth')) {
+        if (tab.url.includes('/login/saml') || tab.url.includes('/saml/consume')) {
           return;
         }
 
@@ -155,8 +149,7 @@ begin
 
             setTimeout(() => {
               browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
-                console.log("Redirect message failed, fallback to tab update: ", err);
-                browser.tabs.update(tabId, { url: "app3kportal://login-success" });
+                console.log("Redirect message failed: ", err);
               });
             }, 300);
           }
@@ -165,7 +158,6 @@ begin
     });
   JS
 
-  # 🟢 バナーUI ＋ ディープリンク発火用 content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     if (!document.getElementById('kdot-extension-banner')) {
@@ -183,7 +175,6 @@ begin
     });
   JS
 
-  # 2. Extension Target の取得・生成
   extension_target = project.targets.find { |t| t.name == 'RunnerExtension' }
   unless extension_target
     extension_target = project.new_target(:app_extension, 'RunnerExtension', :ios, '16.0')
@@ -203,7 +194,6 @@ begin
     config.build_settings['SKIP_INSTALL'] = 'YES'
   end
 
-  # 3. リソースとソースファイルの紐付け
   group = project.main_group.find_subpath('RunnerExtension', true) || project.main_group.new_group('RunnerExtension', 'RunnerExtension')
   group.path = 'RunnerExtension'
   group.source_tree = '<group>'
@@ -226,7 +216,6 @@ begin
   resources_phase.add_file_reference(background_file)
   icon_files.each { |icon_f| resources_phase.add_file_reference(icon_f) }
 
-  # 4. Frameworks 設定
   frameworks_phase = extension_target.frameworks_build_phase
   sf_framework = project.frameworks_group.files.find { |f| f.path == 'System/Library/Frameworks/SafariServices.framework' } ||
                  project.frameworks_group.new_file('System/Library/Frameworks/SafariServices.framework')
@@ -235,7 +224,6 @@ begin
     frameworks_phase.add_file_reference(sf_framework)
   end
 
-  # 5. Target Dependency と Embed App Extensions の接続
   main_target = project.targets.find { |t| t.name == 'Runner' }
   abort 'ERROR: Runner target not found' unless main_target
 
@@ -287,7 +275,6 @@ begin
   project.save
   puts "Successfully configured Runner and RunnerExtension targets with all resources."
 
-  # 6. Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
   scheme_paths = Dir.glob('ios/**/*.xcscheme')
   runner_scheme = scheme_paths.find { |p| p.include?('Runner.xcscheme') }
 
