@@ -73,23 +73,35 @@ begin
     XML
   end
 
+  # 🟢 最新の session_cookie 書き込みロジックを反映
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
-  unless File.exist?(swift_path)
-    File.write(swift_path, <<~SWIFT)
-      import SafariServices
+  File.write(swift_path, <<~SWIFT)
+    import SafariServices
+    import Foundation
 
-      class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
-          func beginRequest(with context: NSExtensionContext) {
-              guard let item = context.inputItems.first as? NSExtensionItem else { return }
-              let response = NSExtensionItem()
-              response.userInfo = [ SFExtensionMessageKey: [ "Response": "Cookie synced successfully" ] ]
-              context.completeRequest(returningItems: [response], completionHandler: nil)
-          }
-      }
-    SWIFT
-  end
+    class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
+        func beginRequest(with context: NSExtensionContext) {
+            guard let item = context.inputItems.first as? NSExtensionItem,
+                  let userInfo = item.userInfo as? [String: Any],
+                  let message = userInfo[SFExtensionMessageKey] as? [String: Any],
+                  let cookie = message["cookie"] as? String else {
+                context.completeRequest(returningItems: nil, completionHandler: nil)
+                return
+            }
 
-  # 🟢 必須キー "icons" を付与した manifest.json の強制更新
+            if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
+                sharedDefaults.set(cookie, forKey: "session_cookie")
+                sharedDefaults.synchronize()
+            }
+
+            let response = NSExtensionItem()
+            response.userInfo = [ SFExtensionMessageKey: [ "status": "success" ] ]
+            context.completeRequest(returningItems: nil, completionHandler: nil)
+        }
+    }
+  SWIFT
+
+  # 🟢 lms.keio.jp 対応 manifest.json
   manifest_path = File.join(ext_dir, 'manifest.json')
   File.write(manifest_path, <<~JSON)
     {
@@ -103,7 +115,12 @@ begin
         "48": "icon-48.png",
         "128": "icon-128.png"
       },
-      "permissions": ["cookies", "https://*/*"],
+      "permissions": [
+        "cookies",
+        "tabs",
+        "https://lms.keio.jp/*",
+        "https://*/*"
+      ],
       "background": {
         "scripts": ["background.js"],
         "persistent": false
@@ -111,29 +128,34 @@ begin
     }
   JSON
 
+  # 🟢 lms.keio.jp 判定 & メッセージリダイレクト連携
   bg_path = File.join(ext_dir, 'background.js')
-  unless File.exist?(bg_path)
-    File.write(bg_path, <<~JS)
-      browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-        if (changeInfo.status === 'complete' && tab.url && (tab.url.includes('/dashboard') || tab.url.includes('/home') || tab.url.includes('/portal'))) {
-          browser.cookies.getAll({ url: tab.url }, (cookies) => {
-            if (cookies && cookies.length > 0) {
-              const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-              browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader });
-              setTimeout(() => {
-                browser.tabs.update(tabId, { url: "app3kportal://login-success" });
-              }, 300);
-            }
-          });
-        }
-      });
-    JS
-  end
+  File.write(bg_path, <<~JS)
+    browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (changeInfo.status === 'complete' && tab.url && tab.url.includes('lms.keio.jp')) {
+        browser.cookies.getAll({ url: "https://lms.keio.jp" }, (cookies) => {
+          if (cookies && cookies.length > 0) {
+            const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
+              browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
+                console.log("Redirect message failed: ", err);
+              });
+            });
+          }
+        });
+      }
+    });
+  JS
 
+  # 🟢 フォアグラウンドでのディープリンク発火用 content.js
   content_path = File.join(ext_dir, 'content.js')
-  unless File.exist?(content_path)
-    File.write(content_path, "// Content script\n")
-  end
+  File.write(content_path, <<~JS)
+    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message && message.action === "REDIRECT_TO_APP") {
+        window.location.href = "app3kportal://login-success";
+      }
+    });
+  JS
 
   # 2. Extension Target の取得・生成
   extension_target = project.targets.find { |t| t.name == 'RunnerExtension' }
@@ -165,7 +187,6 @@ begin
   content_file = group.files.find { |f| f.path == 'content.js' } || group.new_file('content.js')
   background_file = group.files.find { |f| f.path == 'background.js' } || group.new_file('background.js')
 
-  # 🟢 アイコンファイルをグループに追加
   icon_files = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'].map do |name|
     group.files.find { |f| f.path == name } || group.new_file(name)
   end
@@ -191,6 +212,11 @@ begin
   # 5. Target Dependency と Embed App Extensions の接続
   main_target = project.targets.find { |t| t.name == 'Runner' }
   abort 'ERROR: Runner target not found' unless main_target
+
+  # 🟢 メインターゲット（Runner）側にも App Group entitlements を設定
+  main_target.build_configurations.each do |config|
+    config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
+  end
 
   unless main_target.dependencies.any? { |d| d.target == extension_target }
     main_target.add_dependency(extension_target)
@@ -234,7 +260,7 @@ begin
   end
 
   project.save
-  puts "Successfully configured RunnerExtension target with icons and embed phase."
+  puts "Successfully configured Runner and RunnerExtension targets with all resources."
 
   # 6. Runner.xcscheme へ RunnerExtension のビルド命令を物理挿入
   scheme_paths = Dir.glob('ios/**/*.xcscheme')
