@@ -2,7 +2,6 @@ import SafariServices
 import Foundation
 
 class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
-
     func beginRequest(with context: NSExtensionContext) {
         guard let item = context.inputItems.first as? NSExtensionItem,
               let userInfo = item.userInfo as? [String: Any],
@@ -12,7 +11,6 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
-        // 🟢 App Group (group.com.h.k.portal) に session_cookie として保存
         if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
             sharedDefaults.set(cookie, forKey: "session_cookie")
             sharedDefaults.synchronize()

@@ -9,7 +9,12 @@
     "48": "icon-48.png",
     "128": "icon-128.png"
   },
-  "permissions": ["cookies", "https://*/*"],
+  "permissions": [
+    "cookies",
+    "tabs",
+    "https://lms.keio.jp/*",
+    "https://*/*"
+  ],
   "background": {
     "scripts": ["background.js"],
     "persistent": false
