@@ -4,18 +4,18 @@
 <dict>
 	<!-- 🟢 修正：URLスキーム（URLTypes）の親タグ構造を正しく定義 -->
 	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>com.h.k.portal</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>app3kportal</string>
-			</array>
-		</dict>
-	</array>
+    	<array>
+    		<dict>
+    			<key>CFBundleTypeRole</key>
+    			<string>Editor</string>
+    			<key>CFBundleURLName</key>
+    			<string>com.h.k.portal</string>
+    			<key>CFBundleURLSchemes</key>
+    			<array>
+    				<string>app3kportal</string>
+    			</array>
+    		</dict>
+    	</array>
 
 	<key>NSMicrophoneUsageDescription</key>
 	<string>カメラの初期化および動画撮影のためにマイクを使用します。</string>

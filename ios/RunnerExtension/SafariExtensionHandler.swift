@@ -12,7 +12,7 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
-        // App Group (group.com.h.k.portal) に Cookie を書き込み
+        // 🟢 App Group (group.com.h.k.portal) に session_cookie として保存
         if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
             sharedDefaults.set(cookie, forKey: "session_cookie")
             sharedDefaults.synchronize()
