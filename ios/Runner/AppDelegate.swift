@@ -15,6 +15,7 @@ import Flutter
       (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
       if call.method == "getAppGroupCookie" {
         if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
+          sharedDefaults.synchronize() // 🟢 読み出し前に強制同期！
           let cookie = sharedDefaults.string(forKey: "session_cookie")
           result(cookie)
         } else {

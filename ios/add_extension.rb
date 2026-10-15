@@ -89,7 +89,7 @@ begin
     XML
   end
 
-  # 🟢 Swift ハンドラ
+  # 🟢 Swift ハンドラ（確実にApp Groupへ同期書き込みを実行）
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -100,19 +100,19 @@ begin
             guard let item = context.inputItems.first as? NSExtensionItem,
                   let userInfo = item.userInfo as? [String: Any],
                   let message = userInfo[SFExtensionMessageKey] as? [String: Any],
-                  let cookie = message["cookie"] as? String else {
+                  let cookie = message["cookie"] as? String, !cookie.isEmpty else {
                 let response = NSExtensionItem()
-                response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "payload_empty" ] ]
+                response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "empty_cookie" ] ]
                 context.completeRequest(returningItems: [response], completionHandler: nil)
                 return
             }
 
             if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
                 sharedDefaults.set(cookie, forKey: "session_cookie")
-                sharedDefaults.synchronize()
+                let success = sharedDefaults.synchronize()
 
                 let response = NSExtensionItem()
-                response.userInfo = [ SFExtensionMessageKey: [ "status": "success" ] ]
+                response.userInfo = [ SFExtensionMessageKey: [ "status": success ? "success" : "sync_fail" ] ]
                 context.completeRequest(returningItems: [response], completionHandler: nil)
             } else {
                 let response = NSExtensionItem()
@@ -156,7 +156,7 @@ begin
     }
   JSON
 
-  # 🟢 即時レスポンス型 background.js（コールバック待ちによるハングアップを回避）
+  # 🟢 HttpOnly 含む完全クッキー抽出 background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -164,42 +164,49 @@ begin
     extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message && message.action === "SYNC_COOKIE") {
         try {
-          extAPI.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookies) => {
-            let cookiePairs = [];
+          // 全パス・全ドメインのクッキーを全網羅検索
+          extAPI.cookies.getAll({ domain: "lms.keio.jp" }, (cookies) => {
+            let cookieMap = new Map();
 
             if (cookies && cookies.length > 0) {
               cookies.forEach(c => {
                 if (c && c.name && c.value) {
-                  cookiePairs.push(`${c.name}=${c.value}`);
+                  cookieMap.set(c.name, c.value);
                 }
               });
             }
 
             if (message.fallbackCookie) {
               message.fallbackCookie.split(';').forEach(pair => {
-                const p = pair.trim();
-                if (p && !cookiePairs.includes(p)) {
-                  cookiePairs.push(p);
+                const parts = pair.split('=');
+                if (parts.length >= 2) {
+                  const k = parts[0].trim();
+                  const v = parts.slice(1).join('=').trim();
+                  if (k && !cookieMap.has(k)) cookieMap.set(k, v);
                 }
               });
             }
 
+            let cookiePairs = [];
+            cookieMap.forEach((v, k) => cookiePairs.push(`${k}=${v}`));
             const fullCookie = cookiePairs.join('; ');
 
-            if (!fullCookie || fullCookie.trim().length < 5) {
-              sendResponse({ status: "error", reason: "No Cookie Found" });
+            if (!fullCookie || fullCookie.trim().length < 10) {
+              sendResponse({ status: "error", reason: "Cookie Not Found (Please Login)" });
               return;
             }
 
-            // 🟢 Native Swift へクッキー送信（iOS Safari のレスポンス遅延を待たずに即時成功を返す！）
-            try {
-              extAPI.runtime.sendNativeMessage("application.id", { "cookie": fullCookie });
-            } catch (nativeErr) {
-              console.log("sendNativeMessage error:", nativeErr);
-            }
-
-            // Swift 側への書き込みは数ミリ秒で完了するため、待たずに即時レスポンス
-            sendResponse({ status: "success", cookieLength: fullCookie.length });
+            extAPI.runtime.sendNativeMessage("application.id", { "cookie": fullCookie }, (response) => {
+              const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
+              if (lastErr) {
+                sendResponse({ status: "error", reason: "Native Err: " + lastErr.message });
+              } else if (response && response.status === "success") {
+                sendResponse({ status: "success", cookieLength: fullCookie.length });
+              } else {
+                const errDetail = (response && response.reason) ? response.reason : "Native Sync Fail";
+                sendResponse({ status: "error", reason: errDetail });
+              }
+            });
           });
         } catch (e) {
           sendResponse({ status: "error", reason: "BG Exception: " + e.message });
@@ -209,7 +216,7 @@ begin
     });
   JS
 
-  # 🟢 英語表記・排他制御付き content.js
+  # 🟢 確実な保存成功後のリダイレクト content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -254,7 +261,7 @@ begin
         const docCookie = document.cookie || "";
 
         if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 Syncing Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+          banner.innerHTML = '🟡 Extracting & Syncing Session... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
         }
 
         extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
@@ -269,13 +276,13 @@ begin
 
           if (response && response.status === "success") {
             banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 App Group Sync Success! Returning to App...';
+            banner.innerHTML = '🟢 App Group Sync Success (' + response.cookieLength + ' chars)! Returning to App...';
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
-            }, 100);
+            }, 300);
           } else {
             const reason = (response && response.reason) ? response.reason : "Waiting";
-            banner.innerHTML = '🟡 Waiting Sync (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+            banner.innerHTML = '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
           }
         });
       } catch (err) {
@@ -289,7 +296,7 @@ begin
 
     setupBanner();
     checkAndSyncCookie();
-    setInterval(checkAndSyncCookie, 1500);
+    setInterval(checkAndSyncCookie, 2000);
   JS
 
   # 3. Extension Target の取得・生成
