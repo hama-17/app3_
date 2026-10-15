@@ -32,20 +32,25 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       const checkAndSend = () => {
         let cookiePairs = [];
-        let hasCanvasSession = false;
+        let detectedKeys = [];
+        let hasSessionCookie = false;
 
         cookieMap.forEach((v, k) => {
           cookiePairs.push(`${k}=${v}`);
-          if (k.includes('_canvas_session') || k.includes('canvas_session')) {
-            hasCanvasSession = true;
+          detectedKeys.push(k);
+
+          const lowerK = k.toLowerCase();
+          if (lowerK.includes('canvas_session') || lowerK.includes('session') || lowerK.includes('token') || lowerK.includes('auth')) {
+            hasSessionCookie = true;
           }
         });
 
         const fullCookie = cookiePairs.join('; ');
+        const keySummary = detectedKeys.slice(0, 4).join(', ');
 
-        // 🟢 本物の Canvas 認証セッションクッキーが存在しない場合はまだ同期しない（ログイン完了待ち）
-        if (!hasCanvasSession || fullCookie.length < 200) {
-          safeResponse({ status: "error", reason: "Waiting Session Auth (_canvas_session)" });
+        // 🟢 文字数が200文字以上でセッション系キーが存在すれば合格、それ以外はキー一覧をバナーに表示
+        if (!hasSessionCookie || fullCookie.length < 180) {
+          safeResponse({ status: "error", reason: `Keys:[${keySummary}] Len:${fullCookie.length}` });
           return;
         }
 

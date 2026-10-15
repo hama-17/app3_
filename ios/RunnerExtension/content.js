@@ -31,7 +31,7 @@ function checkAndSyncCookie() {
 
     if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
       if (banner) {
-        banner.innerHTML = '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+        banner.innerHTML = '🟡 K.dot Extension (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
       }
       return;
     }
@@ -40,7 +40,7 @@ function checkAndSyncCookie() {
     const docCookie = document.cookie || "";
 
     if (banner && !banner.dataset.synced) {
-      banner.innerHTML = '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+      banner.innerHTML = '🟡 Cookie確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
     }
 
     const lockTimer = setTimeout(() => {
@@ -62,13 +62,13 @@ function checkAndSyncCookie() {
 
       if (response && response.status === "success") {
         banner.dataset.synced = "true";
-        banner.innerHTML = '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...';
+        banner.innerHTML = '🟢 セッション同期成功 (' + response.cookieLength + '文字)! アプリへ復帰中...';
         setTimeout(() => {
           window.location.href = "app3kportal://login-success";
         }, 300);
       } else {
-        const reason = (response && response.reason) ? response.reason : "Waiting Auth";
-        banner.innerHTML = '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+        const reason = (response && response.reason) ? response.reason : "待機中";
+        banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
       }
     });
   } catch (err) {

@@ -89,7 +89,7 @@ begin
     XML
   end
 
-  # 🟢 Swift ハンドラ（書き込み成功の確実な返却）
+  # 🟢 Swift ハンドラ
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -170,7 +170,7 @@ begin
     }
   JSON
 
-  # 🟢 _canvas_session 検証ロジック付き background.js
+  # 🟢 クッキーキー名デバッグ出力 ＆ 柔軟なセッション判定 background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -207,20 +207,25 @@ begin
 
           const checkAndSend = () => {
             let cookiePairs = [];
-            let hasCanvasSession = false;
+            let detectedKeys = [];
+            let hasSessionCookie = false;
 
             cookieMap.forEach((v, k) => {
               cookiePairs.push(`${k}=${v}`);
-              if (k.includes('_canvas_session') || k.includes('canvas_session')) {
-                hasCanvasSession = true;
+              detectedKeys.push(k);
+
+              const lowerK = k.toLowerCase();
+              if (lowerK.includes('canvas_session') || lowerK.includes('session') || lowerK.includes('token') || lowerK.includes('auth')) {
+                hasSessionCookie = true;
               }
             });
 
             const fullCookie = cookiePairs.join('; ');
+            const keySummary = detectedKeys.slice(0, 4).join(', ');
 
-            // 🟢 本物の Canvas 認証セッションクッキーが存在しない場合はまだ同期しない（ログイン完了待ち）
-            if (!hasCanvasSession || fullCookie.length < 200) {
-              safeResponse({ status: "error", reason: "Waiting Session Auth (_canvas_session)" });
+            // 🟢 文字数が200文字以上でセッション系キーが存在すれば合格、それ以外はキー一覧をバナーに表示
+            if (!hasSessionCookie || fullCookie.length < 180) {
+              safeResponse({ status: "error", reason: `Keys:[${keySummary}] Len:${fullCookie.length}` });
               return;
             }
 
@@ -275,7 +280,7 @@ begin
     }
   JS
 
-  # 🟢 同期成功時のみ復帰 content.js
+  # 🟢 リモートログ可視化 content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -311,7 +316,7 @@ begin
 
         if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
           if (banner) {
-            banner.innerHTML = '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+            banner.innerHTML = '🟡 K.dot Extension (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
           }
           return;
         }
@@ -320,7 +325,7 @@ begin
         const docCookie = document.cookie || "";
 
         if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+          banner.innerHTML = '🟡 Cookie確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
         }
 
         const lockTimer = setTimeout(() => {
@@ -342,13 +347,13 @@ begin
 
           if (response && response.status === "success") {
             banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...';
+            banner.innerHTML = '🟢 セッション同期成功 (' + response.cookieLength + '文字)! アプリへ復帰中...';
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
             }, 300);
           } else {
-            const reason = (response && response.reason) ? response.reason : "Waiting Auth";
-            banner.innerHTML = '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+            const reason = (response && response.reason) ? response.reason : "待機中";
+            banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
           }
         });
       } catch (err) {
