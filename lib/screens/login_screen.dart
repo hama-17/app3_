@@ -20,7 +20,7 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
   Timer? _pollingTimer;
   InAppWebViewController? _webViewController;
   bool _isInitialized = false;
-  String _statusText = "Safariでログインしてください"; // 🟢 画面表示用ステータス
+  String _statusText = "初期化中...";
 
   static const _appGroupChannel = MethodChannel('com.h.k.portal/app_group');
 
@@ -34,6 +34,7 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     } else if (Platform.isIOS) {
       setState(() {
         _isInitialized = true;
+        _statusText = "iOS 監視スタート（Safariを開いてください）";
       });
       _startCookiePolling();
     }
@@ -46,11 +47,9 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     super.dispose();
   }
 
-  // 🟢 アプリ復帰時に即時クッキーチェック
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && Platform.isIOS) {
-      debugPrint("📱 アプリ復帰を検知: App Group クッキーを即時チェック");
       _checkAndValidateIosAppGroupCookies();
     }
   }
@@ -118,32 +117,33 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  // 🍎 iOS：App Group (UserDefaults) 監視＆診断メッセージ更新
+  // 🍎 iOS：毎秒App Groupを読み出し、リアルタイム時刻と状態を画面に強制描画
   Future<void> _checkAndValidateIosAppGroupCookies() async {
     if (_isSuccessTriggered) return;
 
     try {
       final String? appGroupCookie = await _appGroupChannel.invokeMethod<String>('getAppGroupCookie');
 
-      if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
-        if (mounted) {
-          setState(() {
-            _statusText = "App Group からクッキーを取得！検証中...";
-          });
-        }
-        await _validateAndSave(appGroupCookie);
-      } else {
-        if (mounted && _statusText != "Safariでログインしてください") {
-          setState(() {
-            _statusText = "クッキー同期待機中...";
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint("iOS AppGroup Cookie check error: $e");
+      final now = DateTime.now();
+      final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
       if (mounted) {
         setState(() {
-          _statusText = "App Group 読み込みエラー: $e";
+          if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
+            _statusText = "🟢 [$timeStr] Cookie取得成功 (${appGroupCookie.length}文字)\n検証処理を実行中...";
+          } else {
+            _statusText = "🟡 [$timeStr] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+          }
+        });
+      }
+
+      if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
+        await _validateAndSave(appGroupCookie);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _statusText = "🔴 App Group 呼び出しエラー:\n$e";
         });
       }
     }
@@ -168,9 +168,11 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
         widget.onLoginSuccess();
       }
     } else if (!isValid && mounted) {
-      setState(() {
-        _statusText = "クッキーを取得しましたが未ログイン状態です（ログイン完了後に戻ってください）";
-      });
+      if (mounted) {
+        setState(() {
+          _statusText = "⚠️ Cookieを取得しましたがセッション無効\n(${cookieString.length}文字) / ログイン完了後に戻ってください";
+        });
+      }
     }
   }
 
@@ -257,17 +259,18 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
             style: TextStyle(fontSize: 14, color: AppTheme.textSub(context)),
           ),
           const SizedBox(height: 20),
-          // 🟢 リアルタイム診断ステータス表示エリア
+          // 🟢 リアルタイム診断ステータス表示エリア（アクセント色の枠線付き）
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.black.withAlpha(20),
-              borderRadius: BorderRadius.circular(8),
+              color: Colors.black.withAlpha(30),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.accent.withAlpha(120), width: 1.5),
             ),
             child: Text(
               _statusText,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.accent),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.accent, height: 1.4),
             ),
           ),
           const SizedBox(height: 24),
