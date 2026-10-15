@@ -7,7 +7,7 @@ function setupBanner() {
     banner = document.createElement('div');
     banner.id = 'kdot-extension-banner';
     banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:12px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
-    banner.innerHTML = '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+    banner.innerHTML = '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
     if (document.body) {
       document.body.appendChild(banner);
     } else {
@@ -40,13 +40,11 @@ function checkAndSyncCookie() {
     const docCookie = document.cookie || "";
 
     if (banner && !banner.dataset.synced) {
-      banner.innerHTML = '🟡 セッションクッキー確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+      banner.innerHTML = '🟡 Cookie確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
     }
 
     const lockTimer = setTimeout(() => {
-      if (isSyncing) {
-        isSyncing = false;
-      }
+      if (isSyncing) isSyncing = false;
     }, 3000);
 
     extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
@@ -56,7 +54,7 @@ function checkAndSyncCookie() {
 
       const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
       if (lastErr) {
-        banner.innerHTML = '🔴 通信エラー: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        banner.innerHTML = '🔴 Comm Error: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         return;
       }
 

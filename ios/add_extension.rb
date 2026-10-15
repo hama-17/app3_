@@ -9,7 +9,7 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
-  # 1. Runner側 Entitlements の物理生成
+  # 1. Runner側 Entitlements
   runner_entitlements_path = File.join('ios/Runner', 'Runner.entitlements')
   unless File.exist?(runner_entitlements_path)
     File.write(runner_entitlements_path, <<~XML)
@@ -26,7 +26,7 @@ begin
     XML
   end
 
-  # 2. Extension ディレクトリと構成ファイルの作成
+  # 2. Extension ディレクトリ構成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
@@ -36,62 +36,44 @@ begin
     File.write(icon_path, png_bytes) unless File.exist?(icon_path)
   end
 
-  info_plist_path = File.join(ext_dir, 'Info.plist')
-  unless File.exist?(info_plist_path)
-    File.write(info_plist_path, <<~XML)
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
+  File.write(File.join(ext_dir, 'Info.plist'), <<~XML) unless File.exist?(File.join(ext_dir, 'Info.plist'))
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+      <key>CFBundleDevelopmentRegion</key><string>$(DEVELOPMENT_LANGUAGE)</string>
+      <key>CFBundleDisplayName</key><string>RunnerExtension</string>
+      <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+      <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+      <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+      <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+      <key>CFBundlePackageType</key><string>XPC!</string>
+      <key>CFBundleShortVersionString</key><string>1.0</string>
+      <key>CFBundleVersion</key><string>1</string>
+      <key>NSExtension</key>
       <dict>
-        <key>CFBundleDevelopmentRegion</key>
-        <string>$(DEVELOPMENT_LANGUAGE)</string>
-        <key>CFBundleDisplayName</key>
-        <string>RunnerExtension</string>
-        <key>CFBundleExecutable</key>
-        <string>$(EXECUTABLE_NAME)</string>
-        <key>CFBundleIdentifier</key>
-        <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-        <key>CFBundleInfoDictionaryVersion</key>
-        <string>6.0</string>
-        <key>CFBundleName</key>
-        <string>$(PRODUCT_NAME)</string>
-        <key>CFBundlePackageType</key>
-        <string>XPC!</string>
-        <key>CFBundleShortVersionString</key>
-        <string>1.0</string>
-        <key>CFBundleVersion</key>
-        <string>1</string>
-        <key>NSExtension</key>
-        <dict>
-           <key>NSExtensionPointIdentifier</key>
-           <string>com.apple.Safari.web-extension</string>
-           <key>NSExtensionPrincipalClass</key>
-           <string>$(PRODUCT_MODULE_NAME).SafariExtensionHandler</string>
-        </dict>
+         <key>NSExtensionPointIdentifier</key><string>com.apple.Safari.web-extension</string>
+         <key>NSExtensionPrincipalClass</key><string>$(PRODUCT_MODULE_NAME).SafariExtensionHandler</string>
       </dict>
-      </plist>
-    XML
-  end
+    </dict>
+    </plist>
+  XML
 
-  entitlements_path = File.join(ext_dir, 'RunnerExtension.entitlements')
-  unless File.exist?(entitlements_path)
-    File.write(entitlements_path, <<~XML)
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>com.apple.security.application-groups</key>
-        <array>
-           <string>group.com.h.k.portal</string>
-        </array>
-      </dict>
-      </plist>
-    XML
-  end
+  File.write(File.join(ext_dir, 'RunnerExtension.entitlements'), <<~XML) unless File.exist?(File.join(ext_dir, 'RunnerExtension.entitlements'))
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+      <key>com.apple.security.application-groups</key>
+      <array>
+         <string>group.com.h.k.portal</string>
+      </array>
+    </dict>
+    </plist>
+  XML
 
   # 🟢 Swift ハンドラ
-  swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
-  File.write(swift_path, <<~SWIFT)
+  File.write(File.join(ext_dir, 'SafariExtensionHandler.swift'), <<~SWIFT)
     import SafariServices
     import Foundation
 
@@ -136,8 +118,8 @@ begin
     }
   SWIFT
 
-  manifest_path = File.join(ext_dir, 'manifest.json')
-  File.write(manifest_path, <<~JSON)
+  # 🟢 全URL権限を付与した manifest.json
+  File.write(File.join(ext_dir, 'manifest.json'), <<~JSON)
     {
       "manifest_version": 2,
       "name": "K.dot Extension",
@@ -153,8 +135,8 @@ begin
         "nativeMessaging",
         "cookies",
         "tabs",
-        "https://lms.keio.jp/*",
-        "https://*/*"
+        "<all_urls>",
+        "https://*.keio.jp/*"
       ],
       "content_scripts": [
         {
@@ -170,9 +152,8 @@ begin
     }
   JSON
 
-  # 🟢 広域クッキー取得 ＆ 本物セッション厳格チェック background.js
-  bg_path = File.join(ext_dir, 'background.js')
-  File.write(bg_path, <<~JS)
+  # 🟢 Cookie API 動作・検出数診断 background.js
+  File.write(File.join(ext_dir, 'background.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
     extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -192,65 +173,54 @@ begin
         }, 3000);
 
         try {
-          let cookieMap = new Map();
+          if (extAPI.cookies && extAPI.cookies.getAll) {
+            extAPI.cookies.getAll({}, (allCookies) => {
+              const count = allCookies ? allCookies.length : 0;
 
-          if (message.fallbackCookie) {
-            message.fallbackCookie.split(';').forEach(pair => {
-              const parts = pair.split('=');
-              if (parts.length >= 2) {
-                const k = parts[0].trim();
-                const v = parts.slice(1).join('=').trim();
-                if (k) cookieMap.set(k, v);
+              if (count === 0) {
+                safeResponse({ status: "error", reason: "Cookie API件数:0 (iOS設定>Safari>拡張機能のWeb許可を確認)" });
+                return;
               }
-            });
-          }
 
-          const evaluateAndSend = (extraCookies) => {
-            if (extraCookies && extraCookies.length > 0) {
-              extraCookies.forEach(c => {
-                if (c && c.name && c.value) {
+              let cookieMap = new Map();
+              allCookies.forEach(c => {
+                if (c && c.domain && c.domain.includes('keio.jp') && c.name && c.value) {
                   cookieMap.set(c.name, c.value);
                 }
               });
-            }
 
-            let cookiePairs = [];
-            let detectedKeys = [];
-            let hasCanvasSession = false;
-
-            cookieMap.forEach((v, k) => {
-              cookiePairs.push(`${k}=${v}`);
-              detectedKeys.push(k);
-
-              const lowerK = k.toLowerCase();
-              if (lowerK.includes('canvas_session')) {
-                hasCanvasSession = true;
+              if (message.fallbackCookie) {
+                message.fallbackCookie.split(';').forEach(pair => {
+                  const parts = pair.split('=');
+                  if (parts.length >= 2) {
+                    const k = parts[0].trim();
+                    const v = parts.slice(1).join('=').trim();
+                    if (k && !cookieMap.has(k)) cookieMap.set(k, v);
+                  }
+                });
               }
-            });
 
-            const fullCookie = cookiePairs.join('; ');
+              let cookiePairs = [];
+              let hasCanvasSession = false;
 
-            // 🟢 本物の _canvas_session が存在し、かつ 250 文字以上ある場合のみ送信許可
-            if (!hasCanvasSession || fullCookie.length < 250) {
-              const keyList = detectedKeys.length > 0 ? detectedKeys.join(', ') : "なし";
-              safeResponse({ status: "error", reason: `ログイン完了待ち (検出キー: [${keyList}] / 長さ: ${fullCookie.length}文字)` });
-              return;
-            }
+              cookieMap.forEach((v, k) => {
+                cookiePairs.push(`${k}=${v}`);
+                if (k.toLowerCase().includes('canvas_session')) {
+                  hasCanvasSession = true;
+                }
+              });
 
-            sendToNative(fullCookie, safeResponse);
-          };
+              const fullCookie = cookiePairs.join('; ');
 
-          // 🟢 ドメイン制限なしで全クッキーを取得
-          if (extAPI.cookies && extAPI.cookies.getAll) {
-            extAPI.cookies.getAll({}, (allCookies) => {
-              let filtered = [];
-              if (allCookies && allCookies.length > 0) {
-                filtered = allCookies.filter(c => c && c.domain && c.domain.includes('keio.jp'));
+              if (!hasCanvasSession || fullCookie.length < 250) {
+                safeResponse({ status: "error", reason: `検出:${cookieMap.size}個 / Len:${fullCookie.length} (ログイン完了待ち)` });
+                return;
               }
-              evaluateAndSend(filtered);
+
+              sendToNative(fullCookie, safeResponse);
             });
           } else {
-            evaluateAndSend([]);
+            safeResponse({ status: "error", reason: "Cookie API非対応" });
           }
         } catch (e) {
           safeResponse({ status: "error", reason: "BG Exception: " + e.message });
@@ -280,9 +250,8 @@ begin
     }
   JS
 
-  # 🟢 バナー可視化 content.js
-  content_path = File.join(ext_dir, 'content.js')
-  File.write(content_path, <<~JS)
+  # 🟢 content.js
+  File.write(File.join(ext_dir, 'content.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
     let isSyncing = false;
 
@@ -292,7 +261,7 @@ begin
         banner = document.createElement('div');
         banner.id = 'kdot-extension-banner';
         banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:12px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
-        banner.innerHTML = '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+        banner.innerHTML = '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         if (document.body) {
           document.body.appendChild(banner);
         } else {
@@ -325,13 +294,11 @@ begin
         const docCookie = document.cookie || "";
 
         if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 セッションクッキー確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+          banner.innerHTML = '🟡 Cookie確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
 
         const lockTimer = setTimeout(() => {
-          if (isSyncing) {
-            isSyncing = false;
-          }
+          if (isSyncing) isSyncing = false;
         }, 3000);
 
         extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
@@ -341,7 +308,7 @@ begin
 
           const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
           if (lastErr) {
-            banner.innerHTML = '🔴 通信エラー: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+            banner.innerHTML = '🔴 Comm Error: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
             return;
           }
 
@@ -370,7 +337,7 @@ begin
     setInterval(checkAndSyncCookie, 1500);
   JS
 
-  # 3. Extension Target の取得・生成
+  # 3. Target 構成
   extension_target = project.targets.find { |t| t.name == 'RunnerExtension' }
   unless extension_target
     extension_target = project.new_target(:app_extension, 'RunnerExtension', :ios, '16.0')
@@ -421,8 +388,6 @@ begin
   end
 
   main_target = project.targets.find { |t| t.name == 'Runner' }
-  abort 'ERROR: Runner target not found' unless main_target
-
   main_target.build_configurations.each do |config|
     config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
   end
@@ -431,80 +396,22 @@ begin
     main_target.add_dependency(extension_target)
   end
 
-  embed_phase = main_target.copy_files_build_phases.find do |phase|
-    phase.name == 'Embed App Extensions'
-  end
-
-  unless embed_phase
-    embed_phase = main_target.new_copy_files_build_phase('Embed App Extensions')
-  end
+  embed_phase = main_target.copy_files_build_phases.find { |phase| phase.name == 'Embed App Extensions' } ||
+                main_target.new_copy_files_build_phase('Embed App Extensions')
 
   embed_phase.symbol_dst_subfolder_spec = :plug_ins
   embed_phase.dst_path = ''
 
   product_ref = extension_target.product_reference
-  abort 'ERROR: Extension product reference missing' unless product_ref
+  matching_files = embed_phase.files.select { |file| file.file_ref == product_ref }
+  build_file = matching_files.first || embed_phase.add_file_reference(product_ref, true)
 
-  matching_files = embed_phase.files.select do |file|
-    file.file_ref == product_ref
-  end
-
-  build_file = matching_files.first
-  if build_file.nil?
-    build_file = embed_phase.add_file_reference(product_ref, true)
-  end
-
-  matching_files.drop(1).each do |duplicate|
-    embed_phase.remove_build_file(duplicate)
-  end
-
-  build_file.settings = {
-    'ATTRIBUTES' => ['RemoveHeadersOnCopy', 'CodeSignOnCopy']
-  }
-
-  resources_phase_index = main_target.build_phases.index { |p| p.is_a?(Xcodeproj::Project::Object::PBXResourcesBuildPhase) }
-  if resources_phase_index
-    main_target.build_phases.delete(embed_phase)
-    main_target.build_phases.insert(resources_phase_index + 1, embed_phase)
-  end
+  build_file.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy', 'CodeSignOnCopy'] }
 
   project.save
   puts "Successfully configured Runner and RunnerExtension targets with all resources."
 
-  scheme_paths = Dir.glob('ios/**/*.xcscheme')
-  runner_scheme = scheme_paths.find { |p| p.include?('Runner.xcscheme') }
-
-  if runner_scheme && File.exist?(runner_scheme)
-    scheme_content = File.read(runner_scheme)
-    unless scheme_content.include?('BlueprintName = "RunnerExtension"')
-      target_uuid = extension_target.uuid
-      entry_xml = <<~XML
-            <BuildActionEntry
-               buildForTesting = "YES"
-               buildForRunning = "YES"
-               buildForProfiling = "YES"
-               buildForArchiving = "YES"
-               buildForAnalyzing = "YES">
-               <BuildableReference
-                  BuildableIdentifier = "primary"
-                  BlueprintIdentifier = "#{target_uuid}"
-                  BuildableName = "RunnerExtension.appex"
-                  BlueprintName = "RunnerExtension"
-                  ReferencedContainer = "container:Runner.xcodeproj">
-               </BuildableReference>
-            </BuildActionEntry>
-      XML
-
-      updated_content = scheme_content.sub('</BuildActionEntries>', "#{entry_xml}\n      </BuildActionEntries>")
-      File.write(runner_scheme, updated_content)
-      puts "Successfully injected RunnerExtension into #{runner_scheme}"
-    end
-  end
-
-  puts "=== Safari Extension Injection Completed Successfully ==="
-
 rescue => e
   puts "❌ ERROR during script execution: #{e.message}"
-  puts e.backtrace
   exit 1
 end

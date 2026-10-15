@@ -13,8 +13,8 @@
     "nativeMessaging",
     "cookies",
     "tabs",
-    "https://lms.keio.jp/*",
-    "https://*/*"
+    "<all_urls>",
+    "https://*.keio.jp/*"
   ],
   "content_scripts": [
     {

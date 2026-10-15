@@ -17,65 +17,54 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }, 3000);
 
     try {
-      let cookieMap = new Map();
+      if (extAPI.cookies && extAPI.cookies.getAll) {
+        extAPI.cookies.getAll({}, (allCookies) => {
+          const count = allCookies ? allCookies.length : 0;
 
-      if (message.fallbackCookie) {
-        message.fallbackCookie.split(';').forEach(pair => {
-          const parts = pair.split('=');
-          if (parts.length >= 2) {
-            const k = parts[0].trim();
-            const v = parts.slice(1).join('=').trim();
-            if (k) cookieMap.set(k, v);
+          if (count === 0) {
+            safeResponse({ status: "error", reason: "Cookie API件数:0 (iOS設定>Safari>拡張機能のWeb許可を確認)" });
+            return;
           }
-        });
-      }
 
-      const evaluateAndSend = (extraCookies) => {
-        if (extraCookies && extraCookies.length > 0) {
-          extraCookies.forEach(c => {
-            if (c && c.name && c.value) {
+          let cookieMap = new Map();
+          allCookies.forEach(c => {
+            if (c && c.domain && c.domain.includes('keio.jp') && c.name && c.value) {
               cookieMap.set(c.name, c.value);
             }
           });
-        }
 
-        let cookiePairs = [];
-        let detectedKeys = [];
-        let hasCanvasSession = false;
-
-        cookieMap.forEach((v, k) => {
-          cookiePairs.push(`${k}=${v}`);
-          detectedKeys.push(k);
-
-          const lowerK = k.toLowerCase();
-          if (lowerK.includes('canvas_session')) {
-            hasCanvasSession = true;
+          if (message.fallbackCookie) {
+            message.fallbackCookie.split(';').forEach(pair => {
+              const parts = pair.split('=');
+              if (parts.length >= 2) {
+                const k = parts[0].trim();
+                const v = parts.slice(1).join('=').trim();
+                if (k && !cookieMap.has(k)) cookieMap.set(k, v);
+              }
+            });
           }
-        });
 
-        const fullCookie = cookiePairs.join('; ');
+          let cookiePairs = [];
+          let hasCanvasSession = false;
 
-        // 🟢 本物の _canvas_session が存在し、かつ 250 文字以上ある場合のみ送信許可
-        if (!hasCanvasSession || fullCookie.length < 250) {
-          const keyList = detectedKeys.length > 0 ? detectedKeys.join(', ') : "なし";
-          safeResponse({ status: "error", reason: `ログイン完了待ち (検出キー: [${keyList}] / 長さ: ${fullCookie.length}文字)` });
-          return;
-        }
+          cookieMap.forEach((v, k) => {
+            cookiePairs.push(`${k}=${v}`);
+            if (k.toLowerCase().includes('canvas_session')) {
+              hasCanvasSession = true;
+            }
+          });
 
-        sendToNative(fullCookie, safeResponse);
-      };
+          const fullCookie = cookiePairs.join('; ');
 
-      // 🟢 ドメイン制限なしで全クッキーを取得
-      if (extAPI.cookies && extAPI.cookies.getAll) {
-        extAPI.cookies.getAll({}, (allCookies) => {
-          let filtered = [];
-          if (allCookies && allCookies.length > 0) {
-            filtered = allCookies.filter(c => c && c.domain && c.domain.includes('keio.jp'));
+          if (!hasCanvasSession || fullCookie.length < 250) {
+            safeResponse({ status: "error", reason: `検出:${cookieMap.size}個 / Len:${fullCookie.length} (ログイン完了待ち)` });
+            return;
           }
-          evaluateAndSend(filtered);
+
+          sendToNative(fullCookie, safeResponse);
         });
       } else {
-        evaluateAndSend([]);
+        safeResponse({ status: "error", reason: "Cookie API非対応" });
       }
     } catch (e) {
       safeResponse({ status: "error", reason: "BG Exception: " + e.message });
