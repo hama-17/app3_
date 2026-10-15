@@ -30,52 +30,52 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }
 
-      const checkAndSend = () => {
+      const evaluateAndSend = (extraCookies) => {
+        if (extraCookies && extraCookies.length > 0) {
+          extraCookies.forEach(c => {
+            if (c && c.name && c.value) {
+              cookieMap.set(c.name, c.value);
+            }
+          });
+        }
+
         let cookiePairs = [];
         let detectedKeys = [];
-        let hasSessionCookie = false;
+        let hasCanvasSession = false;
 
         cookieMap.forEach((v, k) => {
           cookiePairs.push(`${k}=${v}`);
           detectedKeys.push(k);
 
           const lowerK = k.toLowerCase();
-          if (lowerK.includes('canvas_session') || lowerK.includes('session') || lowerK.includes('token') || lowerK.includes('auth')) {
-            hasSessionCookie = true;
+          if (lowerK.includes('canvas_session')) {
+            hasCanvasSession = true;
           }
         });
 
         const fullCookie = cookiePairs.join('; ');
-        const keySummary = detectedKeys.slice(0, 4).join(', ');
 
-        // 🟢 文字数が200文字以上でセッション系キーが存在すれば合格、それ以外はキー一覧をバナーに表示
-        if (!hasSessionCookie || fullCookie.length < 180) {
-          safeResponse({ status: "error", reason: `Keys:[${keySummary}] Len:${fullCookie.length}` });
+        // 🟢 本物の _canvas_session が存在し、かつ 250 文字以上ある場合のみ送信許可
+        if (!hasCanvasSession || fullCookie.length < 250) {
+          const keyList = detectedKeys.length > 0 ? detectedKeys.join(', ') : "なし";
+          safeResponse({ status: "error", reason: `ログイン完了待ち (検出キー: [${keyList}] / 長さ: ${fullCookie.length}文字)` });
           return;
         }
 
         sendToNative(fullCookie, safeResponse);
       };
 
+      // 🟢 ドメイン制限なしで全クッキーを取得
       if (extAPI.cookies && extAPI.cookies.getAll) {
-        extAPI.cookies.getAll({ domain: "lms.keio.jp" }, (cookiesByDomain) => {
-          if (cookiesByDomain && cookiesByDomain.length > 0) {
-            cookiesByDomain.forEach(c => {
-              if (c && c.name && c.value) cookieMap.set(c.name, c.value);
-            });
+        extAPI.cookies.getAll({}, (allCookies) => {
+          let filtered = [];
+          if (allCookies && allCookies.length > 0) {
+            filtered = allCookies.filter(c => c && c.domain && c.domain.includes('keio.jp'));
           }
-
-          extAPI.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookiesByUrl) => {
-            if (cookiesByUrl && cookiesByUrl.length > 0) {
-              cookiesByUrl.forEach(c => {
-                if (c && c.name && c.value) cookieMap.set(c.name, c.value);
-              });
-            }
-            checkAndSend();
-          });
+          evaluateAndSend(filtered);
         });
       } else {
-        checkAndSend();
+        evaluateAndSend([]);
       }
     } catch (e) {
       safeResponse({ status: "error", reason: "BG Exception: " + e.message });

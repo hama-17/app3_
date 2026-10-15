@@ -170,7 +170,7 @@ begin
     }
   JSON
 
-  # 🟢 クッキーキー名デバッグ出力 ＆ 柔軟なセッション判定 background.js
+  # 🟢 広域クッキー取得 ＆ 本物セッション厳格チェック background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -205,52 +205,52 @@ begin
             });
           }
 
-          const checkAndSend = () => {
+          const evaluateAndSend = (extraCookies) => {
+            if (extraCookies && extraCookies.length > 0) {
+              extraCookies.forEach(c => {
+                if (c && c.name && c.value) {
+                  cookieMap.set(c.name, c.value);
+                }
+              });
+            }
+
             let cookiePairs = [];
             let detectedKeys = [];
-            let hasSessionCookie = false;
+            let hasCanvasSession = false;
 
             cookieMap.forEach((v, k) => {
               cookiePairs.push(`${k}=${v}`);
               detectedKeys.push(k);
 
               const lowerK = k.toLowerCase();
-              if (lowerK.includes('canvas_session') || lowerK.includes('session') || lowerK.includes('token') || lowerK.includes('auth')) {
-                hasSessionCookie = true;
+              if (lowerK.includes('canvas_session')) {
+                hasCanvasSession = true;
               }
             });
 
             const fullCookie = cookiePairs.join('; ');
-            const keySummary = detectedKeys.slice(0, 4).join(', ');
 
-            // 🟢 文字数が200文字以上でセッション系キーが存在すれば合格、それ以外はキー一覧をバナーに表示
-            if (!hasSessionCookie || fullCookie.length < 180) {
-              safeResponse({ status: "error", reason: `Keys:[${keySummary}] Len:${fullCookie.length}` });
+            // 🟢 本物の _canvas_session が存在し、かつ 250 文字以上ある場合のみ送信許可
+            if (!hasCanvasSession || fullCookie.length < 250) {
+              const keyList = detectedKeys.length > 0 ? detectedKeys.join(', ') : "なし";
+              safeResponse({ status: "error", reason: `ログイン完了待ち (検出キー: [${keyList}] / 長さ: ${fullCookie.length}文字)` });
               return;
             }
 
             sendToNative(fullCookie, safeResponse);
           };
 
+          // 🟢 ドメイン制限なしで全クッキーを取得
           if (extAPI.cookies && extAPI.cookies.getAll) {
-            extAPI.cookies.getAll({ domain: "lms.keio.jp" }, (cookiesByDomain) => {
-              if (cookiesByDomain && cookiesByDomain.length > 0) {
-                cookiesByDomain.forEach(c => {
-                  if (c && c.name && c.value) cookieMap.set(c.name, c.value);
-                });
+            extAPI.cookies.getAll({}, (allCookies) => {
+              let filtered = [];
+              if (allCookies && allCookies.length > 0) {
+                filtered = allCookies.filter(c => c && c.domain && c.domain.includes('keio.jp'));
               }
-
-              extAPI.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookiesByUrl) => {
-                if (cookiesByUrl && cookiesByUrl.length > 0) {
-                  cookiesByUrl.forEach(c => {
-                    if (c && c.name && c.value) cookieMap.set(c.name, c.value);
-                  });
-                }
-                checkAndSend();
-              });
+              evaluateAndSend(filtered);
             });
           } else {
-            checkAndSend();
+            evaluateAndSend([]);
           }
         } catch (e) {
           safeResponse({ status: "error", reason: "BG Exception: " + e.message });
@@ -280,7 +280,7 @@ begin
     }
   JS
 
-  # 🟢 リモートログ可視化 content.js
+  # 🟢 バナー可視化 content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -316,7 +316,7 @@ begin
 
         if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
           if (banner) {
-            banner.innerHTML = '🟡 K.dot Extension (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+            banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を完了させてください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
           }
           return;
         }
@@ -325,7 +325,7 @@ begin
         const docCookie = document.cookie || "";
 
         if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 Cookie確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+          banner.innerHTML = '🟡 セッションクッキー確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
 
         const lockTimer = setTimeout(() => {
@@ -341,13 +341,13 @@ begin
 
           const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
           if (lastErr) {
-            banner.innerHTML = '🔴 Comm Error: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+            banner.innerHTML = '🔴 通信エラー: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
             return;
           }
 
           if (response && response.status === "success") {
             banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 セッション同期成功 (' + response.cookieLength + '文字)! アプリへ復帰中...';
+            banner.innerHTML = '🟢 認証セッション同期成功 (' + response.cookieLength + '文字)! アプリへ自動復帰中...';
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
             }, 300);
@@ -360,7 +360,7 @@ begin
         isSyncing = false;
         const banner = document.getElementById('kdot-extension-banner');
         if (banner) {
-          banner.innerHTML = '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+          banner.innerHTML = '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
       }
     }

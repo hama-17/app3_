@@ -31,7 +31,7 @@ function checkAndSyncCookie() {
 
     if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
       if (banner) {
-        banner.innerHTML = '🟡 K.dot Extension (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+        banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を完了させてください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
       }
       return;
     }
@@ -40,7 +40,7 @@ function checkAndSyncCookie() {
     const docCookie = document.cookie || "";
 
     if (banner && !banner.dataset.synced) {
-      banner.innerHTML = '🟡 Cookie確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+      banner.innerHTML = '🟡 セッションクッキー確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
     }
 
     const lockTimer = setTimeout(() => {
@@ -56,13 +56,13 @@ function checkAndSyncCookie() {
 
       const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
       if (lastErr) {
-        banner.innerHTML = '🔴 Comm Error: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+        banner.innerHTML = '🔴 通信エラー: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         return;
       }
 
       if (response && response.status === "success") {
         banner.dataset.synced = "true";
-        banner.innerHTML = '🟢 セッション同期成功 (' + response.cookieLength + '文字)! アプリへ復帰中...';
+        banner.innerHTML = '🟢 認証セッション同期成功 (' + response.cookieLength + '文字)! アプリへ自動復帰中...';
         setTimeout(() => {
           window.location.href = "app3kportal://login-success";
         }, 300);
@@ -75,7 +75,7 @@ function checkAndSyncCookie() {
     isSyncing = false;
     const banner = document.getElementById('kdot-extension-banner');
     if (banner) {
-      banner.innerHTML = '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+      banner.innerHTML = '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
     }
   }
 }
