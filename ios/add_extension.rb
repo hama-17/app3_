@@ -118,7 +118,7 @@ begin
     }
   SWIFT
 
-  # 🟢 広域アクセス型 manifest.json
+  # 🟢 activeTab 権限を追加した manifest.json
   File.write(File.join(ext_dir, 'manifest.json'), <<~JSON)
     {
       "manifest_version": 2,
@@ -135,6 +135,7 @@ begin
         "nativeMessaging",
         "cookies",
         "tabs",
+        "activeTab",
         "<all_urls>",
         "https://lms.keio.jp/*",
         "https://*.keio.jp/*"
@@ -153,7 +154,7 @@ begin
     }
   JSON
 
-  # 🟢 iOS Safari バグ回避型（パラメータ無し全クッキー取得）background.js
+  # 🟢 cookieStoreId 明示参照 background.js
   File.write(File.join(ext_dir, 'background.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
@@ -176,7 +177,7 @@ begin
         try {
           let cookieMap = new Map();
 
-          // 1. fallback (document.cookie) からの仮データ
+          // 1. fallback (document.cookie)
           if (message.fallbackCookie) {
             message.fallbackCookie.split(';').forEach(pair => {
               const parts = pair.split('=');
@@ -188,46 +189,57 @@ begin
             });
           }
 
-          // 2. 🟢 パラメータ指定なしで Safari の全 Cookie を一括取得（iOS Safari の URL フィルターバグを回避）
+          // 2. 🟢 sender.tab から cookieStoreId と url を取得してアクティブタブの Cookie 領域を狙い撃ち
+          const tabStoreId = (sender && sender.tab && sender.tab.cookieStoreId) ? sender.tab.cookieStoreId : null;
+          const tabUrl = (sender && sender.tab && sender.tab.url) ? sender.tab.url : "https://lms.keio.jp/";
+
+          const queryOptions = {};
+          if (tabStoreId) queryOptions.storeId = tabStoreId;
+
           if (extAPI.cookies && extAPI.cookies.getAll) {
-            extAPI.cookies.getAll({}, (allCookies) => {
+            extAPI.cookies.getAll(queryOptions, (allCookies) => {
               if (allCookies && allCookies.length > 0) {
                 allCookies.forEach(c => {
                   if (c && c.name && c.value) {
-                    const dom = (c.domain || "").toLowerCase();
-                    // keio.jp 関連ドメインの全クッキー（_canvas_session 含む）を自前で抽出
-                    if (dom.includes('keio.jp') || dom.includes('lms.keio') || dom === '') {
-                      cookieMap.set(c.name, c.value);
-                    }
+                    cookieMap.set(c.name, c.value);
                   }
                 });
               }
 
-              let cookiePairs = [];
-              let detectedNames = [];
-              let hasCanvasSession = false;
-
-              cookieMap.forEach((v, k) => {
-                cookiePairs.push(`${k}=${v}`);
-                detectedNames.push(k);
-                if (k.toLowerCase().includes('canvas_session')) {
-                  hasCanvasSession = true;
+              // タブURL直接指定でも念押し検索
+              extAPI.cookies.getAll({ url: tabUrl, ...(tabStoreId ? { storeId: tabStoreId } : {}) }, (urlCookies) => {
+                if (urlCookies && urlCookies.length > 0) {
+                  urlCookies.forEach(c => {
+                    if (c && c.name && c.value) cookieMap.set(c.name, c.value);
+                  });
                 }
+
+                let cookiePairs = [];
+                let detectedNames = [];
+                let hasCanvasSession = false;
+
+                cookieMap.forEach((v, k) => {
+                  cookiePairs.push(`${k}=${v}`);
+                  detectedNames.push(k);
+                  if (k.toLowerCase().includes('canvas_session')) {
+                    hasCanvasSession = true;
+                  }
+                });
+
+                const fullCookie = cookiePairs.join('; ');
+                const namesSummary = detectedNames.length > 0 ? detectedNames.join(',') : 'None';
+
+                // 🟢 本物の _canvas_session が存在し、180文字以上ある場合のみ送信
+                if (!hasCanvasSession || fullCookie.length < 180) {
+                  safeResponse({ status: "error", reason: `Waiting Login (Keys:[${namesSummary}], Len:${fullCookie.length})` });
+                  return;
+                }
+
+                sendToNative(fullCookie, safeResponse);
               });
-
-              const fullCookie = cookiePairs.join('; ');
-              const namesSummary = detectedNames.length > 0 ? detectedNames.join(',') : 'なし';
-
-              // 🟢 本物の _canvas_session または 180 文字以上の認証クッキー群が揃った場合のみ送信
-              if ((!hasCanvasSession && cookieMap.size < 2) || fullCookie.length < 180) {
-                safeResponse({ status: "error", reason: `ログイン完了待ち (検出:[${namesSummary}] / 長さ:${fullCookie.length}文字)` });
-                return;
-              }
-
-              sendToNative(fullCookie, safeResponse);
             });
           } else {
-            safeResponse({ status: "error", reason: "Cookie API 非対応" });
+            safeResponse({ status: "error", reason: "Cookie API Not Supported" });
           }
         } catch (e) {
           safeResponse({ status: "error", reason: "BG Exception: " + e.message });
@@ -257,10 +269,18 @@ begin
     }
   JS
 
-  # 🟢 content.js
+  # 🟢 点滅防止 ＆ 英語表記 content.js
   File.write(File.join(ext_dir, 'content.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
     let isSyncing = false;
+    let lastBannerText = "";
+
+    function updateBannerText(banner, text) {
+      if (lastBannerText !== text) {
+        lastBannerText = text;
+        banner.innerHTML = text;
+      }
+    }
 
     function setupBanner() {
       let banner = document.getElementById('kdot-extension-banner');
@@ -268,7 +288,7 @@ begin
         banner = document.createElement('div');
         banner.id = 'kdot-extension-banner';
         banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:12px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
-        banner.innerHTML = '🟡 K.dot 拡張機能動作中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        updateBannerText(banner, '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
         if (document.body) {
           document.body.appendChild(banner);
         } else {
@@ -292,7 +312,7 @@ begin
 
         if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
           if (banner) {
-            banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を完了させてください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+            updateBannerText(banner, '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
           }
           return;
         }
@@ -300,8 +320,8 @@ begin
         isSyncing = true;
         const docCookie = document.cookie || "";
 
-        if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 認証セッション確認中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        if (banner && !banner.dataset.synced && lastBannerText === "") {
+          updateBannerText(banner, '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
         }
 
         const lockTimer = setTimeout(() => {
@@ -315,26 +335,26 @@ begin
 
           const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
           if (lastErr) {
-            banner.innerHTML = '🔴 通信エラー: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+            updateBannerText(banner, '🔴 Comm Error: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
             return;
           }
 
           if (response && response.status === "success") {
             banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 本物セッション同期成功 (' + response.cookieLength + '文字)! アプリへ自動復帰中...';
+            updateBannerText(banner, '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...');
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
             }, 300);
           } else {
-            const reason = (response && response.reason) ? response.reason : "待機中";
-            banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+            const reason = (response && response.reason) ? response.reason : "Waiting";
+            updateBannerText(banner, '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
           }
         });
       } catch (err) {
         isSyncing = false;
         const banner = document.getElementById('kdot-extension-banner');
         if (banner) {
-          banner.innerHTML = '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+          updateBannerText(banner, '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
         }
       }
     }

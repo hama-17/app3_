@@ -19,7 +19,7 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       let cookieMap = new Map();
 
-      // 1. fallback (document.cookie) からの仮データ
+      // 1. fallback (document.cookie)
       if (message.fallbackCookie) {
         message.fallbackCookie.split(';').forEach(pair => {
           const parts = pair.split('=');
@@ -31,46 +31,57 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }
 
-      // 2. 🟢 パラメータ指定なしで Safari の全 Cookie を一括取得（iOS Safari の URL フィルターバグを回避）
+      // 2. 🟢 sender.tab から cookieStoreId と url を取得してアクティブタブの Cookie 領域を狙い撃ち
+      const tabStoreId = (sender && sender.tab && sender.tab.cookieStoreId) ? sender.tab.cookieStoreId : null;
+      const tabUrl = (sender && sender.tab && sender.tab.url) ? sender.tab.url : "https://lms.keio.jp/";
+
+      const queryOptions = {};
+      if (tabStoreId) queryOptions.storeId = tabStoreId;
+
       if (extAPI.cookies && extAPI.cookies.getAll) {
-        extAPI.cookies.getAll({}, (allCookies) => {
+        extAPI.cookies.getAll(queryOptions, (allCookies) => {
           if (allCookies && allCookies.length > 0) {
             allCookies.forEach(c => {
               if (c && c.name && c.value) {
-                const dom = (c.domain || "").toLowerCase();
-                // keio.jp 関連ドメインの全クッキー（_canvas_session 含む）を自前で抽出
-                if (dom.includes('keio.jp') || dom.includes('lms.keio') || dom === '') {
-                  cookieMap.set(c.name, c.value);
-                }
+                cookieMap.set(c.name, c.value);
               }
             });
           }
 
-          let cookiePairs = [];
-          let detectedNames = [];
-          let hasCanvasSession = false;
-
-          cookieMap.forEach((v, k) => {
-            cookiePairs.push(`${k}=${v}`);
-            detectedNames.push(k);
-            if (k.toLowerCase().includes('canvas_session')) {
-              hasCanvasSession = true;
+          // タブURL直接指定でも念押し検索
+          extAPI.cookies.getAll({ url: tabUrl, ...(tabStoreId ? { storeId: tabStoreId } : {}) }, (urlCookies) => {
+            if (urlCookies && urlCookies.length > 0) {
+              urlCookies.forEach(c => {
+                if (c && c.name && c.value) cookieMap.set(c.name, c.value);
+              });
             }
+
+            let cookiePairs = [];
+            let detectedNames = [];
+            let hasCanvasSession = false;
+
+            cookieMap.forEach((v, k) => {
+              cookiePairs.push(`${k}=${v}`);
+              detectedNames.push(k);
+              if (k.toLowerCase().includes('canvas_session')) {
+                hasCanvasSession = true;
+              }
+            });
+
+            const fullCookie = cookiePairs.join('; ');
+            const namesSummary = detectedNames.length > 0 ? detectedNames.join(',') : 'None';
+
+            // 🟢 本物の _canvas_session が存在し、180文字以上ある場合のみ送信
+            if (!hasCanvasSession || fullCookie.length < 180) {
+              safeResponse({ status: "error", reason: `Waiting Login (Keys:[${namesSummary}], Len:${fullCookie.length})` });
+              return;
+            }
+
+            sendToNative(fullCookie, safeResponse);
           });
-
-          const fullCookie = cookiePairs.join('; ');
-          const namesSummary = detectedNames.length > 0 ? detectedNames.join(',') : 'なし';
-
-          // 🟢 本物の _canvas_session または 180 文字以上の認証クッキー群が揃った場合のみ送信
-          if ((!hasCanvasSession && cookieMap.size < 2) || fullCookie.length < 180) {
-            safeResponse({ status: "error", reason: `ログイン完了待ち (検出:[${namesSummary}] / 長さ:${fullCookie.length}文字)` });
-            return;
-          }
-
-          sendToNative(fullCookie, safeResponse);
         });
       } else {
-        safeResponse({ status: "error", reason: "Cookie API 非対応" });
+        safeResponse({ status: "error", reason: "Cookie API Not Supported" });
       }
     } catch (e) {
       safeResponse({ status: "error", reason: "BG Exception: " + e.message });
