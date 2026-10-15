@@ -156,61 +156,93 @@ begin
     }
   JSON
 
-  # 🟢 コールバック受け渡し型 background.js
+  # 🟢 既存ログインセッションの完全網羅取得 background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
     extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message && message.action === "SYNC_COOKIE") {
+        let hasResponded = false;
+
+        const respondOnce = (data) => {
+          if (!hasResponded) {
+            hasResponded = true;
+            clearTimeout(timeoutTimer);
+            try { sendResponse(data); } catch(e) {}
+          }
+        };
+
+        const timeoutTimer = setTimeout(() => {
+          respondOnce({ status: "error", reason: "BGタイムアウト(2.5s)" });
+        }, 2500);
+
         try {
-          extAPI.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookies) => {
-            let cookieParts = [];
-            if (cookies && cookies.length > 0) {
-              cookieParts.push(cookies.map(c => `${c.name}=${c.value}`).join('; '));
-            }
-            if (message.fallbackCookie && message.fallbackCookie.length > 0) {
-              cookieParts.push(message.fallbackCookie);
-            }
+          // 🟢 URL・ドメインの両面からクッキーを全集計（HttpOnly含む）
+          extAPI.cookies.getAll({ domain: "lms.keio.jp" }, (cookiesByDomain) => {
+            extAPI.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookiesByUrl) => {
+              let cookieMap = new Map();
 
-            const fullCookie = cookieParts.join('; ');
-
-            if (!fullCookie || fullCookie.trim().length === 0) {
-              sendResponse({ status: "error", reason: "Cookie未検出(ログイン完了待ち)" });
-              return;
-            }
-
-            extAPI.runtime.sendNativeMessage("application.id", { "cookie": fullCookie }, (response) => {
-              const lastErr = extAPI.runtime.lastError;
-              if (lastErr) {
-                sendResponse({ status: "error", reason: "Native通信失敗: " + lastErr.message });
-              } else if (response && response.status === "success") {
-                sendResponse({ status: "success", cookieLength: fullCookie.length });
-              } else {
-                const errDetail = (response && response.reason) ? response.reason : "Native書き込み失敗";
-                sendResponse({ status: "error", reason: errDetail });
+              if (cookiesByDomain) {
+                cookiesByDomain.forEach(c => { if(c && c.name) cookieMap.set(c.name, c.value); });
               }
+              if (cookiesByUrl) {
+                cookiesByUrl.forEach(c => { if(c && c.name) cookieMap.set(c.name, c.value); });
+              }
+              if (message.fallbackCookie) {
+                message.fallbackCookie.split(';').forEach(pair => {
+                  const parts = pair.split('=');
+                  if (parts.length >= 2) {
+                    const k = parts[0].trim();
+                    const v = parts.slice(1).join('=').trim();
+                    if (k && !cookieMap.has(k)) cookieMap.set(k, v);
+                  }
+                });
+              }
+
+              let cookiePairs = [];
+              cookieMap.forEach((v, k) => cookiePairs.push(`${k}=${v}`));
+              const fullCookie = cookiePairs.join('; ');
+
+              // 🟢 ログインセッションの存在判定（Canvasの主要セッションキーまたは全クッキー長で判定）
+              if (!fullCookie || fullCookie.trim().length < 10) {
+                respondOnce({ status: "error", reason: "Cookie未検出(ログイン完了待ち)" });
+                return;
+              }
+
+              extAPI.runtime.sendNativeMessage("application.id", { "cookie": fullCookie }, (response) => {
+                const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
+                if (lastErr) {
+                  respondOnce({ status: "error", reason: "Native通信失敗: " + lastErr.message });
+                } else if (response && response.status === "success") {
+                  respondOnce({ status: "success", cookieLength: fullCookie.length });
+                } else {
+                  const errDetail = (response && response.reason) ? response.reason : "Native書き込み失敗";
+                  respondOnce({ status: "error", reason: errDetail });
+                }
+              });
             });
           });
         } catch (e) {
-          sendResponse({ status: "error", reason: "BG処理例外: " + e.message });
+          respondOnce({ status: "error", reason: "BG例外: " + e.message });
         }
         return true;
       }
     });
   JS
 
-  # 🟢 送信成功時に自動リダイレクトを発火する content.js
+  # 🟢 既存ログイン状態検知 ＆ 0.2秒自動即時復帰 content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
     function setupBanner() {
-      if (!document.getElementById('kdot-extension-banner')) {
-        const banner = document.createElement('div');
+      let banner = document.getElementById('kdot-extension-banner');
+      if (!banner) {
+        banner = document.createElement('div');
         banner.id = 'kdot-extension-banner';
         banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:12px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
-        banner.innerHTML = 'K.dot 拡張機能初期化中...';
+        banner.innerHTML = '🟡 K.dot 拡張機能動作中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         if (document.body) {
           document.body.appendChild(banner);
         } else {
@@ -219,18 +251,18 @@ begin
           });
         }
       }
+      return banner;
     }
 
     function checkAndSyncCookie() {
       try {
-        setupBanner();
-        const banner = document.getElementById('kdot-extension-banner');
+        const banner = setupBanner();
 
-        // 🟢 すでに一度同期成功している場合は再処理・再リダイレクトしない
         if (banner && banner.dataset.synced === "true") {
           return;
         }
 
+        // 未ログイン状態（パスキー入力画面等）の場合
         if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
           if (banner) {
             banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
@@ -238,28 +270,28 @@ begin
           return;
         }
 
+        // ログイン済み状態（すでにSafariでログイン済みの場合も含む）
         const docCookie = document.cookie || "";
 
         extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
           if (!banner) return;
 
-          const lastErr = extAPI.runtime.lastError;
+          const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
           if (lastErr) {
             banner.innerHTML = '🔴 通信エラー: ' + lastErr.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
             return;
           }
 
           if (response && response.status === "success") {
-            // 🟢 同期フラグを立てる
             banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 App Groupへ送信完了！アプリへ自動復帰中...';
+            banner.innerHTML = '🟢 既存セッション同期完了！アプリへ自動復帰中...';
 
-            // 🟢 即座にアプリへ自動リダイレクトを発火！
+            // 🟢 0.2秒で即座にアプリへ自動復帰！
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
-            }, 300);
+            }, 200);
           } else {
-            const reason = (response && response.reason) ? response.reason : "処理中...";
+            const reason = (response && response.reason) ? response.reason : "待機中";
             banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
           }
         });
@@ -272,7 +304,8 @@ begin
     }
 
     setupBanner();
-    setInterval(checkAndSyncCookie, 2000);
+    checkAndSyncCookie();
+    setInterval(checkAndSyncCookie, 1000);
   JS
 
   # 3. Extension Target の取得・生成
