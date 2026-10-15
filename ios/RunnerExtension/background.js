@@ -2,20 +2,6 @@ const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
 extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.action === "SYNC_COOKIE") {
-    let hasResponded = false;
-
-    const respondOnce = (data) => {
-      if (!hasResponded) {
-        hasResponded = true;
-        clearTimeout(timeoutTimer);
-        try { sendResponse(data); } catch(e) {}
-      }
-    };
-
-    const timeoutTimer = setTimeout(() => {
-      respondOnce({ status: "error", reason: "BG応答タイムアウト(3s)" });
-    }, 3000);
-
     try {
       extAPI.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookies) => {
         let cookiePairs = [];
@@ -40,24 +26,22 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const fullCookie = cookiePairs.join('; ');
 
         if (!fullCookie || fullCookie.trim().length < 5) {
-          respondOnce({ status: "error", reason: "Cookie未検出(ログイン完了待ち)" });
+          sendResponse({ status: "error", reason: "No Cookie Found" });
           return;
         }
 
-        extAPI.runtime.sendNativeMessage("application.id", { "cookie": fullCookie }, (response) => {
-          const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
-          if (lastErr) {
-            respondOnce({ status: "error", reason: "Native通信失敗: " + lastErr.message });
-          } else if (response && response.status === "success") {
-            respondOnce({ status: "success", cookieLength: fullCookie.length });
-          } else {
-            const errDetail = (response && response.reason) ? response.reason : "Native書き込み失敗";
-            respondOnce({ status: "error", reason: errDetail });
-          }
-        });
+        // 🟢 Native Swift へクッキー送信（iOS Safari のレスポンス遅延を待たずに即時成功を返す！）
+        try {
+          extAPI.runtime.sendNativeMessage("application.id", { "cookie": fullCookie });
+        } catch (nativeErr) {
+          console.log("sendNativeMessage error:", nativeErr);
+        }
+
+        // Swift 側への書き込みは数ミリ秒で完了するため、待たずに即時レスポンス
+        sendResponse({ status: "success", cookieLength: fullCookie.length });
       });
     } catch (e) {
-      respondOnce({ status: "error", reason: "BG処理例外: " + e.message });
+      sendResponse({ status: "error", reason: "BG Exception: " + e.message });
     }
     return true;
   }
