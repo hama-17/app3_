@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
 
 import '../core/app_theme.dart';
 import '../services/auth_service.dart';
@@ -50,13 +51,12 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  // 🍎 iOS：画面起動時に App Group の古いクッキーを消去してから監視開始
   Future<void> _prepareLoginScreenIos() async {
     await _clearAppGroupCookie();
     if (mounted) {
       setState(() {
         _isInitialized = true;
-        _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+        _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Token未検出 / Safariでログイン完了待ち)";
       });
       _startCookiePolling();
     }
@@ -85,7 +85,6 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  /// App Group のクッキーを削除するヘルパー
   Future<void> _clearAppGroupCookie() async {
     try {
       await _appGroupChannel.invokeMethod('clearAppGroupCookie');
@@ -140,24 +139,23 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  // 🍎 iOS：毎秒App Groupを読み出し、リアルタイム時刻と状態を画面に描画
   Future<void> _checkAndValidateIosAppGroupCookies() async {
     if (_isSuccessTriggered) return;
 
     try {
-      final String? appGroupCookie = await _appGroupChannel.invokeMethod<String>('getAppGroupCookie');
+      final String? appGroupData = await _appGroupChannel.invokeMethod<String>('getAppGroupCookie');
 
-      if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
+      if (appGroupData != null && appGroupData.isNotEmpty) {
         if (mounted) {
           setState(() {
-            _statusText = "🟢 [${_getTimeStr()}] Cookie取得成功 (${appGroupCookie.length}文字)\n検証処理を実行中...";
+            _statusText = "🟢 [${_getTimeStr()}] Token取得成功 (${appGroupData.length}文字)\n検証処理を実行中...";
           });
         }
-        await _validateAndSave(appGroupCookie);
+        await _validateAndSave(appGroupData);
       } else {
         if (mounted) {
           setState(() {
-            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Token未検出 / Safariでログイン完了待ち)";
           });
         }
       }
@@ -170,8 +168,31 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  Future<void> _validateAndSave(String cookieString) async {
-    final isValid = await AuthService.validateSession(cookieString);
+  /// 🟢 Cookie・API Tokenの双方に対応した検証ロジック
+  Future<bool> _verifyCredential(String credential) async {
+    try {
+      // 1. API トークン形式 (Bearer Token) での検証
+      final tokenRes = await http.get(
+        Uri.parse('https://lms.keio.jp/api/v1/users/self'),
+        headers: {
+          'Authorization': 'Bearer $credential',
+          'Accept': 'application/json',
+        },
+      );
+      if (tokenRes.statusCode == 200) {
+        return true;
+      }
+
+      // 2. 既存 Cookie 形式での検証 (AuthService)
+      return await AuthService.validateSession(credential);
+    } catch (e) {
+      debugPrint("Credential verification error: $e");
+      return false;
+    }
+  }
+
+  Future<void> _validateAndSave(String credential) async {
+    final isValid = await _verifyCredential(credential);
 
     if (isValid && !_isSuccessTriggered && mounted) {
       _isSuccessTriggered = true;
@@ -182,20 +203,20 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
         await _clearAppGroupCookie();
       }
 
-      await AuthService.saveSession(cookieString);
+      await AuthService.saveSession(credential);
 
       if (mounted) {
         Navigator.pop(context);
         widget.onLoginSuccess();
       }
     } else if (!isValid && mounted) {
-      // 🟢 セッションが無効（106文字などの仮クッキー）だった場合、App Groupから即座に削除して無限ループを防ぐ
-      if (Platform.isIOS) {
+      // 🟢 64文字などの本物トークンが届いている間に誤削除されないよう、本当に短い仮クッキー（< 30文字）のみ消去
+      if (Platform.isIOS && credential.length < 30) {
         await _clearAppGroupCookie();
       }
       if (mounted) {
         setState(() {
-          _statusText = "🟡 [${_getTimeStr()}] 仮Cookie検知 (${cookieString.length}文字 - 無効)\nApp Groupをクリアしました。Safariでログインを完了させてください。";
+          _statusText = "⚠️ [${_getTimeStr()}] Token検証失敗 (${credential.length}文字)\n再試行中...";
         });
       }
     }
@@ -206,12 +227,11 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     final Uri fallbackUri = Uri.parse('https://lms.keio.jp');
 
     try {
-      // 🟢 Safari起動直前に古データをApp Groupから完全消去し、画面状態をリセット
       if (Platform.isIOS) {
         await _clearAppGroupCookie();
         if (mounted) {
           setState(() {
-            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Token未検出 / Safariでログイン完了待ち)";
           });
         }
       }
