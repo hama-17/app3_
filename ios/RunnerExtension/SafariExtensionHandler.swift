@@ -23,8 +23,8 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
 
         if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
             sharedDefaults.set(cookie, forKey: "session_cookie")
-            let success = sharedDefaults.synchronize()
-            sendResponse(context: context, status: success ? "success" : "sync_fail", reason: nil)
+            sharedDefaults.synchronize()
+            sendResponse(context: context, status: "success", reason: nil)
         } else {
             sendResponse(context: context, status: "error", reason: "no_app_group")
         }

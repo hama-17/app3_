@@ -30,6 +30,28 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }
 
+      const checkAndSend = () => {
+        let cookiePairs = [];
+        let hasCanvasSession = false;
+
+        cookieMap.forEach((v, k) => {
+          cookiePairs.push(`${k}=${v}`);
+          if (k.includes('_canvas_session') || k.includes('canvas_session')) {
+            hasCanvasSession = true;
+          }
+        });
+
+        const fullCookie = cookiePairs.join('; ');
+
+        // 🟢 本物の Canvas 認証セッションクッキーが存在しない場合はまだ同期しない（ログイン完了待ち）
+        if (!hasCanvasSession || fullCookie.length < 200) {
+          safeResponse({ status: "error", reason: "Waiting Session Auth (_canvas_session)" });
+          return;
+        }
+
+        sendToNative(fullCookie, safeResponse);
+      };
+
       if (extAPI.cookies && extAPI.cookies.getAll) {
         extAPI.cookies.getAll({ domain: "lms.keio.jp" }, (cookiesByDomain) => {
           if (cookiesByDomain && cookiesByDomain.length > 0) {
@@ -44,20 +66,11 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (c && c.name && c.value) cookieMap.set(c.name, c.value);
               });
             }
-
-            let cookiePairs = [];
-            cookieMap.forEach((v, k) => cookiePairs.push(`${k}=${v}`));
-            const fullCookie = cookiePairs.join('; ');
-
-            sendToNative(fullCookie, safeResponse);
+            checkAndSend();
           });
         });
       } else {
-        let cookiePairs = [];
-        cookieMap.forEach((v, k) => cookiePairs.push(`${k}=${v}`));
-        const fullCookie = cookiePairs.join('; ');
-
-        sendToNative(fullCookie, safeResponse);
+        checkAndSend();
       }
     } catch (e) {
       safeResponse({ status: "error", reason: "BG Exception: " + e.message });
@@ -68,11 +81,6 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 function sendToNative(cookieString, safeResponse) {
-  if (!cookieString || cookieString.trim().length < 5) {
-    safeResponse({ status: "error", reason: "No Cookie Found" });
-    return;
-  }
-
   try {
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
     extAPI.runtime.sendNativeMessage("application.id", { "cookie": cookieString }, (response) => {

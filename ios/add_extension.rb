@@ -89,7 +89,7 @@ begin
     XML
   end
 
-  # 🟢 Swift ハンドラ（確実な App Group 書き込み ＆ 同期）
+  # 🟢 Swift ハンドラ（書き込み成功の確実な返却）
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -117,8 +117,8 @@ begin
 
             if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
                 sharedDefaults.set(cookie, forKey: "session_cookie")
-                let success = sharedDefaults.synchronize()
-                sendResponse(context: context, status: success ? "success" : "sync_fail", reason: nil)
+                sharedDefaults.synchronize()
+                sendResponse(context: context, status: "success", reason: nil)
             } else {
                 sendResponse(context: context, status: "error", reason: "no_app_group")
             }
@@ -136,7 +136,6 @@ begin
     }
   SWIFT
 
-  # 🟢 nativeMessaging 権限を追加した manifest.json
   manifest_path = File.join(ext_dir, 'manifest.json')
   File.write(manifest_path, <<~JSON)
     {
@@ -171,7 +170,7 @@ begin
     }
   JSON
 
-  # 🟢 完全な Cookie 取得 background.js
+  # 🟢 _canvas_session 検証ロジック付き background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -206,6 +205,28 @@ begin
             });
           }
 
+          const checkAndSend = () => {
+            let cookiePairs = [];
+            let hasCanvasSession = false;
+
+            cookieMap.forEach((v, k) => {
+              cookiePairs.push(`${k}=${v}`);
+              if (k.includes('_canvas_session') || k.includes('canvas_session')) {
+                hasCanvasSession = true;
+              }
+            });
+
+            const fullCookie = cookiePairs.join('; ');
+
+            // 🟢 本物の Canvas 認証セッションクッキーが存在しない場合はまだ同期しない（ログイン完了待ち）
+            if (!hasCanvasSession || fullCookie.length < 200) {
+              safeResponse({ status: "error", reason: "Waiting Session Auth (_canvas_session)" });
+              return;
+            }
+
+            sendToNative(fullCookie, safeResponse);
+          };
+
           if (extAPI.cookies && extAPI.cookies.getAll) {
             extAPI.cookies.getAll({ domain: "lms.keio.jp" }, (cookiesByDomain) => {
               if (cookiesByDomain && cookiesByDomain.length > 0) {
@@ -220,20 +241,11 @@ begin
                     if (c && c.name && c.value) cookieMap.set(c.name, c.value);
                   });
                 }
-
-                let cookiePairs = [];
-                cookieMap.forEach((v, k) => cookiePairs.push(`${k}=${v}`));
-                const fullCookie = cookiePairs.join('; ');
-
-                sendToNative(fullCookie, safeResponse);
+                checkAndSend();
               });
             });
           } else {
-            let cookiePairs = [];
-            cookieMap.forEach((v, k) => cookiePairs.push(`${k}=${v}`));
-            const fullCookie = cookiePairs.join('; ');
-
-            sendToNative(fullCookie, safeResponse);
+            checkAndSend();
           }
         } catch (e) {
           safeResponse({ status: "error", reason: "BG Exception: " + e.message });
@@ -244,11 +256,6 @@ begin
     });
 
     function sendToNative(cookieString, safeResponse) {
-      if (!cookieString || cookieString.trim().length < 5) {
-        safeResponse({ status: "error", reason: "No Cookie Found" });
-        return;
-      }
-
       try {
         const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
         extAPI.runtime.sendNativeMessage("application.id", { "cookie": cookieString }, (response) => {
@@ -268,7 +275,7 @@ begin
     }
   JS
 
-  # 🟢 応答待ち ＆ 自動復帰 content.js
+  # 🟢 同期成功時のみ復帰 content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
@@ -313,17 +320,14 @@ begin
         const docCookie = document.cookie || "";
 
         if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 Extracting & Syncing Session... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+          banner.innerHTML = '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
         }
 
         const lockTimer = setTimeout(() => {
           if (isSyncing) {
             isSyncing = false;
-            if (banner && !banner.dataset.synced) {
-              banner.innerHTML = '🔴 Sync Timeout (Retrying...) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
-            }
           }
-        }, 4000);
+        }, 3000);
 
         extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
           clearTimeout(lockTimer);
@@ -338,12 +342,12 @@ begin
 
           if (response && response.status === "success") {
             banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 App Group Sync Success (' + response.cookieLength + ' chars)! Returning to App...';
+            banner.innerHTML = '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...';
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
             }, 300);
           } else {
-            const reason = (response && response.reason) ? response.reason : "Waiting";
+            const reason = (response && response.reason) ? response.reason : "Waiting Auth";
             banner.innerHTML = '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
           }
         });
@@ -358,7 +362,7 @@ begin
 
     setupBanner();
     checkAndSyncCookie();
-    setInterval(checkAndSyncCookie, 2000);
+    setInterval(checkAndSyncCookie, 1500);
   JS
 
   # 3. Extension Target の取得・生成

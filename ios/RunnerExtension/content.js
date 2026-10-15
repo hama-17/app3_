@@ -40,17 +40,14 @@ function checkAndSyncCookie() {
     const docCookie = document.cookie || "";
 
     if (banner && !banner.dataset.synced) {
-      banner.innerHTML = '🟡 Extracting & Syncing Session... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
+      banner.innerHTML = '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
     }
 
     const lockTimer = setTimeout(() => {
       if (isSyncing) {
         isSyncing = false;
-        if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🔴 Sync Timeout (Retrying...) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
-        }
       }
-    }, 4000);
+    }, 3000);
 
     extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
       clearTimeout(lockTimer);
@@ -65,12 +62,12 @@ function checkAndSyncCookie() {
 
       if (response && response.status === "success") {
         banner.dataset.synced = "true";
-        banner.innerHTML = '🟢 App Group Sync Success (' + response.cookieLength + ' chars)! Returning to App...';
+        banner.innerHTML = '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...';
         setTimeout(() => {
           window.location.href = "app3kportal://login-success";
         }, 300);
       } else {
-        const reason = (response && response.reason) ? response.reason : "Waiting";
+        const reason = (response && response.reason) ? response.reason : "Waiting Auth";
         banner.innerHTML = '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>';
       }
     });
@@ -85,4 +82,4 @@ function checkAndSyncCookie() {
 
 setupBanner();
 checkAndSyncCookie();
-setInterval(checkAndSyncCookie, 2000);
+setInterval(checkAndSyncCookie, 1500);
