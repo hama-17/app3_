@@ -1,16 +1,13 @@
-import 'package:flutter/services.dart';
+import '../services/auth_service.dart';
 
 class CookieService {
-  static const _platform = MethodChannel('com.h.k.portal/cookies');
+  /// 🟢 App Group ではなく AuthService (SecureStorage) から最新ヘッダーを取得
+  static Future<Map<String, String>> getHeaders() async {
+    return await AuthService.getHeaders();
+  }
 
-  /// App Group から保存された Cookie を読み出す
+  /// 🟢 既存コードとの互換性のためのセッション文字列取得
   static Future<String?> getSavedCookie() async {
-    try {
-      final String? cookie = await _platform.invokeMethod('getAppGroupCookie');
-      return cookie;
-    } on PlatformException catch (e) {
-      print("Failed to read App Group Cookie: '${e.message}'.");
-      return null;
-    }
+    return await AuthService.getSession();
   }
 }

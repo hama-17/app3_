@@ -11,14 +11,16 @@ class AuthService {
   );
   static const String _cookieKey = 'canvas_cookie';
 
-  static Future<void> saveSession(String cookie) async {
+  /// 🟢 セッション（クッキーまたはAPIトークン）の保存
+  static Future<void> saveSession(String credential) async {
     try {
-      await _storage.write(key: _cookieKey, value: cookie);
+      await _storage.write(key: _cookieKey, value: credential);
     } catch (e) {
       debugPrint("AuthService.saveSession Error: $e");
     }
   }
 
+  /// 🟢 保存されているセッション（クッキーまたはAPIトークン）の取得
   static Future<String?> getSession() async {
     try {
       return await _storage.read(key: _cookieKey);
@@ -28,9 +30,10 @@ class AuthService {
     }
   }
 
+  /// 🟢 セッションおよびキャッシュの一括初期化（ログアウト用）
   static Future<void> clearSession() async {
     try {
-      // 1. SecureStorage から暗号化キーを削除
+      // 1. SecureStorage から暗号化データを削除
       await _storage.delete(key: _cookieKey);
 
       // 2. 全クッキーを一括完全初期化
@@ -51,11 +54,40 @@ class AuthService {
     }
   }
 
-  static Future<bool> validateSession(String cookie) async {
+  /// 🟢 クレデンシャル形式（Cookie / Bearer Token）を自動判定してヘッダーを構築
+  static Map<String, String> buildHeaders(String credential) {
+    // クッキー形式（'=' や ';' を含む）か API トークン形式（純粋な文字列）かを自動判別
+    if (credential.contains('=') || credential.contains(';')) {
+      return {
+        'Cookie': credential,
+        'Accept': 'application/json',
+      };
+    } else {
+      return {
+        'Authorization': 'Bearer $credential',
+        'Accept': 'application/json',
+      };
+    }
+  }
+
+  /// 🟢 保存中のクレデンシャルから最適な HTTP リクエストヘッダーを取得
+  static Future<Map<String, String>> getHeaders() async {
+    final credential = await getSession();
+    if (credential == null || credential.isEmpty) {
+      return {'Accept': 'application/json'};
+    }
+    return buildHeaders(credential);
+  }
+
+  /// 🟢 クッキー／APIトークンの両方に対応したセッション検証
+  static Future<bool> validateSession(String credential) async {
     try {
       final uri = Uri.tryParse('$canvasBaseUrl/api/v1/users/self');
       if (uri == null) return false;
-      final response = await http.get(uri, headers: {'Cookie': cookie}).timeout(const Duration(seconds: 10));
+
+      // 自動判別された適切なヘッダーで API をテスト
+      final headers = buildHeaders(credential);
+      final response = await http.get(uri, headers: headers).timeout(const Duration(seconds: 10));
       return response.statusCode == 200;
     } catch (e) {
       debugPrint("AuthService.validateSession Error: $e");
