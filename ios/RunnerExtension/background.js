@@ -34,6 +34,6 @@ extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch (e) {
       sendResponse({ status: "error", reason: "BG処理例外: " + e.message });
     }
-    return true; // 非同期応答の有効化
+    return true;
   }
 });

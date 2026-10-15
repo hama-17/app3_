@@ -21,6 +21,11 @@ function checkAndSyncCookie() {
     setupBanner();
     const banner = document.getElementById('kdot-extension-banner');
 
+    // 🟢 すでに一度同期成功している場合は再処理・再リダイレクトしない
+    if (banner && banner.dataset.synced === "true") {
+      return;
+    }
+
     if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
       if (banner) {
         banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
@@ -40,8 +45,14 @@ function checkAndSyncCookie() {
       }
 
       if (response && response.status === "success") {
+        // 🟢 同期フラグを立てる
         banner.dataset.synced = "true";
-        banner.innerHTML = '🟢 App Groupへ送信完了！ (' + response.cookieLength + '文字) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
+        banner.innerHTML = '🟢 App Groupへ送信完了！アプリへ自動復帰中...';
+
+        // 🟢 即座にアプリへ自動リダイレクトを発火！
+        setTimeout(() => {
+          window.location.href = "app3kportal://login-success";
+        }, 300);
       } else {
         const reason = (response && response.reason) ? response.reason : "処理中...";
         banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
