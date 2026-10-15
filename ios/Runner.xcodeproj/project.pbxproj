@@ -8,23 +8,23 @@
 
 /* Begin PBXBuildFile section */
 		02CC4752D07EA28F544BC0D0 /* SafariExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DF61F5C564128E40676B43 /* SafariExtensionHandler.swift */; };
-		0E08CABCB26C0A3D3DAB2DD0 /* icon-16.png in Resources */ = {isa = PBXBuildFile; fileRef = 94276133D98D123D7BDF4BC3 /* icon-16.png */; };
 		10091C648AA33F5A998A10F1 /* RunnerExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 50F2651B6043063604FD0D56 /* RunnerExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
 		1690677445A527008DEC3B77 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36AB5EE027AE82A40EF2A1C2 /* Foundation.framework */; };
-		2D15D819C000374E4AA344F0 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 88236E0EF1BF784E46C07F04 /* content.js */; };
+		188987D12E1D3CAE9FD6D2E6 /* icon-16.png in Resources */ = {isa = PBXBuildFile; fileRef = 94276133D98D123D7BDF4BC3 /* icon-16.png */; };
+		2750794207FF1BF4D4C80ABA /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = B918054B32BF89FDDEA6F1D3 /* manifest.json */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
-		3A6E991B796316CB01E44DF5 /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 47AAF2ABBDCF3835D930E05E /* icon-128.png */; };
+		38049A7EC865C2F499D22A10 /* icon-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 279651A84E216DF840A60C77 /* icon-32.png */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
-		55B65E91BE1DC97B28E75C5E /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = B918054B32BF89FDDEA6F1D3 /* manifest.json */; };
-		628DB3458183D1976FAF4A7F /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 9865A88E9B77A29DF46E4EC5 /* background.js */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
+		800C0AA2CAF76B01B9D85C12 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 9865A88E9B77A29DF46E4EC5 /* background.js */; };
+		95E4A9D978379ED18F30D857 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 88236E0EF1BF784E46C07F04 /* content.js */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
-		A93EA3D5FC11BAADA928AB50 /* icon-48.png in Resources */ = {isa = PBXBuildFile; fileRef = 6EDEBC16AC9C01ADF446501C /* icon-48.png */; };
 		B6E378145186DFA23CC60B97 /* SafariServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C3A391D4AE049FDE9FEFE33 /* SafariServices.framework */; };
-		C8FC8725578BB3D3E736A890 /* icon-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 279651A84E216DF840A60C77 /* icon-32.png */; };
+		BC21E22E27EDB81D2EF5DF8F /* icon-48.png in Resources */ = {isa = PBXBuildFile; fileRef = 6EDEBC16AC9C01ADF446501C /* icon-48.png */; };
+		EB8EBB47F2F6589F4ADE1C17 /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 47AAF2ABBDCF3835D930E05E /* icon-128.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -317,13 +317,13 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				55B65E91BE1DC97B28E75C5E /* manifest.json in Resources */,
-				2D15D819C000374E4AA344F0 /* content.js in Resources */,
-				628DB3458183D1976FAF4A7F /* background.js in Resources */,
-				0E08CABCB26C0A3D3DAB2DD0 /* icon-16.png in Resources */,
-				C8FC8725578BB3D3E736A890 /* icon-32.png in Resources */,
-				A93EA3D5FC11BAADA928AB50 /* icon-48.png in Resources */,
-				3A6E991B796316CB01E44DF5 /* icon-128.png in Resources */,
+				2750794207FF1BF4D4C80ABA /* manifest.json in Resources */,
+				95E4A9D978379ED18F30D857 /* content.js in Resources */,
+				800C0AA2CAF76B01B9D85C12 /* background.js in Resources */,
+				188987D12E1D3CAE9FD6D2E6 /* icon-16.png in Resources */,
+				38049A7EC865C2F499D22A10 /* icon-32.png in Resources */,
+				BC21E22E27EDB81D2EF5DF8F /* icon-48.png in Resources */,
+				EB8EBB47F2F6589F4ADE1C17 /* icon-128.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
