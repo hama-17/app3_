@@ -8,7 +8,7 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
               let message = userInfo[SFExtensionMessageKey] as? [String: Any],
               let cookie = message["cookie"] as? String else {
             let response = NSExtensionItem()
-            response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "invalid_payload" ] ]
+            response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "payload_empty" ] ]
             context.completeRequest(returningItems: [response], completionHandler: nil)
             return
         }

@@ -89,7 +89,7 @@ begin
     XML
   end
 
-  # 🟢 Swift ハンドラ（書き込み成功のレスポンスを返す）
+  # 🟢 Swift ハンドラ
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -102,7 +102,7 @@ begin
                   let message = userInfo[SFExtensionMessageKey] as? [String: Any],
                   let cookie = message["cookie"] as? String else {
                 let response = NSExtensionItem()
-                response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "invalid_payload" ] ]
+                response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "payload_empty" ] ]
                 context.completeRequest(returningItems: [response], completionHandler: nil)
                 return
             }
@@ -156,36 +156,45 @@ begin
     }
   JSON
 
-  # 🟢 HttpOnly Cookie 取得 ＆ 非同期レスポンス対応 background.js
+  # 🟢 堅牢な Cookie 取得＆ネイティブ送信 background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message && message.action === "SYNC_COOKIE") {
-        browser.cookies.getAll({ url: "https://lms.keio.jp" }, (cookies) => {
-          if (!cookies || cookies.length === 0) {
-            sendResponse({ status: "error", reason: "クッキーなし (ログインしてください)" });
+        // 末尾スラッシュ付き URL で取得
+        browser.cookies.getAll({ url: "https://lms.keio.jp/" }, (cookies) => {
+          let cookieParts = [];
+          if (cookies && cookies.length > 0) {
+            cookieParts.push(cookies.map(c => `${c.name}=${c.value}`).join('; '));
+          }
+          if (message.fallbackCookie && message.fallbackCookie.length > 0) {
+            cookieParts.push(message.fallbackCookie);
+          }
+
+          const fullCookie = cookieParts.join('; ');
+
+          if (!fullCookie || fullCookie.trim().length === 0) {
+            sendResponse({ status: "error", reason: "Cookie未検出(ログイン完了待ち)" });
             return;
           }
 
-          const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-          browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
+          browser.runtime.sendNativeMessage("application.id", { "cookie": fullCookie }, (response) => {
             if (browser.runtime.lastError) {
-              sendResponse({ status: "error", reason: browser.runtime.lastError.message });
+              sendResponse({ status: "error", reason: "Native通信失敗: " + browser.runtime.lastError.message });
             } else if (response && response.status === "success") {
-              sendResponse({ status: "success", cookieLength: cookieHeader.length });
+              sendResponse({ status: "success", cookieLength: fullCookie.length });
             } else {
-              const errDetail = (response && response.reason) ? response.reason : "Nativeエラー";
+              const errDetail = (response && response.reason) ? response.reason : "Native書き込み失敗";
               sendResponse({ status: "error", reason: errDetail });
             }
           });
         });
-        return true; // 非同期応答のために必須
+        return true; // 非同期応答を有効化
       }
     });
   JS
 
-  # 🟢 真の成功通知を表示する content.js
+  # 🟢 フォールバック送信 ＆ 詳細エラーバナー content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     function setupBanner() {
@@ -201,20 +210,23 @@ begin
     function checkAndSyncCookie() {
       setupBanner();
       const banner = document.getElementById('kdot-extension-banner');
+
       if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
         if (banner) {
-          banner.innerHTML = '🟡 K.dot 拡張機能動作中 (ログイン操作を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+          banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
         return;
       }
 
-      browser.runtime.sendMessage({ action: "SYNC_COOKIE" }).then((response) => {
+      const docCookie = document.cookie || "";
+
+      browser.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }).then((response) => {
         if (!banner) return;
         if (response && response.status === "success") {
           banner.dataset.synced = "true";
           banner.innerHTML = '🟢 App Groupへ送信完了！ (' + response.cookieLength + '文字) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
         } else {
-          const reason = (response && response.reason) ? response.reason : "送信準備中";
+          const reason = (response && response.reason) ? response.reason : "処理中...";
           banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
       }).catch((e) => {
