@@ -27,6 +27,25 @@ function setupBanner() {
   return banner;
 }
 
+// 🟢 CSRFトークンを多角的に検索・抽出するヘルパー関数
+function extractCsrfToken() {
+  // 1. Meta タグからの抽出
+  const metaToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+                 || document.querySelector('meta[name="authenticity-token"]')?.getAttribute('content');
+  if (metaToken) return metaToken;
+
+  // 2. document.cookie から _csrf_token の値を直接パース（100%確実に取得可能）
+  const cookies = document.cookie.split(';');
+  for (let i = 0; i < cookies.length; i++) {
+    const pair = cookies[i].trim().split('=');
+    if (pair[0] === '_csrf_token' || pair[0] === 'csrf_token') {
+      return decodeURIComponent(pair.slice(1).join('='));
+    }
+  }
+
+  return null;
+}
+
 async function autoGenerateTokenAndSync() {
   if (isExecuting) return;
 
@@ -49,17 +68,16 @@ async function autoGenerateTokenAndSync() {
       updateBannerText(banner, '🟡 Auto-generating Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
     }
 
-    // 1. DOMから CSRF トークンを拾う
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-                   || (window.ENV && window.ENV.AUTHENTICITY_TOKEN);
+    // 🟢 document.cookie 等から CSRF トークンを確実に抽出
+    const csrfToken = extractCsrfToken();
 
     if (!csrfToken) {
       isExecuting = false;
-      if (banner) updateBannerText(banner, '🟡 Waiting Page Load (CSRF Token)... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+      if (banner) updateBannerText(banner, '🟡 Waiting Cookie/CSRF... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
       return;
     }
 
-    // 2. /profile/tokens へ POST を送りAPIトークンを即時作成（SafariがHttpOnlyクッキーを自動添付）
+    // POST リクエストで API トークンを発行（Safari が Cookie を自動添付）
     const response = await fetch('/profile/tokens', {
       method: 'POST',
       headers: {
@@ -82,7 +100,7 @@ async function autoGenerateTokenAndSync() {
       throw new Error("Token payload empty");
     }
 
-    // 3. 受け取った API トークンを Swift ➔ App Group 経由でアプリへ転送
+    // 発行された API トークンを App Group 経由で Flutter へ送る
     extAPI.runtime.sendMessage({ action: "SYNC_TOKEN", token: apiToken }, (res) => {
       isExecuting = false;
       if (!banner) return;
