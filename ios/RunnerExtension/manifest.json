@@ -3,18 +3,8 @@
   "name": "K.dot Extension",
   "version": "1.0",
   "description": "Cookie sync extension for K.dot portal",
-  "icons": {
-    "16": "icon-16.png",
-    "32": "icon-32.png",
-    "48": "icon-48.png",
-    "128": "icon-128.png"
-  },
-  "permissions": [
-    "cookies",
-    "tabs",
-    "https://lms.keio.jp/*",
-    "https://*/*"
-  ],
+  "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
+  "permissions": ["cookies", "tabs", "https://lms.keio.jp/*"],
   "content_scripts": [
     {
       "matches": ["https://lms.keio.jp/*"],

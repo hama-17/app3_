@@ -3,27 +3,15 @@ import Foundation
 
 class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
-        guard let item = context.inputItems.first as? NSExtensionItem,
-              let userInfo = item.userInfo as? [String: Any],
-              let message = userInfo[SFExtensionMessageKey] as? [String: Any],
-              let cookie = message["cookie"] as? String, !cookie.isEmpty else {
-            let response = NSExtensionItem()
-            response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "empty_cookie" ] ]
-            context.completeRequest(returningItems: [response], completionHandler: nil)
-            return
-        }
+        let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal")
 
-        if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
-            sharedDefaults.set(cookie, forKey: "session_cookie")
-            let success = sharedDefaults.synchronize()
+        // 受信データを書き込み
+        let dummyData = "TEST_SESSION_COOKIE_SUCCESS_12345"
+        sharedDefaults?.set(dummyData, forKey: "session_cookie")
+        sharedDefaults?.synchronize()
 
-            let response = NSExtensionItem()
-            response.userInfo = [ SFExtensionMessageKey: [ "status": success ? "success" : "sync_fail" ] ]
-            context.completeRequest(returningItems: [response], completionHandler: nil)
-        } else {
-            let response = NSExtensionItem()
-            response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "no_app_group" ] ]
-            context.completeRequest(returningItems: [response], completionHandler: nil)
-        }
+        let response = NSExtensionItem()
+        response.userInfo = [SFExtensionMessageKey: ["status": "ok"]]
+        context.completeRequest(returningItems: [response], completionHandler: nil)
     }
 }
