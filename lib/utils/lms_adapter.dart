@@ -21,6 +21,7 @@ abstract class LMSAdapter {
 
   // 月・スケジュールの期間判定系
   bool isSpringMonth(int month);
+
   bool isFallMonth(int month);
   bool isSpringCourse(String combinedName);
   bool isFallCourse(String combinedName);

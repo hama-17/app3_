@@ -10,4 +10,5 @@ class CookieService {
   static Future<String?> getSavedCookie() async {
     return await AuthService.getSession();
   }
+
 }
