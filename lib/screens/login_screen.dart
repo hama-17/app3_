@@ -32,11 +32,7 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     if (Platform.isAndroid) {
       _prepareLoginScreenAndroid();
     } else if (Platform.isIOS) {
-      setState(() {
-        _isInitialized = true;
-        _statusText = "iOS 監視スタート（Safariを開いてください）";
-      });
-      _startCookiePolling();
+      _prepareLoginScreenIos();
     }
   }
 
@@ -51,6 +47,18 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && Platform.isIOS) {
       _checkAndValidateIosAppGroupCookies();
+    }
+  }
+
+  // 🍎 iOS：画面起動時に App Group の古いクッキーを消去してから監視開始
+  Future<void> _prepareLoginScreenIos() async {
+    await _clearAppGroupCookie();
+    if (mounted) {
+      setState(() {
+        _isInitialized = true;
+        _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+      });
+      _startCookiePolling();
     }
   }
 
@@ -75,6 +83,21 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     } catch (e) {
       debugPrint("Cookie clear error: $e");
     }
+  }
+
+  /// App Group のクッキーを削除するヘルパー
+  Future<void> _clearAppGroupCookie() async {
+    try {
+      await _appGroupChannel.invokeMethod('clearAppGroupCookie');
+      debugPrint("App Group cookie cleared.");
+    } catch (e) {
+      debugPrint("Clear App Group cookie error: $e");
+    }
+  }
+
+  String _getTimeStr() {
+    final now = DateTime.now();
+    return "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
   }
 
   void _startCookiePolling() {
@@ -117,28 +140,26 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  // 🍎 iOS：毎秒App Groupを読み出し、リアルタイム時刻と状態を画面に強制描画
+  // 🍎 iOS：毎秒App Groupを読み出し、リアルタイム時刻と状態を画面に描画
   Future<void> _checkAndValidateIosAppGroupCookies() async {
     if (_isSuccessTriggered) return;
 
     try {
       final String? appGroupCookie = await _appGroupChannel.invokeMethod<String>('getAppGroupCookie');
 
-      final now = DateTime.now();
-      final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
-
-      if (mounted) {
-        setState(() {
-          if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
-            _statusText = "🟢 [$timeStr] Cookie取得成功 (${appGroupCookie.length}文字)\n検証処理を実行中...";
-          } else {
-            _statusText = "🟡 [$timeStr] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
-          }
-        });
-      }
-
       if (appGroupCookie != null && appGroupCookie.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _statusText = "🟢 [${_getTimeStr()}] Cookie取得成功 (${appGroupCookie.length}文字)\n検証処理を実行中...";
+          });
+        }
         await _validateAndSave(appGroupCookie);
+      } else {
+        if (mounted) {
+          setState(() {
+            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -158,7 +179,7 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
       _pollingTimer = null;
 
       if (Platform.isIOS) {
-        await _appGroupChannel.invokeMethod('clearAppGroupCookie');
+        await _clearAppGroupCookie();
       }
 
       await AuthService.saveSession(cookieString);
@@ -168,9 +189,13 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
         widget.onLoginSuccess();
       }
     } else if (!isValid && mounted) {
+      // 🟢 セッションが無効（106文字などの仮クッキー）だった場合、App Groupから即座に削除して無限ループを防ぐ
+      if (Platform.isIOS) {
+        await _clearAppGroupCookie();
+      }
       if (mounted) {
         setState(() {
-          _statusText = "⚠️ Cookieを取得しましたがセッション無効\n(${cookieString.length}文字) / ログイン完了後に戻ってください";
+          _statusText = "🟡 [${_getTimeStr()}] 仮Cookie検知 (${cookieString.length}文字 - 無効)\nApp Groupをクリアしました。Safariでログインを完了させてください。";
         });
       }
     }
@@ -181,12 +206,21 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     final Uri fallbackUri = Uri.parse('https://lms.keio.jp');
 
     try {
+      // 🟢 Safari起動直前に古データをApp Groupから完全消去し、画面状態をリセット
+      if (Platform.isIOS) {
+        await _clearAppGroupCookie();
+        if (mounted) {
+          setState(() {
+            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Cookie未検出 / Safariでログイン完了待ち)";
+          });
+        }
+      }
+
       if (await canLaunchUrl(safariUri)) {
         await launchUrl(safariUri, mode: LaunchMode.externalApplication);
       } else {
         await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
       }
-      _checkAndValidateIosAppGroupCookies();
     } catch (e) {
       debugPrint("Safari launch error: $e");
     }
@@ -259,7 +293,6 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
             style: TextStyle(fontSize: 14, color: AppTheme.textSub(context)),
           ),
           const SizedBox(height: 20),
-          // 🟢 リアルタイム診断ステータス表示エリア（アクセント色の枠線付き）
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
