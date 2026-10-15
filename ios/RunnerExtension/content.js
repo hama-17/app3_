@@ -1,4 +1,5 @@
 const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
+let isSyncing = false; // 🟢 通信ハングアップ防止用ロック
 
 function setupBanner() {
   let banner = document.getElementById('kdot-extension-banner');
@@ -19,6 +20,8 @@ function setupBanner() {
 }
 
 function checkAndSyncCookie() {
+  if (isSyncing) return; // 🟢 送信中なら重複実行をスキップ
+
   try {
     const banner = setupBanner();
 
@@ -26,7 +29,6 @@ function checkAndSyncCookie() {
       return;
     }
 
-    // 未ログイン状態（パスキー入力画面等）の場合
     if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
       if (banner) {
         banner.innerHTML = '🟡 K.dot 拡張機能動作中 (パスキー認証を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
@@ -34,10 +36,15 @@ function checkAndSyncCookie() {
       return;
     }
 
-    // ログイン済み状態（すでにSafariでログイン済みの場合も含む）
+    isSyncing = true; // 🟢 送信中ロック開始
     const docCookie = document.cookie || "";
 
+    if (banner && !banner.dataset.synced) {
+      banner.innerHTML = '🟡 Cookie同期中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+    }
+
     extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
+      isSyncing = false; // 🟢 通信完了でロック解除
       if (!banner) return;
 
       const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
@@ -48,9 +55,7 @@ function checkAndSyncCookie() {
 
       if (response && response.status === "success") {
         banner.dataset.synced = "true";
-        banner.innerHTML = '🟢 既存セッション同期完了！アプリへ自動復帰中...';
-
-        // 🟢 0.2秒で即座にアプリへ自動復帰！
+        banner.innerHTML = '🟢 App Groupへ送信完了！ (' + response.cookieLength + '文字) アプリへ自動復帰中...';
         setTimeout(() => {
           window.location.href = "app3kportal://login-success";
         }, 200);
@@ -60,6 +65,7 @@ function checkAndSyncCookie() {
       }
     });
   } catch (err) {
+    isSyncing = false;
     const banner = document.getElementById('kdot-extension-banner');
     if (banner) {
       banner.innerHTML = '🔴 JS例外: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
@@ -69,4 +75,4 @@ function checkAndSyncCookie() {
 
 setupBanner();
 checkAndSyncCookie();
-setInterval(checkAndSyncCookie, 1000);
+setInterval(checkAndSyncCookie, 2000);
