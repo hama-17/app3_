@@ -14,23 +14,22 @@ function checkAndSyncCookie() {
   const cookie = document.cookie;
 
   if (cookie && cookie.length > 10 && !window.location.href.includes('/login') && !window.location.href.includes('/saml')) {
-    if (banner) {
+    if (banner && !banner.dataset.synced) {
       banner.innerHTML = 'Cookie検出 (' + cookie.length + '文字) 送信中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;">[アプリへ戻る]</a>';
     }
 
-    try {
-      browser.runtime.sendNativeMessage("application.id", { "cookie": cookie }, (response) => {
-        if (banner) {
-          banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
-        }
-      });
-    } catch (e) {
+    browser.runtime.sendMessage({ action: "SYNC_COOKIE", cookie: cookie }).then((response) => {
       if (banner) {
-        banner.innerHTML = '🔴 Native送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        banner.dataset.synced = "true";
+        banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
       }
-    }
+    }).catch((e) => {
+      if (banner && !banner.dataset.synced) {
+        banner.innerHTML = '🔴 送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+      }
+    });
   } else {
-    if (banner) {
+    if (banner && !banner.dataset.synced) {
       banner.innerHTML = '🟡 K.dot 拡張機能動作中 (Cookie未検出・ログイン待ち) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
     }
   }

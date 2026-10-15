@@ -72,7 +72,7 @@ begin
     XML
   end
 
-  # 🟢 App Group へのセッションクッキー保存処理
+  # 🟢 Swift ハンドラ
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -133,12 +133,22 @@ begin
     }
   JSON
 
+  # 🟢 sendNativeMessage を実行する正しい場所（background.js）
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
     console.log("K.dot background script initialized.");
+
+    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message && message.action === "SYNC_COOKIE" && message.cookie) {
+        browser.runtime.sendNativeMessage("application.id", { "cookie": message.cookie }, (response) => {
+          console.log("Native response:", response);
+        });
+        return Promise.resolve({ status: "ok" });
+      }
+    });
   JS
 
-  # 🟢 document.cookie 直読み ＆ リアルタイム診断バナー機能付き content.js
+  # 🟢 background.js へ委送する content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     function setupBanner() {
@@ -157,23 +167,22 @@ begin
       const cookie = document.cookie;
 
       if (cookie && cookie.length > 10 && !window.location.href.includes('/login') && !window.location.href.includes('/saml')) {
-        if (banner) {
+        if (banner && !banner.dataset.synced) {
           banner.innerHTML = 'Cookie検出 (' + cookie.length + '文字) 送信中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;">[アプリへ戻る]</a>';
         }
 
-        try {
-          browser.runtime.sendNativeMessage("application.id", { "cookie": cookie }, (response) => {
-            if (banner) {
-              banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
-            }
-          });
-        } catch (e) {
+        browser.runtime.sendMessage({ action: "SYNC_COOKIE", cookie: cookie }).then((response) => {
           if (banner) {
-            banner.innerHTML = '🔴 Native送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+            banner.dataset.synced = "true";
+            banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
           }
-        }
+        }).catch((e) => {
+          if (banner && !banner.dataset.synced) {
+            banner.innerHTML = '🔴 送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+          }
+        });
       } else {
-        if (banner) {
+        if (banner && !banner.dataset.synced) {
           banner.innerHTML = '🟡 K.dot 拡張機能動作中 (Cookie未検出・ログイン待ち) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
       }
