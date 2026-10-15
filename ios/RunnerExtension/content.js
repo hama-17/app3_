@@ -27,14 +27,11 @@ function setupBanner() {
   return banner;
 }
 
-// 🟢 CSRFトークンを多角的に検索・抽出するヘルパー関数
 function extractCsrfToken() {
-  // 1. Meta タグからの抽出
   const metaToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
                  || document.querySelector('meta[name="authenticity-token"]')?.getAttribute('content');
   if (metaToken) return metaToken;
 
-  // 2. document.cookie から _csrf_token の値を直接パース（100%確実に取得可能）
   const cookies = document.cookie.split(';');
   for (let i = 0; i < cookies.length; i++) {
     const pair = cookies[i].trim().split('=');
@@ -65,10 +62,9 @@ async function autoGenerateTokenAndSync() {
 
     isExecuting = true;
     if (banner && !banner.dataset.synced) {
-      updateBannerText(banner, '🟡 Auto-generating Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+      updateBannerText(banner, '🟡 Requesting Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
     }
 
-    // 🟢 document.cookie 等から CSRF トークンを確実に抽出
     const csrfToken = extractCsrfToken();
 
     if (!csrfToken) {
@@ -77,16 +73,18 @@ async function autoGenerateTokenAndSync() {
       return;
     }
 
-    // POST リクエストで API トークンを発行（Safari が Cookie を自動添付）
-    const response = await fetch('/profile/tokens', {
+    // 🟢 Canvas LMS 公式 REST API エンドポイントへ POST
+    const formData = new URLSearchParams();
+    formData.append('token[purpose]', 'K.dot App Auto Sync');
+
+    const response = await fetch('/api/v1/users/self/tokens', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken
+        'X-CSRF-Token': csrfToken,
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: JSON.stringify({
-        access_token: { purpose: "K.dot App Auto Sync" }
-      })
+      body: formData
     });
 
     if (!response.ok) {
@@ -94,13 +92,13 @@ async function autoGenerateTokenAndSync() {
     }
 
     const data = await response.json();
-    const apiToken = data.visible_token || (data.access_token && data.access_token.visible_token);
+    // 🟢 Canvas REST API レスポンスの data.token にアクセストークンが入ります
+    const apiToken = data.token || data.visible_token || (data.access_token && data.access_token.visible_token);
 
     if (!apiToken) {
       throw new Error("Token payload empty");
     }
 
-    // 発行された API トークンを App Group 経由で Flutter へ送る
     extAPI.runtime.sendMessage({ action: "SYNC_TOKEN", token: apiToken }, (res) => {
       isExecuting = false;
       if (!banner) return;
