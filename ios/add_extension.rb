@@ -9,7 +9,24 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
-  # 1. ディレクトリと構成ファイルの作成
+  # 1. Runner側 Entitlements の物理生成
+  runner_entitlements_path = File.join('ios/Runner', 'Runner.entitlements')
+  unless File.exist?(runner_entitlements_path)
+    File.write(runner_entitlements_path, <<~XML)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>com.apple.security.application-groups</key>
+        <array>
+           <string>group.com.h.k.portal</string>
+        </array>
+      </dict>
+      </plist>
+    XML
+  end
+
+  # 2. Extension ディレクトリと構成ファイルの作成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
@@ -72,7 +89,7 @@ begin
     XML
   end
 
-  # 🟢 Swift ハンドラ
+  # 🟢 Swift ハンドラ（書き込み成功のレスポンスを返す）
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -84,18 +101,24 @@ begin
                   let userInfo = item.userInfo as? [String: Any],
                   let message = userInfo[SFExtensionMessageKey] as? [String: Any],
                   let cookie = message["cookie"] as? String else {
-                context.completeRequest(returningItems: nil, completionHandler: nil)
+                let response = NSExtensionItem()
+                response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "invalid_payload" ] ]
+                context.completeRequest(returningItems: [response], completionHandler: nil)
                 return
             }
 
             if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
                 sharedDefaults.set(cookie, forKey: "session_cookie")
                 sharedDefaults.synchronize()
-            }
 
-            let response = NSExtensionItem()
-            response.userInfo = [ SFExtensionMessageKey: [ "status": "success" ] ]
-            context.completeRequest(returningItems: [response], completionHandler: nil)
+                let response = NSExtensionItem()
+                response.userInfo = [ SFExtensionMessageKey: [ "status": "success" ] ]
+                context.completeRequest(returningItems: [response], completionHandler: nil)
+            } else {
+                let response = NSExtensionItem()
+                response.userInfo = [ SFExtensionMessageKey: [ "status": "error", "reason": "no_app_group" ] ]
+                context.completeRequest(returningItems: [response], completionHandler: nil)
+            }
         }
     }
   SWIFT
@@ -133,22 +156,36 @@ begin
     }
   JSON
 
-  # 🟢 sendNativeMessage を実行する正しい場所（background.js）
+  # 🟢 HttpOnly Cookie 取得 ＆ 非同期レスポンス対応 background.js
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
-    console.log("K.dot background script initialized.");
-
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message && message.action === "SYNC_COOKIE" && message.cookie) {
-        browser.runtime.sendNativeMessage("application.id", { "cookie": message.cookie }, (response) => {
-          console.log("Native response:", response);
+      if (message && message.action === "SYNC_COOKIE") {
+        browser.cookies.getAll({ url: "https://lms.keio.jp" }, (cookies) => {
+          if (!cookies || cookies.length === 0) {
+            sendResponse({ status: "error", reason: "クッキーなし (ログインしてください)" });
+            return;
+          }
+
+          const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+          browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
+            if (browser.runtime.lastError) {
+              sendResponse({ status: "error", reason: browser.runtime.lastError.message });
+            } else if (response && response.status === "success") {
+              sendResponse({ status: "success", cookieLength: cookieHeader.length });
+            } else {
+              const errDetail = (response && response.reason) ? response.reason : "Nativeエラー";
+              sendResponse({ status: "error", reason: errDetail });
+            }
+          });
         });
-        return Promise.resolve({ status: "ok" });
+        return true; // 非同期応答のために必須
       }
     });
   JS
 
-  # 🟢 background.js へ委送する content.js
+  # 🟢 真の成功通知を表示する content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
     function setupBanner() {
@@ -164,34 +201,34 @@ begin
     function checkAndSyncCookie() {
       setupBanner();
       const banner = document.getElementById('kdot-extension-banner');
-      const cookie = document.cookie;
-
-      if (cookie && cookie.length > 10 && !window.location.href.includes('/login') && !window.location.href.includes('/saml')) {
-        if (banner && !banner.dataset.synced) {
-          banner.innerHTML = 'Cookie検出 (' + cookie.length + '文字) 送信中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;">[アプリへ戻る]</a>';
+      if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
+        if (banner) {
+          banner.innerHTML = '🟡 K.dot 拡張機能動作中 (ログイン操作を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
         }
-
-        browser.runtime.sendMessage({ action: "SYNC_COOKIE", cookie: cookie }).then((response) => {
-          if (banner) {
-            banner.dataset.synced = "true";
-            banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
-          }
-        }).catch((e) => {
-          if (banner && !banner.dataset.synced) {
-            banner.innerHTML = '🔴 送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
-          }
-        });
-      } else {
-        if (banner && !banner.dataset.synced) {
-          banner.innerHTML = '🟡 K.dot 拡張機能動作中 (Cookie未検出・ログイン待ち) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
-        }
+        return;
       }
+
+      browser.runtime.sendMessage({ action: "SYNC_COOKIE" }).then((response) => {
+        if (!banner) return;
+        if (response && response.status === "success") {
+          banner.dataset.synced = "true";
+          banner.innerHTML = '🟢 App Groupへ送信完了！ (' + response.cookieLength + '文字) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
+        } else {
+          const reason = (response && response.reason) ? response.reason : "送信準備中";
+          banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        }
+      }).catch((e) => {
+        if (banner) {
+          banner.innerHTML = '🔴 通信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        }
+      });
     }
 
     setupBanner();
-    setInterval(checkAndSyncCookie, 1500);
+    setInterval(checkAndSyncCookie, 2000);
   JS
 
+  # 3. Extension Target の取得・生成
   extension_target = project.targets.find { |t| t.name == 'RunnerExtension' }
   unless extension_target
     extension_target = project.new_target(:app_extension, 'RunnerExtension', :ios, '16.0')

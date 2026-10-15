@@ -11,29 +11,28 @@ function setupBanner() {
 function checkAndSyncCookie() {
   setupBanner();
   const banner = document.getElementById('kdot-extension-banner');
-  const cookie = document.cookie;
-
-  if (cookie && cookie.length > 10 && !window.location.href.includes('/login') && !window.location.href.includes('/saml')) {
-    if (banner && !banner.dataset.synced) {
-      banner.innerHTML = 'Cookie検出 (' + cookie.length + '文字) 送信中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;">[アプリへ戻る]</a>';
+  if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
+    if (banner) {
+      banner.innerHTML = '🟡 K.dot 拡張機能動作中 (ログイン操作を行ってください) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
     }
-
-    browser.runtime.sendMessage({ action: "SYNC_COOKIE", cookie: cookie }).then((response) => {
-      if (banner) {
-        banner.dataset.synced = "true";
-        banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
-      }
-    }).catch((e) => {
-      if (banner && !banner.dataset.synced) {
-        banner.innerHTML = '🔴 送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
-      }
-    });
-  } else {
-    if (banner && !banner.dataset.synced) {
-      banner.innerHTML = '🟡 K.dot 拡張機能動作中 (Cookie未検出・ログイン待ち) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
-    }
+    return;
   }
+
+  browser.runtime.sendMessage({ action: "SYNC_COOKIE" }).then((response) => {
+    if (!banner) return;
+    if (response && response.status === "success") {
+      banner.dataset.synced = "true";
+      banner.innerHTML = '🟢 App Groupへ送信完了！ (' + response.cookieLength + '文字) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
+    } else {
+      const reason = (response && response.reason) ? response.reason : "送信準備中";
+      banner.innerHTML = '🟡 同期待機中 (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+    }
+  }).catch((e) => {
+    if (banner) {
+      banner.innerHTML = '🔴 通信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+    }
+  });
 }
 
 setupBanner();
-setInterval(checkAndSyncCookie, 1500);
+setInterval(checkAndSyncCookie, 2000);
