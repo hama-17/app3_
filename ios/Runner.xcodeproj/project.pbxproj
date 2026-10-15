@@ -11,20 +11,20 @@
 		10091C648AA33F5A998A10F1 /* RunnerExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 50F2651B6043063604FD0D56 /* RunnerExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
 		1690677445A527008DEC3B77 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36AB5EE027AE82A40EF2A1C2 /* Foundation.framework */; };
-		29062B89CF764024D0B24C3F /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 9865A88E9B77A29DF46E4EC5 /* background.js */; };
-		297613C950E33906B357BDDE /* icon-16.png in Resources */ = {isa = PBXBuildFile; fileRef = 94276133D98D123D7BDF4BC3 /* icon-16.png */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
-		39BBE1AB4E770D71E4E6438A /* icon-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 279651A84E216DF840A60C77 /* icon-32.png */; };
+		37A040E3A41601D7CE0CC2D8 /* icon-16.png in Resources */ = {isa = PBXBuildFile; fileRef = 94276133D98D123D7BDF4BC3 /* icon-16.png */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
-		5F31746DA5E1C6FB4C368381 /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 47AAF2ABBDCF3835D930E05E /* icon-128.png */; };
-		63019AF940A228D8BF8EB59C /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = B918054B32BF89FDDEA6F1D3 /* manifest.json */; };
+		4A50CE7C17AAA68A07259B57 /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 47AAF2ABBDCF3835D930E05E /* icon-128.png */; };
+		62BBF635CCE48DC897E1823D /* icon-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 279651A84E216DF840A60C77 /* icon-32.png */; };
+		64C1C3C911982E69CC76C2AC /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 9865A88E9B77A29DF46E4EC5 /* background.js */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		B6E378145186DFA23CC60B97 /* SafariServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C3A391D4AE049FDE9FEFE33 /* SafariServices.framework */; };
-		E0F1A2173677E557C9CA76A6 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 88236E0EF1BF784E46C07F04 /* content.js */; };
-		E88FCA9B73F1A962BDBCD9C0 /* icon-48.png in Resources */ = {isa = PBXBuildFile; fileRef = 6EDEBC16AC9C01ADF446501C /* icon-48.png */; };
+		B897956DB6DCA46647DAC053 /* icon-48.png in Resources */ = {isa = PBXBuildFile; fileRef = 6EDEBC16AC9C01ADF446501C /* icon-48.png */; };
+		CD8A9801D8C396BDA6F148CC /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 88236E0EF1BF784E46C07F04 /* content.js */; };
+		F3D6FD37A23E4A31A2C8C472 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = B918054B32BF89FDDEA6F1D3 /* manifest.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -317,13 +317,13 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				63019AF940A228D8BF8EB59C /* manifest.json in Resources */,
-				E0F1A2173677E557C9CA76A6 /* content.js in Resources */,
-				29062B89CF764024D0B24C3F /* background.js in Resources */,
-				297613C950E33906B357BDDE /* icon-16.png in Resources */,
-				39BBE1AB4E770D71E4E6438A /* icon-32.png in Resources */,
-				E88FCA9B73F1A962BDBCD9C0 /* icon-48.png in Resources */,
-				5F31746DA5E1C6FB4C368381 /* icon-128.png in Resources */,
+				F3D6FD37A23E4A31A2C8C472 /* manifest.json in Resources */,
+				CD8A9801D8C396BDA6F148CC /* content.js in Resources */,
+				64C1C3C911982E69CC76C2AC /* background.js in Resources */,
+				37A040E3A41601D7CE0CC2D8 /* icon-16.png in Resources */,
+				62BBF635CCE48DC897E1823D /* icon-32.png in Resources */,
+				B897956DB6DCA46647DAC053 /* icon-48.png in Resources */,
+				4A50CE7C17AAA68A07259B57 /* icon-128.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
