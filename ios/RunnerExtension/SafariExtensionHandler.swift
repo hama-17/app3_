@@ -9,20 +9,20 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
-        var cookieStr: String? = nil
+        var tokenStr: String? = nil
         if let message = userInfo[SFExtensionMessageKey] as? [String: Any] {
-            cookieStr = message["cookie"] as? String
-        } else if let cookie = userInfo["cookie"] as? String {
-            cookieStr = cookie
+            tokenStr = (message["token"] as? String) ?? (message["cookie"] as? String)
+        } else if let token = (userInfo["token"] as? String) ?? (userInfo["cookie"] as? String) {
+            tokenStr = token
         }
 
-        guard let cookie = cookieStr, !cookie.isEmpty else {
+        guard let token = tokenStr, !token.isEmpty else {
             sendResponse(context: context, status: "error", reason: "payload_empty")
             return
         }
 
         if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
-            sharedDefaults.set(cookie, forKey: "session_cookie")
+            sharedDefaults.set(token, forKey: "session_cookie")
             sharedDefaults.synchronize()
             sendResponse(context: context, status: "success", reason: nil)
         } else {

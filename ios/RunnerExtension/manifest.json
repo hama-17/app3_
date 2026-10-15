@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "K.dot Extension",
   "version": "1.0",
-  "description": "Cookie sync extension for K.dot portal",
+  "description": "API Token auto sync extension for K.dot portal",
   "icons": {
     "16": "icon-16.png",
     "32": "icon-32.png",
@@ -11,12 +11,8 @@
   },
   "permissions": [
     "nativeMessaging",
-    "cookies",
     "tabs",
-    "activeTab",
-    "<all_urls>",
-    "https://lms.keio.jp/*",
-    "https://*.keio.jp/*"
+    "https://lms.keio.jp/*"
   ],
   "content_scripts": [
     {

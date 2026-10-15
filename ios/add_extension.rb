@@ -4,7 +4,7 @@ require 'rexml/document'
 require 'base64'
 
 begin
-  puts "=== Starting Safari Extension Injection ==="
+  puts "=== Starting Safari Extension Injection (Option A: Auto Token) ==="
 
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
@@ -26,7 +26,7 @@ begin
     XML
   end
 
-  # 2. Extension ディレクトリと構成ファイルの作成
+  # 2. Extension ディレクトリ構成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
@@ -72,7 +72,7 @@ begin
     </plist>
   XML
 
-  # 🟢 Swift ハンドラ
+  # 🟢 Swift ハンドラ（APIトークン文字列を App Group へ保存）
   File.write(File.join(ext_dir, 'SafariExtensionHandler.swift'), <<~SWIFT)
     import SafariServices
     import Foundation
@@ -85,20 +85,20 @@ begin
                 return
             }
 
-            var cookieStr: String? = nil
+            var tokenStr: String? = nil
             if let message = userInfo[SFExtensionMessageKey] as? [String: Any] {
-                cookieStr = message["cookie"] as? String
-            } else if let cookie = userInfo["cookie"] as? String {
-                cookieStr = cookie
+                tokenStr = (message["token"] as? String) ?? (message["cookie"] as? String)
+            } else if let token = (userInfo["token"] as? String) ?? (userInfo["cookie"] as? String) {
+                tokenStr = token
             }
 
-            guard let cookie = cookieStr, !cookie.isEmpty else {
+            guard let token = tokenStr, !token.isEmpty else {
                 sendResponse(context: context, status: "error", reason: "payload_empty")
                 return
             }
 
             if let sharedDefaults = UserDefaults(suiteName: "group.com.h.k.portal") {
-                sharedDefaults.set(cookie, forKey: "session_cookie")
+                sharedDefaults.set(token, forKey: "session_cookie")
                 sharedDefaults.synchronize()
                 sendResponse(context: context, status: "success", reason: nil)
             } else {
@@ -118,13 +118,13 @@ begin
     }
   SWIFT
 
-  # 🟢 activeTab 権限を追加した manifest.json
+  # 🟢 manifest.json
   File.write(File.join(ext_dir, 'manifest.json'), <<~JSON)
     {
       "manifest_version": 2,
       "name": "K.dot Extension",
       "version": "1.0",
-      "description": "Cookie sync extension for K.dot portal",
+      "description": "API Token auto sync extension for K.dot portal",
       "icons": {
         "16": "icon-16.png",
         "32": "icon-32.png",
@@ -133,12 +133,8 @@ begin
       },
       "permissions": [
         "nativeMessaging",
-        "cookies",
         "tabs",
-        "activeTab",
-        "<all_urls>",
-        "https://lms.keio.jp/*",
-        "https://*.keio.jp/*"
+        "https://lms.keio.jp/*"
       ],
       "content_scripts": [
         {
@@ -154,125 +150,39 @@ begin
     }
   JSON
 
-  # 🟢 cookieStoreId 明示参照 background.js
+  # 🟢 トークン転送専用 background.js
   File.write(File.join(ext_dir, 'background.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
     extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message && message.action === "SYNC_COOKIE") {
-        let responded = false;
-
-        const safeResponse = (data) => {
-          if (!responded) {
-            responded = true;
-            clearTimeout(timer);
-            try { sendResponse(data); } catch(e) {}
-          }
-        };
-
-        const timer = setTimeout(() => {
-          safeResponse({ status: "error", reason: "BG Timeout (3s)" });
-        }, 3000);
-
-        try {
-          let cookieMap = new Map();
-
-          // 1. fallback (document.cookie)
-          if (message.fallbackCookie) {
-            message.fallbackCookie.split(';').forEach(pair => {
-              const parts = pair.split('=');
-              if (parts.length >= 2) {
-                const k = parts[0].trim();
-                const v = parts.slice(1).join('=').trim();
-                if (k) cookieMap.set(k, v);
-              }
-            });
-          }
-
-          // 2. 🟢 sender.tab から cookieStoreId と url を取得してアクティブタブの Cookie 領域を狙い撃ち
-          const tabStoreId = (sender && sender.tab && sender.tab.cookieStoreId) ? sender.tab.cookieStoreId : null;
-          const tabUrl = (sender && sender.tab && sender.tab.url) ? sender.tab.url : "https://lms.keio.jp/";
-
-          const queryOptions = {};
-          if (tabStoreId) queryOptions.storeId = tabStoreId;
-
-          if (extAPI.cookies && extAPI.cookies.getAll) {
-            extAPI.cookies.getAll(queryOptions, (allCookies) => {
-              if (allCookies && allCookies.length > 0) {
-                allCookies.forEach(c => {
-                  if (c && c.name && c.value) {
-                    cookieMap.set(c.name, c.value);
-                  }
-                });
-              }
-
-              // タブURL直接指定でも念押し検索
-              extAPI.cookies.getAll({ url: tabUrl, ...(tabStoreId ? { storeId: tabStoreId } : {}) }, (urlCookies) => {
-                if (urlCookies && urlCookies.length > 0) {
-                  urlCookies.forEach(c => {
-                    if (c && c.name && c.value) cookieMap.set(c.name, c.value);
-                  });
-                }
-
-                let cookiePairs = [];
-                let detectedNames = [];
-                let hasCanvasSession = false;
-
-                cookieMap.forEach((v, k) => {
-                  cookiePairs.push(`${k}=${v}`);
-                  detectedNames.push(k);
-                  if (k.toLowerCase().includes('canvas_session')) {
-                    hasCanvasSession = true;
-                  }
-                });
-
-                const fullCookie = cookiePairs.join('; ');
-                const namesSummary = detectedNames.length > 0 ? detectedNames.join(',') : 'None';
-
-                // 🟢 本物の _canvas_session が存在し、180文字以上ある場合のみ送信
-                if (!hasCanvasSession || fullCookie.length < 180) {
-                  safeResponse({ status: "error", reason: `Waiting Login (Keys:[${namesSummary}], Len:${fullCookie.length})` });
-                  return;
-                }
-
-                sendToNative(fullCookie, safeResponse);
-              });
-            });
-          } else {
-            safeResponse({ status: "error", reason: "Cookie API Not Supported" });
-          }
-        } catch (e) {
-          safeResponse({ status: "error", reason: "BG Exception: " + e.message });
+      if (message && message.action === "SYNC_TOKEN") {
+        const token = message.token;
+        if (!token) {
+          sendResponse({ status: "error", reason: "Token Empty" });
+          return true;
         }
+
+        extAPI.runtime.sendNativeMessage("application.id", { "token": token }, (response) => {
+          const err = extAPI.runtime ? extAPI.runtime.lastError : null;
+          if (err) {
+            sendResponse({ status: "error", reason: "Native Err: " + err.message });
+          } else if (response && response.status === "success") {
+            sendResponse({ status: "success", tokenLength: token.length });
+          } else {
+            const errDetail = (response && response.reason) ? response.reason : "Native Sync Fail";
+            sendResponse({ status: "error", reason: errDetail });
+          }
+        });
 
         return true;
       }
     });
-
-    function sendToNative(cookieString, safeResponse) {
-      try {
-        const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
-        extAPI.runtime.sendNativeMessage("application.id", { "cookie": cookieString }, (response) => {
-          const err = extAPI.runtime ? extAPI.runtime.lastError : null;
-          if (err) {
-            safeResponse({ status: "error", reason: "Native Err: " + err.message });
-          } else if (response && response.status === "success") {
-            safeResponse({ status: "success", cookieLength: cookieString.length });
-          } else {
-            const errDetail = (response && response.reason) ? response.reason : "Native Sync Fail";
-            safeResponse({ status: "error", reason: errDetail });
-          }
-        });
-      } catch (e) {
-        safeResponse({ status: "error", reason: "Native Exception: " + e.message });
-      }
-    }
   JS
 
-  # 🟢 点滅防止 ＆ 英語表記 content.js
+  # 🟢 全自動 API トークン生成 & アプリ自動復帰 content.js
   File.write(File.join(ext_dir, 'content.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
-    let isSyncing = false;
+    let isExecuting = false;
     let lastBannerText = "";
 
     function updateBannerText(banner, text) {
@@ -300,8 +210,8 @@ begin
       return banner;
     }
 
-    function checkAndSyncCookie() {
-      if (isSyncing) return;
+    async function autoGenerateTokenAndSync() {
+      if (isExecuting) return;
 
       try {
         const banner = setupBanner();
@@ -317,20 +227,47 @@ begin
           return;
         }
 
-        isSyncing = true;
-        const docCookie = document.cookie || "";
-
-        if (banner && !banner.dataset.synced && lastBannerText === "") {
-          updateBannerText(banner, '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+        isExecuting = true;
+        if (banner && !banner.dataset.synced) {
+          updateBannerText(banner, '🟡 Auto-generating Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
         }
 
-        const lockTimer = setTimeout(() => {
-          if (isSyncing) isSyncing = false;
-        }, 3000);
+        // 1. DOMから CSRF トークンを拾う
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+                       || (window.ENV && window.ENV.AUTHENTICITY_TOKEN);
 
-        extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
-          clearTimeout(lockTimer);
-          isSyncing = false;
+        if (!csrfToken) {
+          isExecuting = false;
+          if (banner) updateBannerText(banner, '🟡 Waiting Page Load (CSRF Token)... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+          return;
+        }
+
+        // 2. /profile/tokens へ POST を送りAPIトークンを即時作成（SafariがHttpOnlyクッキーを自動添付）
+        const response = await fetch('/profile/tokens', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+          },
+          body: JSON.stringify({
+            access_token: { purpose: "K.dot App Auto Sync" }
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const apiToken = data.visible_token || (data.access_token && data.access_token.visible_token);
+
+        if (!apiToken) {
+          throw new Error("Token payload empty");
+        }
+
+        // 3. 受け取った API トークンを Swift ➔ App Group 経由でアプリへ転送
+        extAPI.runtime.sendMessage({ action: "SYNC_TOKEN", token: apiToken }, (res) => {
+          isExecuting = false;
           if (!banner) return;
 
           const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
@@ -339,29 +276,30 @@ begin
             return;
           }
 
-          if (response && response.status === "success") {
+          if (res && res.status === "success") {
             banner.dataset.synced = "true";
-            updateBannerText(banner, '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...');
+            updateBannerText(banner, '🟢 API Token Generated & Synced (' + res.tokenLength + ' chars)! Returning to App...');
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
             }, 300);
           } else {
-            const reason = (response && response.reason) ? response.reason : "Waiting";
-            updateBannerText(banner, '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+            const reason = (res && res.reason) ? res.reason : "Sync Failed";
+            updateBannerText(banner, '🔴 Token Sync Failed (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
           }
         });
+
       } catch (err) {
-        isSyncing = false;
+        isExecuting = false;
         const banner = document.getElementById('kdot-extension-banner');
         if (banner) {
-          updateBannerText(banner, '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+          updateBannerText(banner, '🔴 Token Error: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
         }
       }
     }
 
     setupBanner();
-    checkAndSyncCookie();
-    setInterval(checkAndSyncCookie, 1500);
+    autoGenerateTokenAndSync();
+    setInterval(autoGenerateTokenAndSync, 2000);
   JS
 
   # 3. Target 構成
@@ -436,7 +374,7 @@ begin
   build_file.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy', 'CodeSignOnCopy'] }
 
   project.save
-  puts "Successfully configured Runner and RunnerExtension targets with all resources."
+  puts "Successfully configured Runner and RunnerExtension targets with Auto-Token resources."
 
 rescue => e
   puts "❌ ERROR during script execution: #{e.message}"

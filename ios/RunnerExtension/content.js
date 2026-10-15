@@ -1,5 +1,5 @@
 const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
-let isSyncing = false;
+let isExecuting = false;
 let lastBannerText = "";
 
 function updateBannerText(banner, text) {
@@ -27,8 +27,8 @@ function setupBanner() {
   return banner;
 }
 
-function checkAndSyncCookie() {
-  if (isSyncing) return;
+async function autoGenerateTokenAndSync() {
+  if (isExecuting) return;
 
   try {
     const banner = setupBanner();
@@ -44,20 +44,47 @@ function checkAndSyncCookie() {
       return;
     }
 
-    isSyncing = true;
-    const docCookie = document.cookie || "";
-
-    if (banner && !banner.dataset.synced && lastBannerText === "") {
-      updateBannerText(banner, '🟡 Checking Session Cookie... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+    isExecuting = true;
+    if (banner && !banner.dataset.synced) {
+      updateBannerText(banner, '🟡 Auto-generating Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
     }
 
-    const lockTimer = setTimeout(() => {
-      if (isSyncing) isSyncing = false;
-    }, 3000);
+    // 1. DOMから CSRF トークンを拾う
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+                   || (window.ENV && window.ENV.AUTHENTICITY_TOKEN);
 
-    extAPI.runtime.sendMessage({ action: "SYNC_COOKIE", fallbackCookie: docCookie }, (response) => {
-      clearTimeout(lockTimer);
-      isSyncing = false;
+    if (!csrfToken) {
+      isExecuting = false;
+      if (banner) updateBannerText(banner, '🟡 Waiting Page Load (CSRF Token)... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+      return;
+    }
+
+    // 2. /profile/tokens へ POST を送りAPIトークンを即時作成（SafariがHttpOnlyクッキーを自動添付）
+    const response = await fetch('/profile/tokens', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      body: JSON.stringify({
+        access_token: { purpose: "K.dot App Auto Sync" }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const apiToken = data.visible_token || (data.access_token && data.access_token.visible_token);
+
+    if (!apiToken) {
+      throw new Error("Token payload empty");
+    }
+
+    // 3. 受け取った API トークンを Swift ➔ App Group 経由でアプリへ転送
+    extAPI.runtime.sendMessage({ action: "SYNC_TOKEN", token: apiToken }, (res) => {
+      isExecuting = false;
       if (!banner) return;
 
       const lastErr = extAPI.runtime ? extAPI.runtime.lastError : null;
@@ -66,26 +93,27 @@ function checkAndSyncCookie() {
         return;
       }
 
-      if (response && response.status === "success") {
+      if (res && res.status === "success") {
         banner.dataset.synced = "true";
-        updateBannerText(banner, '🟢 Valid Session Synced (' + response.cookieLength + ' chars)! Returning to App...');
+        updateBannerText(banner, '🟢 API Token Generated & Synced (' + res.tokenLength + ' chars)! Returning to App...');
         setTimeout(() => {
           window.location.href = "app3kportal://login-success";
         }, 300);
       } else {
-        const reason = (response && response.reason) ? response.reason : "Waiting";
-        updateBannerText(banner, '🟡 Sync Waiting (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+        const reason = (res && res.reason) ? res.reason : "Sync Failed";
+        updateBannerText(banner, '🔴 Token Sync Failed (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
       }
     });
+
   } catch (err) {
-    isSyncing = false;
+    isExecuting = false;
     const banner = document.getElementById('kdot-extension-banner');
     if (banner) {
-      updateBannerText(banner, '🔴 JS Exception: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+      updateBannerText(banner, '🔴 Token Error: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
     }
   }
 }
 
 setupBanner();
-checkAndSyncCookie();
-setInterval(checkAndSyncCookie, 1500);
+autoGenerateTokenAndSync();
+setInterval(autoGenerateTokenAndSync, 2000);
