@@ -2,7 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- 🟢 1. アプリ自体のディープリンク定義 (app3kportal://) -->
+	<!-- 🟢 1. Flutter ディープリンク自動画面遷移の無効化（勝手にログイン画面が閉じるのを防ぐ） -->
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
+
+	<!-- 🟢 2. アプリ自体のディープリンク定義 (app3kportal://) -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -17,7 +21,7 @@
 		</dict>
 	</array>
 
-	<!-- 🟢 2. 外部スキームの呼び出し許可 (Safari強制起動 & アプリ起動許可) -->
+	<!-- 🟢 3. 外部スキームの呼び出し許可 (Safari強制起動 & アプリ起動許可) -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>x-safari-https</string>
