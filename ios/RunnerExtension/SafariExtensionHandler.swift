@@ -18,6 +18,6 @@ class SafariExtensionHandler: NSObject, NSExtensionRequestHandling {
 
         let response = NSExtensionItem()
         response.userInfo = [ SFExtensionMessageKey: [ "status": "success" ] ]
-        context.completeRequest(returningItems: nil, completionHandler: nil)
+        context.completeRequest(returningItems: [response], completionHandler: nil)
     }
 }

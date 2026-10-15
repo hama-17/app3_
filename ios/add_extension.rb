@@ -9,6 +9,7 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
+  # 1. ディレクトリと構成ファイルの作成
   ext_dir = 'ios/RunnerExtension'
   FileUtils.mkdir_p(ext_dir)
 
@@ -71,6 +72,7 @@ begin
     XML
   end
 
+  # 🟢 App Group へのセッションクッキー保存処理
   swift_path = File.join(ext_dir, 'SafariExtensionHandler.swift')
   File.write(swift_path, <<~SWIFT)
     import SafariServices
@@ -93,7 +95,7 @@ begin
 
             let response = NSExtensionItem()
             response.userInfo = [ SFExtensionMessageKey: [ "status": "success" ] ]
-            context.completeRequest(returningItems: nil, completionHandler: nil)
+            context.completeRequest(returningItems: [response], completionHandler: nil)
         }
     }
   SWIFT
@@ -133,46 +135,52 @@ begin
 
   bg_path = File.join(ext_dir, 'background.js')
   File.write(bg_path, <<~JS)
-    browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-      if (changeInfo.status === 'complete' && tab.url && tab.url.includes('lms.keio.jp')) {
-        if (tab.url.includes('/login/saml') || tab.url.includes('/saml/consume')) {
-          return;
-        }
-
-        browser.cookies.getAll({ url: "https://lms.keio.jp" }, (cookies) => {
-          if (cookies && cookies.length > 0) {
-            const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-            browser.runtime.sendNativeMessage("application.id", { "cookie": cookieHeader }, (response) => {
-              console.log("Native response:", response);
-            });
-
-            setTimeout(() => {
-              browser.tabs.sendMessage(tabId, { action: "REDIRECT_TO_APP" }).catch((err) => {
-                console.log("Redirect message failed: ", err);
-              });
-            }, 300);
-          }
-        });
-      }
-    });
+    console.log("K.dot background script initialized.");
   JS
 
+  # 🟢 document.cookie 直読み ＆ リアルタイム診断バナー機能付き content.js
   content_path = File.join(ext_dir, 'content.js')
   File.write(content_path, <<~JS)
-    if (!document.getElementById('kdot-extension-banner')) {
-      const banner = document.createElement('div');
-      banner.id = 'kdot-extension-banner';
-      banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:13px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
-      banner.innerHTML = 'K.dot 拡張機能動作中 ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
-      document.body.appendChild(banner);
+    function setupBanner() {
+      if (!document.getElementById('kdot-extension-banner')) {
+        const banner = document.createElement('div');
+        banner.id = 'kdot-extension-banner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:12px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
+        banner.innerHTML = 'K.dot 拡張機能初期化中...';
+        document.body.appendChild(banner);
+      }
     }
 
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message && message.action === "REDIRECT_TO_APP") {
-        window.location.href = "app3kportal://login-success";
+    function checkAndSyncCookie() {
+      setupBanner();
+      const banner = document.getElementById('kdot-extension-banner');
+      const cookie = document.cookie;
+
+      if (cookie && cookie.length > 10 && !window.location.href.includes('/login') && !window.location.href.includes('/saml')) {
+        if (banner) {
+          banner.innerHTML = 'Cookie検出 (' + cookie.length + '文字) 送信中... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;">[アプリへ戻る]</a>';
+        }
+
+        try {
+          browser.runtime.sendNativeMessage("application.id", { "cookie": cookie }, (response) => {
+            if (banner) {
+              banner.innerHTML = '🟢 App Groupへ送信完了！ ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;font-weight:bold;text-decoration:underline;">[タップしてアプリへ戻る]</a>';
+            }
+          });
+        } catch (e) {
+          if (banner) {
+            banner.innerHTML = '🔴 Native送信エラー: ' + e.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+          }
+        }
+      } else {
+        if (banner) {
+          banner.innerHTML = '🟡 K.dot 拡張機能動作中 (Cookie未検出・ログイン待ち) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[アプリへ戻る]</a>';
+        }
       }
-    });
+    }
+
+    setupBanner();
+    setInterval(checkAndSyncCookie, 1500);
   JS
 
   extension_target = project.targets.find { |t| t.name == 'RunnerExtension' }
