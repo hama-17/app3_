@@ -46,34 +46,31 @@ function extractCsrfToken() {
 async function autoGenerateTokenAndSync() {
   if (isExecuting) return;
 
+  const banner = setupBanner();
+
+  if (sessionStorage.getItem('kdot_synced') === 'true' || (banner && banner.dataset.synced === "true")) {
+    return;
+  }
+
+  if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
+    if (banner) {
+      updateBannerText(banner, '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+    }
+    return;
+  }
+
+  const csrfToken = extractCsrfToken();
+  if (!csrfToken) {
+    if (banner) updateBannerText(banner, '🟡 Waiting Cookie/CSRF... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+    return;
+  }
+
+  isExecuting = true;
+  if (banner) {
+    updateBannerText(banner, '🟡 Requesting Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+  }
+
   try {
-    const banner = setupBanner();
-
-    if (banner && banner.dataset.synced === "true") {
-      return;
-    }
-
-    if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
-      if (banner) {
-        updateBannerText(banner, '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
-      }
-      return;
-    }
-
-    isExecuting = true;
-    if (banner && !banner.dataset.synced) {
-      updateBannerText(banner, '🟡 Requesting Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
-    }
-
-    const csrfToken = extractCsrfToken();
-
-    if (!csrfToken) {
-      isExecuting = false;
-      if (banner) updateBannerText(banner, '🟡 Waiting Cookie/CSRF... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
-      return;
-    }
-
-    // 🟢 Canvas LMS 公式 REST API エンドポイントへ POST
     const formData = new URLSearchParams();
     formData.append('token[purpose]', 'K.dot App Auto Sync');
 
@@ -92,7 +89,6 @@ async function autoGenerateTokenAndSync() {
     }
 
     const data = await response.json();
-    // 🟢 Canvas REST API レスポンスの data.token にアクセストークンが入ります
     const apiToken = data.token || data.visible_token || (data.access_token && data.access_token.visible_token);
 
     if (!apiToken) {
@@ -111,10 +107,12 @@ async function autoGenerateTokenAndSync() {
 
       if (res && res.status === "success") {
         banner.dataset.synced = "true";
-        updateBannerText(banner, '🟢 API Token Generated & Synced (' + res.tokenLength + ' chars)! Returning to App...');
+        sessionStorage.setItem('kdot_synced', 'true');
+        updateBannerText(banner, '🟢 API Token Synced (' + res.tokenLength + ' chars)! Returning to App...');
+
         setTimeout(() => {
           window.location.href = "app3kportal://login-success";
-        }, 300);
+        }, 500);
       } else {
         const reason = (res && res.reason) ? res.reason : "Sync Failed";
         updateBannerText(banner, '🔴 Token Sync Failed (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
@@ -123,7 +121,6 @@ async function autoGenerateTokenAndSync() {
 
   } catch (err) {
     isExecuting = false;
-    const banner = document.getElementById('kdot-extension-banner');
     if (banner) {
       updateBannerText(banner, '🔴 Token Error: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
     }
@@ -132,4 +129,11 @@ async function autoGenerateTokenAndSync() {
 
 setupBanner();
 autoGenerateTokenAndSync();
-setInterval(autoGenerateTokenAndSync, 2000);
+
+const timerId = setInterval(() => {
+  if (sessionStorage.getItem('kdot_synced') === 'true') {
+    clearInterval(timerId);
+  } else {
+    autoGenerateTokenAndSync();
+  }
+}, 3000);

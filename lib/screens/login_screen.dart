@@ -24,6 +24,8 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
   String _statusText = "初期化中...";
 
   static const _appGroupChannel = MethodChannel('com.h.k.portal/app_group');
+  static const String _safariUserAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
   @override
   void initState() {
@@ -52,13 +54,15 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
   }
 
   Future<void> _prepareLoginScreenIos() async {
-    await _clearAppGroupCookie();
+    // 🟢 修正：起動時の App Group 消去を廃止（Safari拡張機能が保存したトークンの誤削除を防止）
     if (mounted) {
       setState(() {
         _isInitialized = true;
         _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Token未検出 / Safariでログイン完了待ち)";
       });
       _startCookiePolling();
+      // 画面表示時に既存の App Group データを即座にチェック
+      _checkAndValidateIosAppGroupCookies();
     }
   }
 
@@ -148,16 +152,10 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
       if (appGroupData != null && appGroupData.isNotEmpty) {
         if (mounted) {
           setState(() {
-            _statusText = "🟢 [${_getTimeStr()}] Token取得成功 (${appGroupData.length}文字)\n検証処理を実行中...";
+            _statusText = "🟢 [${_getTimeStr()}] Token検出 (${appGroupData.length}文字)\n検証処理を実行中...";
           });
         }
         await _validateAndSave(appGroupData);
-      } else {
-        if (mounted) {
-          setState(() {
-            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Token未検出 / Safariでログイン完了待ち)";
-          });
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -168,22 +166,26 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
-  /// 🟢 Cookie・API Tokenの双方に対応した検証ロジック
+  /// 🟢 Cookie・API Tokenの双方に対応した検証ロジック (User-Agentを追加)
   Future<bool> _verifyCredential(String credential) async {
     try {
       // 1. API トークン形式 (Bearer Token) での検証
       final tokenRes = await http.get(
-        Uri.parse('https://lms.keio.jp/api/v1/users/self'),
+        Uri.parse('$canvasBaseUrl/api/v1/users/self'),
         headers: {
           'Authorization': 'Bearer $credential',
           'Accept': 'application/json',
+          'User-Agent': _safariUserAgent, // 🟢 WAFブロック回避のため必須
         },
-      );
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint("Canvas API Token Verification Status: ${tokenRes.statusCode}");
+
       if (tokenRes.statusCode == 200) {
         return true;
       }
 
-      // 2. 既存 Cookie 形式での検証 (AuthService)
+      // 2. Cookie 形式での検証 (AuthService)
       return await AuthService.validateSession(credential);
     } catch (e) {
       debugPrint("Credential verification error: $e");
@@ -199,21 +201,18 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
       _pollingTimer?.cancel();
       _pollingTimer = null;
 
+      // 🟢 成功時のみ SecureStorage に保存し、App Group をクリア
+      await AuthService.saveSession(credential);
+
       if (Platform.isIOS) {
         await _clearAppGroupCookie();
       }
-
-      await AuthService.saveSession(credential);
 
       if (mounted) {
         Navigator.pop(context);
         widget.onLoginSuccess();
       }
     } else if (!isValid && mounted) {
-      // 🟢 64文字などの本物トークンが届いている間に誤削除されないよう、本当に短い仮クッキー（< 30文字）のみ消去
-      if (Platform.isIOS && credential.length < 30) {
-        await _clearAppGroupCookie();
-      }
       if (mounted) {
         setState(() {
           _statusText = "⚠️ [${_getTimeStr()}] Token検証失敗 (${credential.length}文字)\n再試行中...";
@@ -227,15 +226,7 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     final Uri fallbackUri = Uri.parse('https://lms.keio.jp');
 
     try {
-      if (Platform.isIOS) {
-        await _clearAppGroupCookie();
-        if (mounted) {
-          setState(() {
-            _statusText = "🟡 [${_getTimeStr()}] App Group監視中\n(Token未検出 / Safariでログイン完了待ち)";
-          });
-        }
-      }
-
+      // 🟢 修正：Safari 起動時の App Group 削除も廃止
       if (await canLaunchUrl(safariUri)) {
         await launchUrl(safariUri, mode: LaunchMode.externalApplication);
       } else {

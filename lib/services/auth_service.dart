@@ -10,6 +10,8 @@ class AuthService {
     aOptions: fss.AndroidOptions(encryptedSharedPreferences: true),
   );
   static const String _cookieKey = 'canvas_cookie';
+  static const String _safariUserAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
   /// 🟢 セッション（クッキーまたはAPIトークン）の保存
   static Future<void> saveSession(String credential) async {
@@ -33,13 +35,9 @@ class AuthService {
   /// 🟢 セッションおよびキャッシュの一括初期化（ログアウト用）
   static Future<void> clearSession() async {
     try {
-      // 1. SecureStorage から暗号化データを削除
       await _storage.delete(key: _cookieKey);
-
-      // 2. 全クッキーを一括完全初期化
       await CookieManager.instance().deleteAllCookies();
 
-      // 3. WebStorage (LocalStorage / SessionStorage) の削除
       final storageManager = WebStorageManager.instance();
       if (Platform.isAndroid) {
         await storageManager.android.deleteAllData();
@@ -56,16 +54,17 @@ class AuthService {
 
   /// 🟢 クレデンシャル形式（Cookie / Bearer Token）を自動判定してヘッダーを構築
   static Map<String, String> buildHeaders(String credential) {
-    // クッキー形式（'=' や ';' を含む）か API トークン形式（純粋な文字列）かを自動判別
     if (credential.contains('=') || credential.contains(';')) {
       return {
         'Cookie': credential,
         'Accept': 'application/json',
+        'User-Agent': _safariUserAgent,
       };
     } else {
       return {
         'Authorization': 'Bearer $credential',
         'Accept': 'application/json',
+        'User-Agent': _safariUserAgent,
       };
     }
   }
@@ -74,7 +73,10 @@ class AuthService {
   static Future<Map<String, String>> getHeaders() async {
     final credential = await getSession();
     if (credential == null || credential.isEmpty) {
-      return {'Accept': 'application/json'};
+      return {
+        'Accept': 'application/json',
+        'User-Agent': _safariUserAgent,
+      };
     }
     return buildHeaders(credential);
   }
@@ -85,7 +87,6 @@ class AuthService {
       final uri = Uri.tryParse('$canvasBaseUrl/api/v1/users/self');
       if (uri == null) return false;
 
-      // 自動判別された適切なヘッダーで API をテスト
       final headers = buildHeaders(credential);
       final response = await http.get(uri, headers: headers).timeout(const Duration(seconds: 10));
       return response.statusCode == 200;

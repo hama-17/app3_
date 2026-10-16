@@ -9,7 +9,7 @@ begin
   project_path = 'ios/Runner.xcodeproj'
   project = Xcodeproj::Project.open(project_path)
 
-  # 1. Runner側 Entitlements の物理生成
+  # 1. Runner 側の Entitlements の物理生成
   runner_entitlements_path = File.join('ios/Runner', 'Runner.entitlements')
   unless File.exist?(runner_entitlements_path)
     File.write(runner_entitlements_path, <<~XML)
@@ -150,9 +150,10 @@ begin
     }
   JSON
 
-  # 🟢 background.js
+  # 🟢 background.js (正確な NATIVE_APP_ID に修正済み)
   File.write(File.join(ext_dir, 'background.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
+    const NATIVE_APP_ID = "com.h.k.portal.extension";
 
     extAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message && message.action === "SYNC_TOKEN") {
@@ -162,7 +163,7 @@ begin
           return true;
         }
 
-        extAPI.runtime.sendNativeMessage("application.id", { "token": token }, (response) => {
+        extAPI.runtime.sendNativeMessage(NATIVE_APP_ID, { "token": token }, (response) => {
           const err = extAPI.runtime ? extAPI.runtime.lastError : null;
           if (err) {
             sendResponse({ status: "error", reason: "Native Err: " + err.message });
@@ -179,7 +180,7 @@ begin
     });
   JS
 
-  # 🟢 正しい API エンドポイント (/api/v1/users/self/tokens) を叩く content.js
+  # 🟢 content.js (無限生成防止 & 安全な同期制御に修正済み)
   File.write(File.join(ext_dir, 'content.js'), <<~JS)
     const extAPI = (typeof browser !== 'undefined') ? browser : chrome;
     let isExecuting = false;
@@ -229,34 +230,31 @@ begin
     async function autoGenerateTokenAndSync() {
       if (isExecuting) return;
 
+      const banner = setupBanner();
+
+      if (sessionStorage.getItem('kdot_synced') === 'true' || (banner && banner.dataset.synced === "true")) {
+        return;
+      }
+
+      if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
+        if (banner) {
+          updateBannerText(banner, '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+        }
+        return;
+      }
+
+      const csrfToken = extractCsrfToken();
+      if (!csrfToken) {
+        if (banner) updateBannerText(banner, '🟡 Waiting Cookie/CSRF... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+        return;
+      }
+
+      isExecuting = true;
+      if (banner) {
+        updateBannerText(banner, '🟡 Requesting Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+      }
+
       try {
-        const banner = setupBanner();
-
-        if (banner && banner.dataset.synced === "true") {
-          return;
-        }
-
-        if (window.location.href.includes('/login') || window.location.href.includes('/saml')) {
-          if (banner) {
-            updateBannerText(banner, '🟡 K.dot Extension (Please complete Passkey login) ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
-          }
-          return;
-        }
-
-        isExecuting = true;
-        if (banner && !banner.dataset.synced) {
-          updateBannerText(banner, '🟡 Requesting Canvas API Token... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
-        }
-
-        const csrfToken = extractCsrfToken();
-
-        if (!csrfToken) {
-          isExecuting = false;
-          if (banner) updateBannerText(banner, '🟡 Waiting Cookie/CSRF... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
-          return;
-        }
-
-        // 🟢 Canvas LMS 公式 REST API エンドポイントへ POST
         const formData = new URLSearchParams();
         formData.append('token[purpose]', 'K.dot App Auto Sync');
 
@@ -275,7 +273,6 @@ begin
         }
 
         const data = await response.json();
-        // 🟢 Canvas REST API レスポンスの data.token にアクセストークンが入ります
         const apiToken = data.token || data.visible_token || (data.access_token && data.access_token.visible_token);
 
         if (!apiToken) {
@@ -294,10 +291,12 @@ begin
 
           if (res && res.status === "success") {
             banner.dataset.synced = "true";
-            updateBannerText(banner, '🟢 API Token Generated & Synced (' + res.tokenLength + ' chars)! Returning to App...');
+            sessionStorage.setItem('kdot_synced', 'true');
+            updateBannerText(banner, '🟢 API Token Synced (' + res.tokenLength + ' chars)! Returning to App...');
+
             setTimeout(() => {
               window.location.href = "app3kportal://login-success";
-            }, 300);
+            }, 500);
           } else {
             const reason = (res && res.reason) ? res.reason : "Sync Failed";
             updateBannerText(banner, '🔴 Token Sync Failed (' + reason + ') ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
@@ -306,7 +305,6 @@ begin
 
       } catch (err) {
         isExecuting = false;
-        const banner = document.getElementById('kdot-extension-banner');
         if (banner) {
           updateBannerText(banner, '🔴 Token Error: ' + err.message + ' ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
         }
@@ -315,7 +313,14 @@ begin
 
     setupBanner();
     autoGenerateTokenAndSync();
-    setInterval(autoGenerateTokenAndSync, 2000);
+
+    const timerId = setInterval(() => {
+      if (sessionStorage.getItem('kdot_synced') === 'true') {
+        clearInterval(timerId);
+      } else {
+        autoGenerateTokenAndSync();
+      }
+    }, 3000);
   JS
 
   # 3. Target 構成
