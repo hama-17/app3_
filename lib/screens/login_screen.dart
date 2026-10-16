@@ -39,6 +39,8 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     }
   }
 
+
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);

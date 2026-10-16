@@ -18,46 +18,54 @@ import 'package:http/http.dart' as http;
 import 'services/cache_manager.dart'; // キャッシュマネージャーのパスを合わせてください
 import 'utils/lms_adapter.dart';
 import 'services/auth_service.dart';
+import 'services/cookie_service.dart';
 //main.dart
 bool globalDisableAutoCacheClear = false;
 final GlobalKey<NavigatorState> globalNavigatorKey = GlobalKey<NavigatorState>();
 
 // ─── 🟢 決定打：スマホがスリープ中にOSから独立して呼び出されるバックグラウンド専用の無線通信Dispatcher ───
+// ─── 🟢 修正版：バックグラウンド処理Dispatcher ───
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    debugPrint("💤 [Background Loop] アップル/アンドロイドのランチャー機能より巡回通信着火。");
+    debugPrint("💤 [Background Loop] バックグラウンド巡回通信着火。");
 
     try {
-      // ① まずは裏側でOktaを完全ステルス通過し、セッションを最新に延命！
+      // ① 裏側でOktaのセッションを延命
       final bool isRefreshSuccess = await LmsSilentRefreshService.trySilentRefresh();
 
       if (isRefreshSuccess) {
-        debugPrint("🟢 [Background Loop] サイレントログイン状態の延長に成功。データ先読みフェッチを開始します...");
+        debugPrint("🟢 [Background Loop] ログイン状態の延長に成功。データフェッチを開始...");
 
-        // 最新のCookieをSecureStorageからサルベージ
-        final String? activeCookie = await AuthService.getSession();
-        if (activeCookie != null && activeCookie.isNotEmpty) {
+        // セッション（Cookie または APIトークン）をSecureStorageから取得
+        final String? activeCredential = await AuthService.getSession();
+        if (activeCredential != null && activeCredential.isNotEmpty) {
 
-          // ② 【課題データの先読み直撃】全科目の課題APIを裏から叩く
-          final tasksUri = Uri.tryParse('$canvasBaseUrl/api/v1/users/self/todo?per_page=100'); // 本来の課題一括取得API
+          // 🟢 決定打：iOS(Bearer Token) と Android(Cookie) の双方に対応したヘッダーを自動構築
+          final headers = AuthService.buildHeaders(activeCredential);
+
+          // ② 課題データの先読み取得
+          final tasksUri = Uri.tryParse('$canvasBaseUrl/api/v1/users/self/todo?per_page=100');
           if (tasksUri != null) {
-            final res = await http.get(tasksUri, headers: {'Cookie': activeCookie}).timeout(const Duration(seconds: 10));
+            final res = await http.get(tasksUri, headers: headers).timeout(const Duration(seconds: 10));
+
             if (res.statusCode == 200) {
               final List<dynamic> fetchedTasks = jsonDecode(res.body);
 
-              // 🎯 決定打：画面（UI）を一切介さず、ローカルキャッシュファイルを裏から力技で直接上書き！
+              // キャッシュファイルへ上書き保存
               await CacheManager.save('cached_assignments_v14_all_year', fetchedTasks);
-              debugPrint("📦 [Background Loop] 最新の課題データをキャッシュに直撃書き込みしました（先読み完了）");
+              debugPrint("📦 [Background Loop] 最新の課題データをキャッシュに書き込み完了");
+            } else {
+              debugPrint("⚠️ [Background Loop] 課題取得失敗 Status: ${res.statusCode}");
             }
           }
         }
 
-        // ③ データが完全に新しくなった状態で、時間割や予定ウィジェットの文字を最新状態へ焼き替える
+        // ③ ウィジェットの描画データを最新状態へ更新
         await WidgetUpdateService.updateHomeWidgets();
       }
     } catch (e) {
-      debugPrint("❌ [Background Loop] バックグラウンド巡回中にエラーが発生: $e");
+      debugPrint("❌ [Background Loop] バックグラウンド巡回エラー: $e");
     }
 
     return Future.value(true);
@@ -184,6 +192,14 @@ class _CyberCanvasAppState extends State<CyberCanvasApp> with WidgetsBindingObse
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+
+    // 🟢 アプリが前面に戻ってきた瞬間に、Safari拡張機能のセッションを回収
+    if (state == AppLifecycleState.resumed) {
+      CookieService.syncSessionFromExtension().then((_) {
+        // 同期完了後にUIを更新したい場合はここで発火
+      });
+    }
+
     if (state == AppLifecycleState.hidden || state == AppLifecycleState.paused) {
       if (globalDisableAutoCacheClear) {
         debugPrint("Auto Cache Clear Skipped (Camera in use)");
