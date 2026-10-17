@@ -36,6 +36,7 @@ import '../services/live_notification_service.dart';
 import '../services/silent_refresh_service.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // 🟢 追記：ネイティブCookie制御のためにインポート
 import '../services/cookie_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 //lib/screens/dashboard_screen.dartの中身です。
 
@@ -83,14 +84,14 @@ class _MainSkeletonState extends State<MainSkeleton> with WidgetsBindingObserver
     if (state == AppLifecycleState.resumed) {
       CookieService.syncSessionFromExtension().then((resultMessage) {
         // 🚨 ここでスマホの画面下にヘッダーの中身を強制表示
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(resultMessage),
-              duration: const Duration(seconds: 7), // 7秒間表示
-            ),
-          );
-        }
+        // if (mounted) {
+        //   ScaffoldMessenger.of(context).showSnackBar(
+        //     SnackBar(
+        //       content: Text(resultMessage),
+        //       duration: const Duration(seconds: 7), // 7秒間表示
+        //     ),
+        //   );
+        // }
 
         if (resultMessage.startsWith("SUCCESS")) {
           Navigator.of(context).popUntil((route) => route.isFirst);
@@ -216,7 +217,29 @@ class _MainSkeletonState extends State<MainSkeleton> with WidgetsBindingObserver
     }
   }
 
-  void _handleLogin() => Navigator.push(context, MaterialPageRoute(builder: (_) => OktaLoginScreen(onLoginSuccess: _loadData)));
+  // ★ 修正：設定に応じて中間画面をスキップし、ダイレクトにSafariを起動するハイブリッドルーター
+  Future<void> _handleLogin() async {
+    if (Platform.isIOS) {
+      final prefs = await SharedPreferences.getInstance();
+      // 設定画面のトグル値を読み込み（デフォルトはtrue）
+      final useSafariLogin = prefs.getBool('ios_use_safari_login') ?? true;
+
+      if (useSafariLogin) {
+        // 🟢 Safari連携モード：中間画面を挟まず、一撃でネイティブのSafariを開く
+        try {
+          final loginUrl = Uri.parse('https://keio.jp/'); // 認証の起点となるURL
+          // mode: LaunchMode.externalApplication でアプリ内ブラウザを禁止し、絶対に標準Safariアプリを開かせる
+          await launchUrl(loginUrl, mode: LaunchMode.externalApplication);
+        } catch (e) {
+          debugPrint("Safari launch error: $e");
+        }
+        return; // WebView画面への展開をここで完全遮断
+      }
+    }
+
+    // 🟢 Android、またはiOSで「WebView方式」を選択している場合は従来の中間画面を展開
+    Navigator.push(context, MaterialPageRoute(builder: (_) => OktaLoginScreen(onLoginSuccess: _loadData)));
+  }
 
   // lib/screens/dashboard_screen.dart 内の _handleLogout メソッドを上書き
   void _handleLogout() async {

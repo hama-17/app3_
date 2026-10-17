@@ -163,6 +163,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _importEventsEnabled = false;
 
   bool _isSilentCameraEnabled = true;
+  bool _useSafariLogin = true;
 
   // 🟢 ライブ通知（カウントダウン）用のステート変数
   bool _isLiveNotifyEnabled = true;
@@ -209,6 +210,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       _liveNotifyClasses = true;
       _liveNotifyTasks = true;
       _isSilentCameraEnabled = prefs.getBool('ios_silent_camera_v10') ?? true;
+      _useSafariLogin = prefs.getBool('ios_use_safari_login') ?? true;
 
       // 🟢 追記：起動時に前回のグラデーションテーマ状態をロード
       _selectedThemeMode = prefs.getString('settings_theme_mode_v10') ?? 'blue';
@@ -258,6 +260,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     setState(() => _isSilentCameraEnabled = value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('ios_silent_camera_v10', value);
+  }
+
+  // 🟢 新設：iOS Safariログイン設定の切り替え
+  Future<void> _toggleSafariLogin(bool value) async {
+    setState(() => _useSafariLogin = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ios_use_safari_login', value);
   }
 
   Future<void> _toggleSyncTasks(bool value) async {
@@ -703,35 +712,65 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     ),
                     const SizedBox(height: 32),
 
-                    // 🟢 追記：iOS専用 無音カメラ切り替えパネル
+                    // 🟢 追記：iOS専用機能パネル (無音カメラ & ログイン方式)
                     if (Platform.isIOS) ...[
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8.0),
                         child: Container(
                           decoration: BoxDecoration(color: AppTheme.panel(context), borderRadius: BorderRadius.circular(30)),
                           clipBehavior: Clip.antiAlias,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text("無音カメラ", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
-                                SizedBox(
-                                  height: 20,
-                                  child: Transform.scale(
-                                    scale: 0.75,
-                                    child: Switch(
-                                      value: _isSilentCameraEnabled,
-                                      onChanged: _toggleSilentCamera,
-                                      activeColor: AppTheme.textMain(context),
-                                      activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
-                                      inactiveThumbColor: AppTheme.textSub(context),
-                                      inactiveTrackColor: Colors.transparent,
+                          child: Column(
+                            children: [
+                              // 無音カメラ設定
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text("無音カメラ", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
+                                    SizedBox(
+                                      height: 20,
+                                      child: Transform.scale(
+                                        scale: 0.75,
+                                        child: Switch(
+                                          value: _isSilentCameraEnabled,
+                                          onChanged: _toggleSilentCamera,
+                                          activeColor: AppTheme.textMain(context),
+                                          activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
+                                          inactiveThumbColor: AppTheme.textSub(context),
+                                          inactiveTrackColor: Colors.transparent,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
-                              ],
-                            ),
+                              ),
+                              Divider(height: 1, color: AppTheme.bg(context)),
+                              // 🟢 追記：Safariログイン設定
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text("Safariでログイン (パスキー)", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
+                                    SizedBox(
+                                      height: 20,
+                                      child: Transform.scale(
+                                        scale: 0.75,
+                                        child: Switch(
+                                          value: _useSafariLogin,
+                                          onChanged: _toggleSafariLogin,
+                                          activeColor: AppTheme.textMain(context),
+                                          activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
+                                          inactiveThumbColor: AppTheme.textSub(context),
+                                          inactiveTrackColor: Colors.transparent,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

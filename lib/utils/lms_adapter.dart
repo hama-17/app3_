@@ -37,14 +37,12 @@ class KeioAdapter implements LMSAdapter {
   String cleanTitle(String rawName) {
     try {
       String name = rawName.replaceAll(RegExp(r'\[.*?\]'), '').trim();
-      if (name.contains(' ')) {
-        final parts = name.split(' ');
+      if (name.contains('　')) {
+        final parts = name.split('　');
         if (parts.isNotEmpty) return parts.last.trim();
       }
       return name;
-    } catch (_) {
-      return rawName;
-    }
+    } catch (_) { return rawName; }
   }
 
   @override

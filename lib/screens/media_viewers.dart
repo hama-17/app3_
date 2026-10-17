@@ -15,6 +15,10 @@ import 'dart:math' as math;
 import 'package:flutter/rendering.dart';
 import 'package:gal/gal.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:gal/gal.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../services/auth_service.dart'; // 🚨この1行を追記
+
 //media_viewers.dart
 class InAppBrowserScreen extends StatefulWidget {
   final String url;
@@ -367,7 +371,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
 
   Future<void> _resolvePdfUrl() async {
     String currentUrl = widget.url;
-    Map<String, String>? currentHeaders = {'Cookie': widget.cookie};
+    // 🚨 修正：AuthServiceを使って正しいヘッダーを生成
+    Map<String, String>? currentHeaders = AuthService.buildHeaders(widget.cookie);
 
     final lowerUrl = currentUrl.toLowerCase();
     if (lowerUrl.contains('amazonaws.com') || lowerUrl.contains('sign=')) {
@@ -376,7 +381,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       try {
         final client = http.Client();
         final request = http.Request('GET', Uri.parse(currentUrl))
-          ..headers['Cookie'] = widget.cookie
+        // 🚨 修正：headersに丸ごとセットする
+          ..headers.addAll(AuthService.buildHeaders(widget.cookie))
           ..followRedirects = false;
 
         final response = await client.send(request).timeout(const Duration(seconds: 5));
@@ -713,7 +719,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                               try {
                                 final response = await http.get(
                                   Uri.parse(_resolvedUrl ?? widget.url),
-                                  headers: _resolvedHeaders ?? {},
+                                  // 🚨 修正：もし_resolvedHeadersが空なら、AuthServiceから生成する
+                                  headers: _resolvedHeaders ?? AuthService.buildHeaders(widget.cookie),
                                 ).timeout(const Duration(seconds: 15));
 
                                 if (response.statusCode == 200) {
@@ -1449,7 +1456,8 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
                         onWebViewCreated: (controller) => _webViewController = controller,
                         initialUrlRequest: URLRequest(
                           url: WebUri(widget.url),
-                          headers: {'Cookie': widget.cookie},
+                          // 🚨 修正：AuthServiceで正しいヘッダーを作って渡す
+                          headers: AuthService.buildHeaders(widget.cookie),
                         ),
                         initialSettings: InAppWebViewSettings(
                           javaScriptEnabled: true,

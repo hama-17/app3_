@@ -10,12 +10,13 @@ function updateBannerText(banner, text) {
 }
 
 function setupBanner() {
-  let banner = document.getElementById('kdot-extension-banner');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'kdot-extension-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#0066cc;color:white;text-align:center;z-index:999999;font-size:12px;padding:6px;box-shadow:0 2px 5px rgba(0,0,0,0.3);';
-    updateBannerText(banner, '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
+      let banner = document.getElementById('kdot-extension-banner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'kdot-extension-banner';
+        // 🟢 修正：CSSを display: none; に変更し、UIを完全に隠す
+        banner.style.cssText = 'display: none;';
+        updateBannerText(banner, '🟡 K.dot Extension Working... ｜ <a href="app3kportal://login-success" style="color:#ffeb3b;">[Back to App]</a>');
     if (document.body) {
       document.body.appendChild(banner);
     } else {

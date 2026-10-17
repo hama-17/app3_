@@ -23,6 +23,8 @@ import '../utils/dummy_data_helper.dart';
 import 'custom_camera_screen.dart';
 import 'dart:typed_data'; // 🟢 追記：これを入れることで Uint8List のエラーが消滅します
 import '../services/cache_manager.dart';
+import '../services/cache_manager.dart';
+import '../services/auth_service.dart'; // 🚨この1行を追記
 
 //lib/screens/course_detail_screen.dartの中身です。
 
@@ -1111,7 +1113,8 @@ class _CourseDataListState extends State<_CourseDataList> with AutomaticKeepAliv
     else url = '${currentLMS.baseUrl}/api/v1/courses/${widget.courseId}/discussion_topics?only_announcements=true&per_page=20';
 
     try {
-      final res = await http.get(Uri.parse(url), headers: {'Cookie': widget.cookie}).timeout(const Duration(seconds: 10));
+      final headers = AuthService.buildHeaders(widget.cookie); // 🚨ここで自動判定
+      final res = await http.get(Uri.parse(url), headers: headers).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200 && mounted) {
         final List<dynamic> freshData = jsonDecode(res.body);
 
