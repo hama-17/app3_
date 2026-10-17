@@ -35,6 +35,7 @@ import 'package:gal/gal.dart';
 import '../services/live_notification_service.dart';
 import '../services/silent_refresh_service.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // 🟢 追記：ネイティブCookie制御のためにインポート
+import '../services/cookie_service.dart';
 
 //lib/screens/dashboard_screen.dartの中身です。
 
@@ -50,7 +51,7 @@ final ValueNotifier<WidgetRouteData?> globalWidgetRouteNotifier = ValueNotifier(
 class MainSkeleton extends StatefulWidget { const MainSkeleton({super.key}); @override State<MainSkeleton> createState() => _MainSkeletonState(); }
 
 
-class _MainSkeletonState extends State<MainSkeleton> {
+class _MainSkeletonState extends State<MainSkeleton> with WidgetsBindingObserver {
   List<dynamic> _allCourses = [];
   List<dynamic> _filteredCourses = [];
   List<dynamic> _uniqueSortedCourses = [];
@@ -65,7 +66,41 @@ class _MainSkeletonState extends State<MainSkeleton> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initTermAndData();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 👈 これを追加
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      CookieService.syncSessionFromExtension().then((resultMessage) {
+        // 🚨 ここでスマホの画面下にヘッダーの中身を強制表示
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(resultMessage),
+              duration: const Duration(seconds: 7), // 7秒間表示
+            ),
+          );
+        }
+
+        if (resultMessage.startsWith("SUCCESS")) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          setState(() {
+            _isLoading = true;
+          });
+          _loadData();
+        }
+      });
+    }
   }
 
   // ★ 修正：起動時の初期化ロジック。手動保存を優先し、なければ自動判定。
@@ -152,7 +187,9 @@ class _MainSkeletonState extends State<MainSkeleton> {
       if (uri == null) return;
 
       // ─── 🟢 修正：科目の初期ロード時に401/403を喰らってもその場で即時自動蘇生 ───
-      final response = await http.get(uri, headers: { 'Cookie': _cookie }).timeout(const Duration(seconds: 10));
+      // ─── 🟢 修正：科目の初期ロード時に401/403を喰らってもその場で即時自動蘇生 ───
+      final headers = await AuthService.getHeaders(); // 🚨ここで自動判定ヘッダーを取得
+      final response = await http.get(uri, headers: headers).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         _allCourses = jsonDecode(response.body) as List;
         await CacheManager.save('my_course_cache_v10', _allCourses);
@@ -1842,7 +1879,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           if (uri == null) continue;
 
           try {
-            final res = await http.get(uri, headers: {'Cookie': liveCookie}).timeout(const Duration(seconds: 8));
+            final headers = AuthService.buildHeaders(liveCookie); // 🚨ここで自動判定
+            final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 8));
             if (isAborted) break; // 通信待合中（await）に誰かが力尽きていたら、静かに終了
 
             if (res.statusCode == 200) {
@@ -1964,7 +2002,8 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           if (uri == null) continue;
 
           try {
-            final res = await http.get(uri, headers: {'Cookie': liveCookie}).timeout(const Duration(seconds: 8));
+            final headers = AuthService.buildHeaders(liveCookie); // 🚨ここで自動判定
+            final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 8));
             if (isAborted) break;
 
             if (res.statusCode == 200) {
