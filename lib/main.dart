@@ -19,6 +19,8 @@ import 'services/cache_manager.dart'; // キャッシュマネージャーのパ
 import 'utils/lms_adapter.dart';
 import 'services/auth_service.dart';
 import 'services/cookie_service.dart';
+import 'screens/initial_boot_screen.dart';
+
 //main.dart
 bool globalDisableAutoCacheClear = false;
 final GlobalKey<NavigatorState> globalNavigatorKey = GlobalKey<NavigatorState>();
@@ -105,6 +107,8 @@ void main() async {
 
   final prefs = await SharedPreferences.getInstance();
 
+  final bool isFirstLaunch = prefs.getBool('has_shown_initial_boot_v1') ?? true;
+
   final savedTheme = prefs.getString('app_theme_mode');
   if (savedTheme == 'light') {
     appThemeNotifier.value = ThemeMode.light;
@@ -112,13 +116,14 @@ void main() async {
     appThemeNotifier.value = ThemeMode.dark;
   }
 
-  runApp(const CyberCanvasApp());
+  runApp(CyberCanvasApp(isFirstLaunch: isFirstLaunch));
 }
 
 // （これ以降の CyberCanvasApp クラスの中身は、1文字も変更なしで完全無傷維持してください）
 
 class CyberCanvasApp extends StatefulWidget {
-  const CyberCanvasApp({super.key});
+  final bool isFirstLaunch; // 🟢 追記：受け取り用の変数を追加
+  const CyberCanvasApp({super.key, required this.isFirstLaunch});
 
   @override
   State<CyberCanvasApp> createState() => _CyberCanvasAppState();
@@ -249,7 +254,9 @@ class _CyberCanvasAppState extends State<CyberCanvasApp> with WidgetsBindingObse
                   brightness: Brightness.dark,
                   fontFamily: 'GenInterfaceJP',
                   scaffoldBackgroundColor: Colors.black),
-              home: const MainSkeleton());
+
+              // 🟢 修正：初回起動ならブースト画面へ、2回目以降なら直接ダッシュボードへ直行
+              home: widget.isFirstLaunch ? const InitialBootScreen() : const MainSkeleton());
         });
   }
 }

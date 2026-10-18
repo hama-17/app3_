@@ -14,6 +14,7 @@ import '../utils/dummy_data_helper.dart';
 import '../services/cache_manager.dart';
 import '../services/auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'initial_boot_screen.dart';
 //setting_screen.dart
 class TermCirclePainter extends CustomPainter {
   final bool q1Active;
@@ -787,7 +788,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                           clipBehavior: Clip.antiAlias,
                           child: Column(
                               children: [
-                                _buildCustomListItem("Guide", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GuideScreen()))),
+                                _buildCustomListItem("Guide", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InitialBootScreen(isFromSettings: true)))),
                                 Divider(height: 1, color: AppTheme.bg(context)),
                                 _buildCustomListItem("Version", trailingText: "1.0.1", onTap: () {}),
                                 Divider(height: 1, color: AppTheme.bg(context)),
@@ -888,12 +889,12 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                   TextButton(
                                     child: const Text('すべて削除する', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold)),
                                     onPressed: () async {
-                                      Navigator.pop(ctx);
+                                      Navigator.pop(ctx); // ダイアログを閉じる
 
                                       await AuthService.clearSession();
 
                                       final prefs = await SharedPreferences.getInstance();
-                                      await prefs.clear();
+                                      await prefs.clear(); // 🟢 記憶（初回起動フラグ等）を全消去
 
                                       try {
                                         await CookieManager.instance().deleteAllCookies();
@@ -922,10 +923,19 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                                       }
 
                                       if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('すべてのデータを削除し、初期状態にリセットしました。アプリを再起動してください。')),
+                                        // ─── 🟢 変更箇所：再起動を促すのではなく、ここから初期化画面へ強制ワープ ───
+                                        Navigator.of(context).pushAndRemoveUntil(
+                                          PageRouteBuilder(
+                                            transitionDuration: const Duration(milliseconds: 600),
+                                            pageBuilder: (context, animation, secondaryAnimation) {
+                                              return FadeTransition(
+                                                opacity: animation,
+                                                child: const InitialBootScreen(),
+                                              );
+                                            },
+                                          ),
+                                              (Route<dynamic> route) => false, // 戻るボタンの履歴を完全破壊
                                         );
-                                        Navigator.pop(context, 'initialized');
                                       }
                                     },
                                   ),

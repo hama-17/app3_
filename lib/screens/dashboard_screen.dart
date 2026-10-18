@@ -217,28 +217,38 @@ class _MainSkeletonState extends State<MainSkeleton> with WidgetsBindingObserver
     }
   }
 
-  // ★ 修正：設定に応じて中間画面をスキップし、ダイレクトにSafariを起動するハイブリッドルーター
+  // 🟢 修正：Safari ON時は直接Safariを起動、OFF時やAndroidは純化したWebView画面を展開
   Future<void> _handleLogin() async {
-    if (Platform.isIOS) {
-      final prefs = await SharedPreferences.getInstance();
-      // 設定画面のトグル値を読み込み（デフォルトはtrue）
-      final useSafariLogin = prefs.getBool('ios_use_safari_login') ?? true;
+    final prefs = await SharedPreferences.getInstance();
+    bool useSafariLogin = false;
 
-      if (useSafariLogin) {
-        // 🟢 Safari連携モード：中間画面を挟まず、一撃でネイティブのSafariを開く
-        try {
-          final loginUrl = Uri.parse('https://keio.jp/'); // 認証の起点となるURL
-          // mode: LaunchMode.externalApplication でアプリ内ブラウザを禁止し、絶対に標準Safariアプリを開かせる
-          await launchUrl(loginUrl, mode: LaunchMode.externalApplication);
-        } catch (e) {
-          debugPrint("Safari launch error: $e");
-        }
-        return; // WebView画面への展開をここで完全遮断
-      }
+    if (Platform.isIOS) {
+      useSafariLogin = prefs.getBool('ios_use_safari_login') ?? true;
     }
 
-    // 🟢 Android、またはiOSで「WebView方式」を選択している場合は従来の中間画面を展開
-    Navigator.push(context, MaterialPageRoute(builder: (_) => OktaLoginScreen(onLoginSuccess: _loadData)));
+    if (Platform.isIOS && useSafariLogin) {
+      // 🚀 中間画面を挟まず、一撃でネイティブSafariを起動
+      // カスタムスキーム(x-safari-https)で標準ブラウザ設定を無視してApple純正Safariを強制起動
+      final Uri safariUri = Uri.parse('x-safari-https://lms.keio.jp');
+      final Uri fallbackUri = Uri.parse('https://lms.keio.jp');
+
+      try {
+        if (await canLaunchUrl(safariUri)) {
+          await launchUrl(safariUri, mode: LaunchMode.externalApplication);
+        } else {
+          await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+        }
+      } catch (e) {
+        debugPrint("Safari launch error: $e");
+      }
+      return; // Safariを開いたのでここで終了。復帰時の処理は MainSkeleton の didChangeAppLifecycleState が担う
+    }
+
+    // 🌐 サファリOFF時 または Android：WebViewログイン画面へ直行
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => OktaLoginScreen(onLoginSuccess: _loadData)),
+    );
   }
 
   // lib/screens/dashboard_screen.dart 内の _handleLogout メソッドを上書き
@@ -3559,11 +3569,17 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                           // ─── _buildHomeContent() メソッド内の下部操作バー周辺 ───
                           // 🟢 修正：条件式を MediaQuery から _isMemoFieldOpen に変更。
                           // メモ入力欄が開いている間、およびフェードアウト中の250msの間、操作バーを完全に消滅（shrink）させて領域を最大確保します。
+                          // ─── _buildHomeContent() メソッド内の下部操作バー周辺 ───
                           _isMemoFieldOpen
                               ? const SizedBox.shrink()
                               : Container(
-                            padding: EdgeInsets.fromLTRB(40.0, 0, 40.0, MediaQuery.of(context).padding.bottom + 24.0),
-                            height: 100,
+                            // 🟢 修正：画面両端から20pxの隙間を空ける
+                            padding: EdgeInsets.only(
+                              left: 20.0,
+                              right: 20.0,
+                              bottom: MediaQuery.of(context).padding.bottom + 24.0,
+                            ),
+                            height: 110,
                             alignment: Alignment.center,
                             child: Builder(
                                 builder: (context) {
@@ -3571,54 +3587,85 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   Color camBtnColor = isDark ? Colors.white : Colors.black;
 
                                   return Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      // 対応メモがない時はボタンを半透明・タップ不可にロック
+                                      // ① 左側：テキストメモボタン（カプセル枠）
                                       Builder(
                                           builder: (context) {
                                             bool hasTarget = _getCurrentOrNextCourse() != null;
-                                            return IconButton(
-                                              // 🟢 修正：edit_note_rounded から、より無機質でプレーンな鉛筆マークへ純化
-                                              icon: Icon(
-                                                Icons.create_outlined,
-                                                color: hasTarget ? camBtnColor : camBtnColor.withOpacity(0.15),
-                                                size: 26, // 輪郭をシャープに魅せるためサイズを26に微調整
-                                              ),
-                                              onPressed: hasTarget ? () {
+                                            return GestureDetector(
+                                              onTap: hasTarget ? () {
                                                 setState(() => _isMemoFieldOpen = true);
                                                 WidgetsBinding.instance.addPostFrameCallback((_) {
                                                   _cameraMemoFocusNode.requestFocus();
                                                 });
                                               } : null,
+                                              child: Container(
+                                                width: 80,
+                                                height: 80,
+                                                decoration: BoxDecoration(
+                                                  border: Border.all(
+                                                    color: hasTarget ? camBtnColor.withOpacity(1) : camBtnColor.withOpacity(0.15),
+                                                    width: 2.0, // 🟢 修正：枠線を少し太く
+                                                  ),
+                                                  borderRadius: BorderRadius.circular(100),
+                                                ),
+                                                child: Icon(
+                                                  Icons.create_outlined,
+                                                  color: hasTarget ? camBtnColor : camBtnColor.withOpacity(0.15),
+                                                  size: 26,
+                                                ),
+                                              ),
                                             );
                                           }
                                       ),
 
-                                      // 中央：タップ時にキュッと小さくなるAnimated正円シャッター
-                                      GestureDetector(
-                                        onTap: _takeInlineCameraPhoto,
-                                        child: Container(
-                                          width: 76, height: 76,
-                                          alignment: Alignment.center,
-                                          child: AnimatedContainer(
+                                      // 🟢 修正：左右ボタンとの間に少しだけ隙間を空ける
+                                      const SizedBox(width: 12),
+
+                                      // ② 中央：シャッターボタン（Expandedで限界まで横長に広げる）
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: _takeInlineCameraPhoto,
+                                          // 🟢 修正：横幅が可変になるため、タップ時の縮小は AnimatedScale に任せる
+                                          child: AnimatedScale(
+                                            scale: _isCamTakingPicture ? 0.9 : 1.0,
                                             duration: const Duration(milliseconds: 100),
                                             curve: Curves.easeInOut,
-                                            width: _isCamTakingPicture ? 52 : 72,
-                                            height: _isCamTakingPicture ? 52 : 72,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: _isCamTakingPicture ? camBtnColor.withOpacity(0.5) : camBtnColor,
+                                            child: Container(
+                                              height: 80,
+                                              decoration: BoxDecoration(
+                                                color: _isCamTakingPicture ? camBtnColor.withOpacity(1) : camBtnColor,
+                                                borderRadius: BorderRadius.circular(100),
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
 
-                                      // 右側：戻るボタン
-                                      IconButton(
-                                        icon: Icon(Icons.arrow_forward_rounded, color: camBtnColor, size: 28),
-                                        onPressed: () {
+                                      // 🟢 修正：左右ボタンとの間に少しだけ隙間を空ける
+                                      const SizedBox(width: 12),
+
+                                      // ③ 右側：ホームへ戻るボタン（カプセル枠）
+                                      GestureDetector(
+                                        onTap: () {
                                           _dragAnimController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
                                         },
+                                        child: Container(
+                                          width: 80,
+                                          height: 80,
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              color: camBtnColor.withOpacity(1),
+                                              width: 2.0, // 🟢 修正：枠線を少し太く
+                                            ),
+                                            borderRadius: BorderRadius.circular(100),
+                                          ),
+                                          child: Icon(
+                                            Icons.arrow_forward_rounded,
+                                            color: camBtnColor,
+                                            size: 28,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   );
@@ -3660,104 +3707,38 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                             _buildTasksAndMessagesColumn(next7DaysTasks, unreadMessages),
 
                             // -------------------------------------------------------------------
-                            // 🟢 追記：最下端のミニマルなカメラ誘導インジケータ
+                            // 🟢 変更：設定画面への誘導インジケータ（大きめの細線カプセル枠）
                             // -------------------------------------------------------------------
                             const SizedBox(height: 16),
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                // 🟢 解決の鍵：タップ時に大元のコントローラーを左（-1.0）へ滑らかにアニメーション駆動。
-                                // これにより既存のスワイプ処理（カメラのオンデマンド起動ロジック）と100%安全に同期します。
-                                _dragAnimController.animateTo(
-                                    -1.0,
-                                    duration: const Duration(milliseconds: 350),
-                                    curve: Curves.easeOutCubic
-                                );
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 24.0),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.arrow_back_rounded,
-                                      color: AppTheme.textMain(context).withOpacity(0.85),
-                                      size: 22,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      "Silent Camera",
-                                      style: TextStyle(
-                                        color: AppTheme.textMain(context).withOpacity(1), // ノイズにならない超極薄グレー
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w200, // スタイリッシュな極細字
-                                        letterSpacing: - 0.4,          // テック感を出す広めのカーニング
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            // 🟢 新設：k-supportへのミニマルなウェブビュー誘導インジケータ
-                            // ─── 🟢 修正：テストログイン時はインダストリアルなk-support誘導インジケータを完全にパージする ───
-                            // ─── 🟢 修正：k-supportへの直撃型・超高剛性顔パスルーター ───
-                            if (widget.cookie != "dummy_test_session")
-                              GestureDetector(
+                            Center(
+                              child: GestureDetector(
                                 behavior: HitTestBehavior.opaque,
-                                onTap: () async {
-                                  const String kSupportUrl = "https://keiouniversity.my.site.com/students/s/";
-
-                                  // 🎯 核心：k-supportを開くコンマ数ミリ秒前に、ネイティブのCookieManagerをハック。
-                                  // Canvas用に持っているクッキーを、k-supportのドメイン（Salesforce/Okta）の改札にも先回りして流し込みます。
-                                  if (widget.cookie.isNotEmpty) {
-                                    final cm = CookieManager.instance();
-
-                                    // k-supportの大元ドメインと、認証のバウンス先である keio.jp の両方に結線
-                                    final kSupportUri = WebUri("https://keiouniversity.my.site.com");
-                                    final keioJpUri = WebUri("https://keio.jp");
-
-                                    for (var pair in widget.cookie.split(';')) {
-                                      final idx = pair.indexOf('=');
-                                      if (idx == -1) continue;
-                                      final name = pair.substring(0, idx).trim();
-                                      final value = pair.substring(idx + 1).trim();
-                                      if (name.isNotEmpty) {
-                                        // 両方のドメインのブラウザストレージにクッキーを同期
-                                        await cm.setCookie(url: kSupportUri, name: name, value: value);
-                                        await cm.setCookie(url: keioJpUri, name: name, value: value);
-                                      }
-                                    }
-                                    debugPrint("🔑 [k-support Bridge] Oktaフリーパスの流し込みが完了しました。");
-                                  }
-
-                                  // 必ずアプリ内の共通WebView（openSmartUrl）で展開すること！
-                                  if (context.mounted) {
-                                    openSmartUrl(
-                                        context,
-                                        kSupportUrl,
-                                        widget.cookie,
-                                        title: "k-support"
-                                    );
-                                  }
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 16.0),
-                                  // （...これより下のRowやText等のUIレイアウトは一切変更なし維持）
+                                onTap: widget.onSettings,
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 24.0),
+                                  padding: const EdgeInsets.symmetric(horizontal: 48.0, vertical: 16.0), // 大きめの余白を持たせる
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: AppTheme.textMain(context).withOpacity(0.3), // 上品で薄い色味
+                                      width: 0.5, // スタイリッシュな極細線
+                                    ),
+                                    borderRadius: BorderRadius.circular(100), // 綺麗なカプセル形状
+                                  ),
                                   child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min, // 枠を文字幅＋パディングに合わせる
                                     children: [
                                       Text(
-                                        "k-support",
+                                        "Settings",
                                         style: TextStyle(
                                           color: AppTheme.textMain(context),
                                           fontSize: 24,
-                                          fontWeight: FontWeight.w200,
+                                          fontWeight: FontWeight.w300, // 極細字
                                           letterSpacing: -0.4,
                                         ),
                                       ),
-                                      const SizedBox(width: 6),
+                                      const SizedBox(width: 8),
                                       Icon(
-                                        Icons.arrow_outward_rounded,
+                                        Icons.settings_outlined,
                                         color: AppTheme.textMain(context).withOpacity(0.85),
                                         size: 22,
                                       ),
@@ -3765,11 +3746,13 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                                   ),
                                 ),
                               ),
-
+                            ),
                           ],
                         ),
                       )
                   ),
+
+
 
                   // ③ 最右面：COURSES時間割
                   Transform.translate(
@@ -5375,7 +5358,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
                       padding: const EdgeInsets.symmetric(vertical: 32.0),
                       child: Center(
                         child: Text(
-                          "予定はありません",
+                          " ",
                           style: TextStyle(
                             color: tCol.withOpacity(0.6),
                             fontSize: 14,
@@ -6303,63 +6286,20 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
       padding: EdgeInsets.fromLTRB(8.0, 0, 8.0, MediaQuery.of(context).padding.bottom + 16.0),
       child: Row(
         children: [
-          AnimatedBuilder(
-              animation: Listenable.merge([_colorAnimController, _errorAnimController, _spinAnimController]),
-              builder: (context, child) {
-                Color bg;
-                IconData iconData;
-                bool isLoading = _isLoadingAssignments || _isLoadingMessages;
-                Color appBgColor = AppTheme.bg(context);
-
-                // 👇 ─── 🟢 ここから分岐条件をリバランス上書き ───
-                // ─── 🟢 修正：確定状態を判定に組み込んだ安心のスイッチ回路 ───
-                if (isLoading && !_hasApiError) {
-                  // 読み込み動作中は、常に同期マーク ＋ クールな白黒点滅で待機
-                  bg = _colorAnimController.value == 0.0
-                      ? baseBgColor
-                      : (Color.lerp(Colors.black, Colors.white, _colorAnimController.value) ?? Colors.black);
-                  iconData = Icons.sync;
-                } else if (_isFirstLaunchLoop) {
-                  // 🎯 起動処理が完全に落ち着く（確定する）までは、絶対に赤ルートに入らせずグレーの静寂を維持
-                  bg = baseBgColor;
-                  iconData = Icons.sync;
-                } else if (!widget.isAuthenticated || _hasApiError) {
-                  // 全通信が終わり、名実ともにログアウトが確定したときのみ真っ赤に変形
-                  bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
-                  iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
-                } else {
-                  bg = baseBgColor;
-                  iconData = Icons.sync;
-                }
-                // 👆 ─── 変更ここまで ───
-
-                Widget iconWidget = Icon(iconData, color: textColor);
-                if (isLoading) {
-                  iconWidget = Transform.rotate(
-                    angle: _spinAnimController.value * 2.0 * math.pi,
-                    child: iconWidget,
-                  );
-                }
-
-                return GestureDetector(
-                  onTap: () {
-                    if (!widget.isAuthenticated) {
-                      // ─── 🟢 追記：左下の赤いボタンを押してログインWebViewへ向かう瞬間に、ポップアップを勝手に消滅させる ───
-                      if (_showInitialLoginGuide) {
-                        _dismissLoginGuide(); // 裏側で SharedPreferences へ「閲覧済みフラグ」を書き込み、メモリを即時クリーンアップ
-                      }
-                      widget.onLogin();
-                    } else if (!isLoading) {
-                      _fetchDataParallel();
-                    }
-                  },
-                  child: Container(
-                    width: 60, height: 60,
-                    decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-                    child: iconWidget,
-                  ),
-                );
-              }
+          // 🟢 変更：左側に Silent Camera ボタンを配置
+          GestureDetector(
+            onTap: () {
+              _dragAnimController.animateTo(
+                  -1.0,
+                  duration: const Duration(milliseconds: 350),
+                  curve: Curves.easeOutCubic
+              );
+            },
+            child: Container(
+              width: 60, height: 60,
+              decoration: BoxDecoration(color: baseBgColor, shape: BoxShape.circle),
+              child: Icon(Icons.camera_alt_outlined, color: textColor),
+            ),
           ),
           const SizedBox(width: 8),
 
@@ -6466,13 +6406,63 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
           ),
           const SizedBox(width: 8),
 
-          Container(
-            width: 60, height: 60,
-            decoration: BoxDecoration(color: baseBgColor, shape: BoxShape.circle),
-            child: IconButton(
-              icon: Icon(Icons.settings, color: textColor),
-              onPressed: widget.onSettings,
-            ),
+          // 🟢 変更：右側に ログイン/リロード ボタンを移動
+          AnimatedBuilder(
+              animation: Listenable.merge([_colorAnimController, _errorAnimController, _spinAnimController]),
+              builder: (context, child) {
+                Color bg;
+                IconData iconData;
+                bool isLoading = _isLoadingAssignments || _isLoadingMessages;
+                Color appBgColor = AppTheme.bg(context);
+
+                // 👇 ─── 🟢 ここから分岐条件をリバランス上書き ───
+                // ─── 🟢 修正：確定状態を判定に組み込んだ安心のスイッチ回路 ───
+                if (isLoading && !_hasApiError) {
+                  // 読み込み動作中は、常に同期マーク ＋ クールな白黒点滅で待機
+                  bg = _colorAnimController.value == 0.0
+                      ? baseBgColor
+                      : (Color.lerp(Colors.black, Colors.white, _colorAnimController.value) ?? Colors.black);
+                  iconData = Icons.sync;
+                } else if (_isFirstLaunchLoop) {
+                  // 🎯 起動処理が完全に落ち着く（確定する）までは、絶対に赤ルートに入らせずグレーの静寂を維持
+                  bg = baseBgColor;
+                  iconData = Icons.sync;
+                } else if (!widget.isAuthenticated || _hasApiError) {
+                  // 全通信が終わり、名実ともにログアウトが確定したときのみ真っ赤に変形
+                  bg = Color.lerp(AppTheme.accent, appBgColor, _errorAnimController.value) ?? AppTheme.accent;
+                  iconData = !widget.isAuthenticated ? Icons.login : Icons.sync;
+                } else {
+                  bg = baseBgColor;
+                  iconData = Icons.sync;
+                }
+                // 👆 ─── 変更ここまで ───
+
+                Widget iconWidget = Icon(iconData, color: textColor);
+                if (isLoading) {
+                  iconWidget = Transform.rotate(
+                    angle: _spinAnimController.value * -2.0 * math.pi,
+                    child: iconWidget,
+                  );
+                }
+
+                return GestureDetector(
+                  onTap: () {
+                    if (!widget.isAuthenticated) {
+                      if (_showInitialLoginGuide) {
+                        _dismissLoginGuide(); // 裏側で SharedPreferences へ「閲覧済みフラグ」を書き込み、メモリを即時クリーンアップ
+                      }
+                      widget.onLogin();
+                    } else if (!isLoading) {
+                      _fetchDataParallel();
+                    }
+                  },
+                  child: Container(
+                    width: 60, height: 60,
+                    decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+                    child: iconWidget,
+                  ),
+                );
+              }
           ),
         ],
       ),
@@ -6624,37 +6614,7 @@ class _DashboardPageState extends State<DashboardPage> with TickerProviderStateM
 
                 // (中略：下部かすみ用グラデーションマスクのジャスト下)
 
-                // ─── 🟢 修正：テストログイン中（dummy_test_session）は表示を完全リジェクトする ───
-                if (_showInitialLoginGuide && _currentViewState == ViewState.home && widget.cookie != "dummy_test_session")
-                  Positioned(
-                    bottom: 84.0 + MediaQuery.of(context).padding.bottom,
-                    left: leftSwipeOffset + 8.0,
-                    right: -leftSwipeOffset + 8.0,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 200),
-                      opacity: (_dragPosition < 0.0) ? (1.0 - _dragPosition.abs() * 2).clamp(0.0, 1.0) : 1.0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 13.0),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accent,
-                          borderRadius: BorderRadius.circular(100),
-                        ),
-                        child: Center(
-                          child: Text(
-                            "セッションが切れ、ログアウト状態になると、\n 左下のログインボタンが赤く点滅します。\n ログインボタンをタップしてログインしてください。",
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w400,
-                              height: 1.4,
-                              letterSpacing: -0.2,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+
 
                 // 下部ナビゲーションユニット本体
                 Positioned(

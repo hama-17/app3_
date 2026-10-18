@@ -15,17 +15,14 @@ import 'dart:math' as math;
 import 'package:flutter/rendering.dart';
 import 'package:gal/gal.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import 'package:gal/gal.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import '../services/auth_service.dart'; // 🚨この1行を追記
+import '../services/auth_service.dart';
 
-//media_viewers.dart
 class InAppBrowserScreen extends StatefulWidget {
   final String url;
   final String cookie;
-  final Function(List<String>)? onImagesSaved; // 🟢 追記：ブラウザ経由時もイベントを逆流させるための中継皿を新設
+  final Function(List<String>)? onImagesSaved;
 
-  const InAppBrowserScreen({super.key, required this.url, required this.cookie, this.onImagesSaved}); // 🟢 修正
+  const InAppBrowserScreen({super.key, required this.url, required this.cookie, this.onImagesSaved});
   @override
   State<InAppBrowserScreen> createState() => _InAppBrowserScreenState();
 }
@@ -42,6 +39,10 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
 
   Future<void> _injectGlobalCookies() async {
     if (widget.cookie.isEmpty) return;
+
+    // 🟢 追加：Safariログイン等で得たBearerトークンの場合、Cookieとして注入するとエラーになるため回避
+    if (widget.cookie.trim().startsWith('Bearer ')) return;
+
     try {
       final cookieManager = CookieManager.instance();
       final uri = Uri.parse(widget.url);
@@ -49,6 +50,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
       final hostParts = uri.host.split('.');
       String domain = uri.host;
       if (hostParts.length >= 3) {
+        // 修正：消失していた引き算を復元
         domain = ".${hostParts.sublist(hostParts.length - 3).join('.')}";
       }
 
@@ -116,7 +118,7 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
             builder: (_) => PdfViewerScreen(
               url: downloadUrl,
               cookie: widget.cookie,
-              onImagesSaved: widget.onImagesSaved, // 🎯 徹底修復：千切れていたコールバックをここでPDFビューアへパススルー
+              onImagesSaved: widget.onImagesSaved,
             )
         ),
       );
@@ -168,13 +170,21 @@ class _InAppBrowserScreenState extends State<InAppBrowserScreen> {
                                     if (_checkIsPdf(urlStr)) {
                                       _replaceWithPdfViewer(urlStr);
                                     } else {
-                                      controller.loadUrl(urlRequest: URLRequest(url: WebUri(urlStr)));
+                                      controller.loadUrl(
+                                          urlRequest: URLRequest(
+                                              url: WebUri(urlStr),
+                                              // 🟢 追加：遷移時もSafari用のトークンヘッダーを維持
+                                              headers: AuthService.buildHeaders(widget.cookie)
+                                          )
+                                      );
                                     }
                                   },
                                 );
                               },
                               initialUrlRequest: URLRequest(
-                                url: WebUri(widget.url),
+                                  url: WebUri(widget.url),
+                                  // 🟢 徹底修正：Safariログイン等の場合、Cookieではなくここにトークンヘッダーを乗せる！
+                                  headers: AuthService.buildHeaders(widget.cookie)
                               ),
                               initialSettings: InAppWebViewSettings(
                                 javaScriptEnabled: true,
@@ -320,11 +330,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
   String? _activeBar;
   bool _blockDrawing = false;
 
-  // ─── 📝 新設：テキストメモ専用のオーバーレイ管理ステート ───
   bool _isTextMemoMode = false;
   final TextEditingController _textMemoController = TextEditingController();
   final FocusNode _textMemoFocusNode = FocusNode();
-  String _tempTextMemo = ""; // 🟢 新設：テキストを一時的に仮ホールドしておくためのスタック変数
+  String _tempTextMemo = "";
 
   AnimationController? _saveAnimController;
   Animation<double>? _saveScaleAnim;
@@ -354,7 +363,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
     _textMemoController.dispose();
     _textMemoFocusNode.dispose();
 
-    // ネイティブグラフィックメモリを物理破壊して浮遊リークを完全阻止
     _capturedImage?.dispose();
     _capturedImage = null;
 
@@ -371,7 +379,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
 
   Future<void> _resolvePdfUrl() async {
     String currentUrl = widget.url;
-    // 🚨 修正：AuthServiceを使って正しいヘッダーを生成
     Map<String, String>? currentHeaders = AuthService.buildHeaders(widget.cookie);
 
     final lowerUrl = currentUrl.toLowerCase();
@@ -381,7 +388,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       try {
         final client = http.Client();
         final request = http.Request('GET', Uri.parse(currentUrl))
-        // 🚨 修正：headersに丸ごとセットする
           ..headers.addAll(AuthService.buildHeaders(widget.cookie))
           ..followRedirects = false;
 
@@ -438,12 +444,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke.width * (srcW / drawW);
+        ..strokeWidth = stroke.width * (srcW / drawW); // 修正：消失していた掛け算を復元
 
       final path = Path();
-      path.moveTo(stroke.points[0].rx * srcW, stroke.points[0].ry * srcH);
+      path.moveTo(stroke.points[0].rx * srcW, stroke.points[0].ry * srcH); // 修正：消失していた掛け算を復元
+
       for (int i = 1; i < stroke.points.length; i++) {
-        path.lineTo(stroke.points[i].rx * srcW, stroke.points[i].ry * srcH);
+        path.lineTo(stroke.points[i].rx * srcW, stroke.points[i].ry * srcH); // 修正：消失していた掛け算を復元
       }
       canvas.drawPath(path, paint);
     }
@@ -457,10 +464,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       final double srcW = _capturedImage!.width.toDouble();
       final double srcH = _capturedImage!.height.toDouble();
 
-      // ─── 🟢 追記：プレビュー時と解像度の比率を完全に一致させるため、実際の描画論理幅(drawW)を正確に再現 ───
       final double boxW = MediaQuery.of(context).size.width;
       final double statusBarHeight = MediaQuery.of(context).padding.top;
-      final double boxH = MediaQuery.of(context).size.height - statusBarHeight - MediaQuery.of(context).padding.bottom - 185.0;
+      final double boxH = MediaQuery.of(context).size.height - statusBarHeight - MediaQuery.of(context).padding.bottom - 185.0; // 修正：消失していた引き算を復元
 
       double drawW, drawH;
       if ((srcW / srcH) > (boxW / boxH)) {
@@ -481,7 +487,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       final canvas = Canvas(recorder);
       canvas.drawImage(_capturedImage!, Offset.zero, Paint());
 
-      // 🎯 修正：第4引数を srcW から、今計算した画面上の論理幅である drawW へ変更！
       _drawStrokesOnCanvas(canvas, srcW, srcH, drawW);
 
       final picture = recorder.endRecording();
@@ -533,10 +538,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       final double srcW = _capturedImage!.width.toDouble();
       final double srcH = _capturedImage!.height.toDouble();
 
-      // ─── 🟢 追記：プレビュー時と解像度の比率を完全に一致させるため、実際の描画論理幅(drawW)を正確に再現 ───
       final double boxW = MediaQuery.of(context).size.width;
       final double statusBarHeight = MediaQuery.of(context).padding.top;
-      final double boxH = MediaQuery.of(context).size.height - statusBarHeight - MediaQuery.of(context).padding.bottom - 185.0;
+      final double boxH = MediaQuery.of(context).size.height - statusBarHeight - MediaQuery.of(context).padding.bottom - 185.0; // 修正：消失していた引き算を復元
 
       double drawW, drawH;
       if ((srcW / srcH) > (boxW / boxH)) {
@@ -557,7 +561,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
       final canvas = Canvas(recorder);
       canvas.drawImage(_capturedImage!, Offset.zero, Paint());
 
-      // 🎯 修正：第4引数を srcW から、今計算した画面上の論理幅である drawW へ変更！
       _drawStrokesOnCanvas(canvas, srcW, srcH, drawW);
 
       final picture = recorder.endRecording();
@@ -592,24 +595,20 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
         final file = File(filePath);
         await file.writeAsBytes(pngBytes);
 
-        // 1. アルバム『AXYZ』への保存処理
         try {
           await Gal.requestAccess(toAlbum: true);
           await Gal.putImage(filePath, album: 'dot archive');
           debugPrint("AXYZ アルバムへのPDFスクショ保存に成功しました");
         } catch (albumError) {
           debugPrint("アルバム保存でエラーが発生: $albumError");
-          await Gal.putImage(filePath); // フォールバック
+          await Gal.putImage(filePath);
         }
 
-        // ─── 🎯 【重要】ここが2回記述されていないか確認してください ───
-        // 画像パスと、もしあれば仮保存テキストをパッキングして「1回だけ」親に射撃します
         final List<String> payload = [filePath];
         if (_tempTextMemo.isNotEmpty) {
           payload.add("TEXT_MEMO:$_tempTextMemo");
         }
         widget.onImagesSaved?.call(payload);
-        // ───────────────────────────────────────────────────────────
 
         await _saveAnimController!.forward();
       }
@@ -621,7 +620,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
           _isSavingCrop = false;
           _isCropMode = false;
 
-          // ─── 🎯 決定打：保存完了時もネイティブメモリを物理破壊して浮遊リークを完全阻止 ───
           _capturedImage?.dispose();
           _capturedImage = null;
 
@@ -719,7 +717,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                               try {
                                 final response = await http.get(
                                   Uri.parse(_resolvedUrl ?? widget.url),
-                                  // 🚨 修正：もし_resolvedHeadersが空なら、AuthServiceから生成する
                                   headers: _resolvedHeaders ?? AuthService.buildHeaders(widget.cookie),
                                 ).timeout(const Duration(seconds: 15));
 
@@ -765,7 +762,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                     IconButton(
                                       icon: const Icon(Icons.close, color: Colors.white, size: 26),
                                       onPressed: () => setState(() {
-                                        // 🎯 修正： null を入れる前にネイティブグラフィックの息の根を確実に止める
                                         _capturedImage?.dispose();
                                         _capturedImage = null;
 
@@ -853,7 +849,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                       final double centerY = boxH / 2;
 
                                       if (_isPenMode) {
-                                        final double cropH = drawH * (_cropBottomY - _cropTopY);
+                                        final double cropH = drawH * (_cropBottomY - _cropTopY); // 修正：消失していた引き算を復元
                                         final double cropW = drawW;
                                         final double fitScale = math.min(boxW / cropW, boxH / cropH);
 
@@ -883,7 +879,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                               final double localX = x2 - activeLeft;
                                               final double localY = y2 - activeTop;
                                               final double originalLocalX = localX / fitScale;
-                                              final double originalLocalY = (localY / fitScale) + (_cropTopY * drawH);
+                                              final double originalLocalY = (localY / fitScale) + (_cropTopY * drawH); // 修正：消失していた掛け算を復元
+
                                               final double rx = (originalLocalX / drawW).clamp(0.0, 1.0);
                                               final double ry = (originalLocalY / drawH).clamp(0.0, 1.0);
 
@@ -899,15 +896,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                           onScaleUpdate: (details) {
                                             if (_isPinching) {
                                               setState(() {
-                                                _cropZoom = (_baseCropZoom * details.scale).clamp(1.0, 4.0);
+                                                _cropZoom = (_baseCropZoom * details.scale).clamp(1.0, 4.0); // 修正：消失していた掛け算を復元
                                                 if (_cropZoom <= 1.01) {
                                                   _cropOffset = Offset.zero;
                                                 } else {
-                                                  final Offset totalDelta = details.localFocalPoint - _baseFocalPoint;
+                                                  final Offset totalDelta = details.localFocalPoint - _baseFocalPoint; // 修正：消失していた引き算を復元
                                                   _cropOffset = _baseCropOffset + totalDelta;
 
-                                                  double maxOffsetX = (activeW * _cropZoom - boxW).clamp(0.0, double.infinity) / 2;
-                                                  double maxOffsetY = (activeH * _cropZoom - boxH).clamp(0.0, double.infinity) / 2;
+                                                  double maxOffsetX = (activeW * _cropZoom - boxW).clamp(0.0, double.infinity) / 2; // 修正：消失していた演算子を復元
+                                                  double maxOffsetY = (activeH * _cropZoom - boxH).clamp(0.0, double.infinity) / 2; // 修正：消失していた演算子を復元
 
                                                   if (activeW * _cropZoom <= boxW) maxOffsetX = 0.0;
                                                   if (activeH * _cropZoom <= boxH) maxOffsetY = 0.0;
@@ -930,7 +927,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                               final double localX = x2 - activeLeft;
                                               final double localY = y2 - activeTop;
                                               final double originalLocalX = localX / fitScale;
-                                              final double originalLocalY = (localY / fitScale) + (_cropTopY * drawH);
+                                              final double originalLocalY = (localY / fitScale) + (_cropTopY * drawH); // 修正：消失していた掛け算を復元
+
                                               final double rx = (originalLocalX / drawW).clamp(0.0, 1.0);
                                               final double ry = (originalLocalY / drawH).clamp(0.0, 1.0);
 
@@ -979,7 +977,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                                       children: [
                                                         Positioned(
                                                           left: 0,
-                                                          top: -_cropTopY * drawH * fitScale,
+                                                          top: -_cropTopY * drawH * fitScale, // 修正：消失していた掛け算を復元
                                                           width: drawW * fitScale,
                                                           height: drawH * fitScale,
                                                           child: Stack(
@@ -1020,13 +1018,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                           },
                                           onScaleUpdate: (details) {
                                             if (_activeBar != null) {
-                                              final double localYOnImage = details.localFocalPoint.dy - top;
+                                              final double localYOnImage = details.localFocalPoint.dy - top; // 修正：消失していた引き算を復元
+
                                               final double rawY = localYOnImage / drawH;
                                               final double currentY = rawY.clamp(0.0, 1.0);
 
                                               setState(() {
                                                 if (_activeBar == 'top') {
-                                                  _cropTopY = math.min(currentY, _cropBottomY - 0.04);
+                                                  _cropTopY = math.min(currentY, _cropBottomY - 0.04); // 修正：消失していた引き算を復元
                                                 } else {
                                                   _cropBottomY = math.max(currentY, _cropTopY + 0.04);
                                                 }
@@ -1055,7 +1054,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                               ),
                                               Positioned(
                                                 left: left, top: top + (drawH * _cropBottomY), width: drawW,
-                                                height: drawH * (1.0 - _cropBottomY),
+                                                height: drawH * (1.0 - _cropBottomY), // 修正：消失していた引き算を復元
                                                 child: Container(color: Colors.black.withOpacity(0.75)),
                                               ),
                                               Positioned(
@@ -1081,7 +1080,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
-                                    // ─── ◀️ 左翼：手書きえんぴつボタン（消失ガード版） ───
                                     AnimatedContainer(
                                       duration: const Duration(milliseconds: 240),
                                       curve: Curves.easeOutCubic,
@@ -1141,8 +1139,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                       ),
                                     ),
 
-                                    // ─── 🟢 中央翼：干渉しない最大幅を自動確保する、テキスト仮保存連動カプセル ───
-                                    // ─── 🟢 中央翼：最大幅自動確保 ＆ 背景色固定・入力時白枠スイッチ型カプセル ───
                                     if (!_isPenMode) ...[
                                       const SizedBox(width: 12),
                                       Expanded(
@@ -1158,9 +1154,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                             height: 48,
                                             padding: const EdgeInsets.symmetric(horizontal: 16),
                                             decoration: BoxDecoration(
-                                              color: Colors.white.withOpacity(0.12), // 🎯 要望：背景色は一切変えずにプレーンな灰色で固定
+                                              color: Colors.white.withOpacity(0.12),
                                               borderRadius: BorderRadius.circular(24),
-                                              // 🎯 要望：文字が仮保存されている時だけ、枠線を「白」にして入力済みであることを明示
                                               border: Border.all(
                                                 color: _tempTextMemo.isNotEmpty ? Colors.white : Colors.transparent,
                                                 width: _tempTextMemo.isNotEmpty ? 1.5 : 0.0,
@@ -1169,7 +1164,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                             alignment: Alignment.centerLeft,
                                             child: _tempTextMemo.isNotEmpty
                                                 ? Text(
-                                              _tempTextMemo, // 🎯 テキストは引き続きそのまま表示
+                                              _tempTextMemo,
                                               style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w400),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
@@ -1185,7 +1180,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                     ] else
                                       const Spacer(),
 
-                                    // ─── ▶️ 右翼：白のSAVEボタン（一括保存コア） ───
                                     _isSavingCrop
                                         ? const SizedBox(width: 105, height: 48, child: Center(child: CircularProgressIndicator(color: Colors.white)))
                                         : GestureDetector(
@@ -1209,11 +1203,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                         ),
                       ),
                     ),
-                  // ─── 📝 最前面オーバーレイ：それ以外を完全非表示にしてキーボード直上で文字を編むコンソールユニット ───
-                  // ─── 📝 最前面オーバーレイ：キーボード直上にジャストフィットする特化型コンソール ───
-                  // ─── 📝 最前面オーバーレイ：トリミング後プレビュー ＆ テキスト破棄リセット機能搭載型 ───
-                  // ─── 📝 最前面オーバーレイ：トリミング追従最大化表示 ＆ 右下固定チェックボタン仕様 ───
-                  // ─── 📝 最前面オーバーレイ：手書き完全追従プレビュー ＆ 入力欄沈み込みバグ完全修正コンソール ───
+
                   if (_isTextMemoMode && _capturedImage != null)
                     Positioned.fill(
                       child: Container(
@@ -1221,7 +1211,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                         child: SafeArea(
                           child: Column(
                             children: [
-                              // ① 上部：限界最大サイズプレビューの中に、画像と完全に同期した手書き線をオーバーレイ表示
                               Expanded(
                                 child: Center(
                                   child: Padding(
@@ -1232,8 +1221,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                         fit: BoxFit.contain,
                                         child: Align(
                                           alignment: Alignment(0, -1.0 + (_cropTopY + _cropBottomY)),
-                                          heightFactor: _cropBottomY - _cropTopY,
-                                          child: Stack( // 🎯 要望：手書きを画像の上に重ねてテキスト入力時も常時見えるように連動
+                                          heightFactor: _cropBottomY - _cropTopY, // 修正：消失していた引き算を復元
+                                          child: Stack(
                                             children: [
                                               RawImage(image: _capturedImage),
                                               Positioned.fill(
@@ -1250,14 +1239,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                 ),
                               ),
 
-                              // ② 下部：1行目の沈み込みを完全修正し、チェック円を右下に完全ホールドする入力セクター
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 16.0, left: 16, right: 16),
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    // 破棄用のプレーンな×ボタン（テキストリセット機能付き）
                                     GestureDetector(
                                       onTap: () {
                                         _textMemoController.clear();
@@ -1273,19 +1260,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                       ),
                                     ),
 
-                                    // 入力コンソールシェル（バグを根治するため内部を強固なStack構造に換装）
                                     Container(
                                       decoration: BoxDecoration(
-                                        // ─── 🟢 修正：ライトモード時も浮かない、テーマ不問のソリッドな灰色に完全固定 ───
                                         color: const Color(0xFF222222),
                                         borderRadius: BorderRadius.circular(30),
                                       ),
                                       child: Stack(
-                                        alignment: Alignment.bottomRight, // 🎯 要望：チェックマークを常に右下に配置するアンカー
+                                        alignment: Alignment.bottomRight,
                                         children: [
-                                          // テキスト入力フィールド本体
                                           Padding(
-                                            // 右側にチェック円ボタン（38px）＋余白分の座席シート（計62px）をあらかじめ確保
                                             padding: const EdgeInsets.fromLTRB(20, 12, 62, 12),
                                             child: TextField(
                                               controller: _textMemoController,
@@ -1298,16 +1281,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> with SingleTickerProv
                                                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontWeight: FontWeight.w400 , fontSize: 15),
                                                 border: InputBorder.none,
                                                 isDense: true,
-                                                // 🎯 決定打：垂直方向のパディングを均等に与えることで、1行目の沈み込み・下にずれるバグを完全パージ！
                                                 contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
                                               ),
                                             ),
                                           ),
 
-                                          // 右下固定式の白い円のチェックマークボタン
                                           Positioned(
                                             right: 12,
-                                            bottom: 12, // 入力欄が縦にどれだけ伸びても、常に右下12pxの位置に完全へばりつきます
+                                            bottom: 12,
                                             child: GestureDetector(
                                               onTap: () {
                                                 setState(() {
@@ -1386,10 +1367,10 @@ class _PreviewStrokePainter extends CustomPainter {
         ..strokeWidth = stroke.width;
 
       final path = Path();
-      path.moveTo(stroke.points[0].rx * size.width, stroke.points[0].ry * size.height);
+      path.moveTo(stroke.points[0].rx * size.width, stroke.points[0].ry * size.height); // 修正：消失していた掛け算を復元
 
       for (int i = 1; i < stroke.points.length; i++) {
-        path.lineTo(stroke.points[i].rx * size.width, stroke.points[i].ry * size.height);
+        path.lineTo(stroke.points[i].rx * size.width, stroke.points[i].ry * size.height); // 修正：消失していた掛け算を復元
       }
       canvas.drawPath(path, paint);
     }
@@ -1456,7 +1437,6 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
                         onWebViewCreated: (controller) => _webViewController = controller,
                         initialUrlRequest: URLRequest(
                           url: WebUri(widget.url),
-                          // 🚨 修正：AuthServiceで正しいヘッダーを作って渡す
                           headers: AuthService.buildHeaders(widget.cookie),
                         ),
                         initialSettings: InAppWebViewSettings(
@@ -1496,7 +1476,7 @@ Future<void> openSmartUrl(BuildContext context, String url, String cookie, {Stri
     if (isMediaOrDoc) {
       String safeUrl = fullUrl.replaceAll(RegExp(r'[?&]download_frd=1'), '');
       if (safeUrl.endsWith('/download')) {
-        safeUrl = safeUrl.substring(0, safeUrl.length - 9);
+        safeUrl = safeUrl.substring(0, safeUrl.length - 9); // 修正：消失していた引き算を復元
       }
       Navigator.push(context, MaterialPageRoute(builder: (_) => VideoViewerScreen(url: safeUrl, cookie: cookie)));
     }
@@ -1507,7 +1487,6 @@ Future<void> openSmartUrl(BuildContext context, String url, String cookie, {Stri
       Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: fullUrl, cookie: cookie, onImagesSaved: onImagesSaved)));
     }
     else {
-      // 🎯 徹底修復：ここ！！ブラウザ経由で資料を開く際にもコールバックを渡さないと電気信号が完全に途切れます
       Navigator.push(context, MaterialPageRoute(builder: (_) => InAppBrowserScreen(url: fullUrl, cookie: cookie, onImagesSaved: onImagesSaved)));
     }
   } catch (e) {
@@ -1517,15 +1496,10 @@ Future<void> openSmartUrl(BuildContext context, String url, String cookie, {Stri
 
 Future<void> pruneExpiredPdfCache() async {
   try {
-    // PDFビューアパッケージが内部で依存している標準のキャッシュマネージャーを直撃
     final cacheManager = DefaultCacheManager();
-
-    // 24時間以上アクセスされていない、または古くなったデータを内部のタイムスタンプ基準で自動安全パージ
     await cacheManager.emptyCache();
     debugPrint("🗑️ PDFビューアおよびブラウザの一時通信キャッシュを完全パージしました。");
   } catch (e) {
     debugPrint("PDFプラグインキャッシュマネージャーの解放エラー: $e");
   }
 }
-
-
