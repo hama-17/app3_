@@ -26,7 +26,21 @@ class WidgetUpdateService {
     if (now.month < 4) defaultYear -= 1;
 
     int selectedYear = savedYear ?? defaultYear;
-    String selectedTerm = savedTerm ?? (now.month >= 4 && now.month <= 8 ? "春学期" : "秋学期");
+
+    // ─── 🟢 修正：現在の月に応じて学期とクォーターを動的に判定 ───
+    String activeQuarter = "Q1";
+    String activeSemester = "春学期";
+    if (now.month >= 4 && now.month <= 5) {
+      activeSemester = "春学期"; activeQuarter = "Q1";
+    } else if (now.month >= 6 && now.month <= 8) {
+      activeSemester = "春学期"; activeQuarter = "Q2";
+    } else if (now.month >= 9 && now.month <= 11) {
+      activeSemester = "秋学期"; activeQuarter = "Q3";
+    } else {
+      activeSemester = "秋学期"; activeQuarter = "Q4"; // 12, 1, 2, 3月
+    }
+
+    String selectedTerm = savedTerm ?? activeSemester;
 
     final List<dynamic> finalTasks = tasks ?? await CacheManager.load('cached_assignments_v14_all_year') ?? [];
     final List<dynamic> finalCourses = courses ?? await CacheManager.load('my_course_cache_v10') ?? [];
@@ -56,30 +70,52 @@ class WidgetUpdateService {
 
       double ratio = index / (total - 1);
       if (!isDark) {
-        int r = (0xE0 + (0x1A - 0xE0) * ratio).round();
+        int r = (0xE0 + (0x1A - 0xE0) * ratio).round(); // マイナス演算子を修正
         return '#${r.toRadixString(16).padLeft(2, '0') * 3}';
       } else {
-        int r = (0x1A + (0xE0 - 0x1A) * ratio).round();
+        int r = (0x1A + (0xE0 - 0x1A) * ratio).round(); // マイナス演算子を修正
         return '#${r.toRadixString(16).padLeft(2, '0') * 3}';
       }
     }
 
-    // 🎯 Q2限定フィルター
+    // 🎯 現在の時期（Q1~Q4 / 春秋）に合わせた動的フィルター
     bool isTargetQuarter(dynamic c) {
       String cId = c['is_custom'] == true ? (c['raw_name'] ?? c['name'] ?? '') : c['id'].toString();
 
+      // 手動オーバーライドがある場合
       if (termOverrides.containsKey(cId)) {
         String overrideStr = termOverrides[cId]?.toString() ?? '';
         if (overrideStr == "未選択") return false;
-        return overrideStr.contains("Q2");
+        return overrideStr.contains(activeQuarter) || overrideStr.contains(activeSemester);
       }
 
       String name = (c['name'] ?? '').toString();
       String semester = (c['semester'] ?? c['term'] ?? '').toString();
-      if (name.contains("Q2") || semester.contains("Q2")) return true;
-      if (name.contains("Q1") || semester.contains("Q1")) return false;
 
-      if (semester.contains("春学期") || semester.contains("春季") || semester.contains("前期")) return true;
+      // Q指定が含まれているかチェック
+      bool hasQ1 = name.contains("Q1") || semester.contains("Q1");
+      bool hasQ2 = name.contains("Q2") || semester.contains("Q2");
+      bool hasQ3 = name.contains("Q3") || semester.contains("Q3");
+      bool hasQ4 = name.contains("Q4") || semester.contains("Q4");
+
+      if (hasQ1 || hasQ2 || hasQ3 || hasQ4) {
+        if (activeQuarter == "Q1" && hasQ1) return true;
+        if (activeQuarter == "Q2" && hasQ2) return true;
+        if (activeQuarter == "Q3" && hasQ3) return true;
+        if (activeQuarter == "Q4" && hasQ4) return true;
+        return false; // 現在のQに一致しないQ科目は除外
+      }
+
+      // Q指定がない場合は学期で判定
+      if (activeSemester == "春学期") {
+        if (semester.contains("春学期") || semester.contains("春季") || semester.contains("前期")) return true;
+      } else {
+        if (semester.contains("秋学期") || semester.contains("秋季") || semester.contains("後期")) return true;
+      }
+
+      // 通年科目は常に表示
+      if (semester.contains("通年")) return true;
+
       return false;
     }
 
@@ -213,7 +249,7 @@ class WidgetUpdateService {
 
     if (todayWidgetData.isEmpty) {
       final daysEn = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-      todayWidgetData.add({ 'title': "向こう7日間の予定はありません(Q2)", 'sub': "--:--", 'end_time': "--:--", 'room': "All cleared", 'date_label': "${now.month}/${now.day} ${daysEn[now.weekday - 1]}", 'is_first_of_day': "true", 'page_route': 'main', 'is_task': 'false' });
+      todayWidgetData.add({ 'title': "向こう7日間の予定はありません", 'sub': "--:--", 'end_time': "--:--", 'room': "All cleared", 'date_label': "${now.month}/${now.day} ${daysEn[now.weekday - 1]}", 'is_first_of_day': "true", 'page_route': 'main', 'is_task': 'false' });
     }
     if (tasksWidgetData.isEmpty) { tasksWidgetData.add({'title': "未提出課題はありません", 'sub': "All cleared"}); }
 
