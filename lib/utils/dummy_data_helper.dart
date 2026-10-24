@@ -61,6 +61,62 @@ class DummyDataHelper {
         'created_at': '${currentYear}-04-01T00:00:00Z',
         'term': {'name': '$currentYear年度 春学期'},
         'teachers': [{'id': 8, 'name': '中村 准教授'}]
+      },
+      {
+        'id': 991,
+        'name': '[月2] 力学第1[14棟201]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 1, 'name': '佐藤 教授'}]
+      },
+      {
+        'id': 992,
+        'name': '[月3月4木3木4] 機械工学実験[11棟312]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 2, 'name': '田中 准教授'}]
+      },
+      {
+        'id': 993,
+        'name': '[月5木5] 熱力学基礎[12棟102]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 3, 'name': '鈴木 教授'}]
+      },
+      {
+        'id': 994,
+        'name': '[火4金4] 電磁気学[14棟101]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 4, 'name': '高橋 教授'}]
+      },
+      {
+        'id': 995,
+        'name': '[火1火2] 流体力学[14棟203]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 5, 'name': '渡辺 准教授'}]
+      },
+      {
+        'id': 996,
+        'name': '[木2] 解析力学[14棟202]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 6, 'name': '伊藤 教授'}]
+      },
+      {
+        'id': 997,
+        'name': '[水2] 数理統計学[10棟201]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 7, 'name': '山本 教授'}]
+      },
+      {
+        'id': 998,
+        'name': '[火5金5] システムデザイン論[11棟205]',
+        'created_at': '${currentYear}-04-01T00:00:00Z',
+        'term': {'name': '$currentYear年度 秋学期'},
+        'teachers': [{'id': 8, 'name': '中村 准教授'}]
       }
     ];
   }

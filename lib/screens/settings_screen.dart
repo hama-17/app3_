@@ -748,29 +748,29 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                               ),
                               Divider(height: 1, color: AppTheme.bg(context)),
                               // 🟢 追記：Safariログイン設定
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text("Safariでログイン (パスキー)", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
-                                    SizedBox(
-                                      height: 20,
-                                      child: Transform.scale(
-                                        scale: 0.75,
-                                        child: Switch(
-                                          value: _useSafariLogin,
-                                          onChanged: _toggleSafariLogin,
-                                          activeColor: AppTheme.textMain(context),
-                                          activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
-                                          inactiveThumbColor: AppTheme.textSub(context),
-                                          inactiveTrackColor: Colors.transparent,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                              // Padding(
+                              //   padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                              //   child: Row(
+                              //     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              //     children: [
+                              //       Text("Safariでログイン (パスキー)", style: TextStyle(color: AppTheme.textMain(context), fontWeight: FontWeight.w300)),
+                              //       SizedBox(
+                              //         height: 20,
+                              //         child: Transform.scale(
+                              //           scale: 0.75,
+                              //           child: Switch(
+                              //             value: _useSafariLogin,
+                              //             onChanged: _toggleSafariLogin,
+                              //             activeColor: AppTheme.textMain(context),
+                              //             activeTrackColor: AppTheme.textMain(context).withOpacity(0.5),
+                              //             inactiveThumbColor: AppTheme.textSub(context),
+                              //             inactiveTrackColor: Colors.transparent,
+                              //           ),
+                              //         ),
+                              //       ),
+                              //     ],
+                              //   ),
+                              // ),
                             ],
                           ),
                         ),

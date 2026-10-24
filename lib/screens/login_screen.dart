@@ -32,11 +32,13 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    if (Platform.isAndroid) {
-      _prepareLoginScreenAndroid();
-    } else if (Platform.isIOS) {
-      _prepareLoginScreenIos();
-    }
+    _prepareLoginScreenAndroid();
+
+    // if (Platform.isAndroid) {
+    //   _prepareLoginScreenAndroid();
+    // } else if (Platform.isIOS) {
+    //   _prepareLoginScreenIos();
+    // }
   }
 
 
@@ -50,9 +52,9 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && Platform.isIOS) {
-      _checkAndValidateIosAppGroupCookies();
-    }
+    // if (state == AppLifecycleState.resumed && Platform.isIOS) {
+    //   _checkAndValidateIosAppGroupCookies();
+    // }
   }
 
   Future<void> _prepareLoginScreenIos() async {
@@ -111,12 +113,13 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
         timer.cancel();
         return;
       }
+      await _checkAndValidateAndroidCookies();
 
-      if (Platform.isAndroid) {
-        await _checkAndValidateAndroidCookies();
-      } else if (Platform.isIOS) {
-        await _checkAndValidateIosAppGroupCookies();
-      }
+      // if (Platform.isAndroid) {
+      //   await _checkAndValidateAndroidCookies();
+      // } else if (Platform.isIOS) {
+      //   await _checkAndValidateIosAppGroupCookies();
+      // }
     });
   }
 
@@ -253,11 +256,18 @@ class _OktaLoginScreenState extends State<OktaLoginScreen> with WidgetsBindingOb
           centerTitle: true,
         ),
         body: SafeArea(
+          // 🟢 修正：OS分岐を廃止し、iOSでも常にWebViewを表示する
+            child: !_isInitialized
+                ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+                : _buildAndroidWebView()
+
+          /* [Safari拡張機能に戻す場合は以下を復元]
             child: Platform.isIOS
                 ? _buildIosPasskeyGuidance()
                 : !_isInitialized
                 ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
                 : _buildAndroidWebView()
+            */
         )
     );
   }
